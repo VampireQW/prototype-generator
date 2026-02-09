@@ -128,18 +128,22 @@ python server.py
 |--------|----------|--------------|
 | OpenAI | `https://api.openai.com/v1` | [platform.openai.com](https://platform.openai.com/api-keys) |
 | Claude | `https://api.anthropic.com/v1` | [console.anthropic.com](https://console.anthropic.com/) |
-| DeepSeek | `https://api.deepseek.com/v1` | [platform.deepseek.com](https://platform.deepseek.com/) |
+| Google Gemini | `https://generativelanguage.googleapis.com/v1beta` | [ai.google.dev](https://ai.google.dev/) |
 | 通义千问 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | [阿里云控制台](https://dashscope.console.aliyun.com/) |
+| 豆包 | `https://ark.cn-beijing.volces.com/api/v3` | [火山引擎控制台](https://console.volcengine.com/ark) |
+| Kimi | `https://api.moonshot.cn/v1` | [platform.moonshot.cn](https://platform.moonshot.cn/) |
 | 中转服务 | 按服务商提供的 URL | 按服务商说明 |
 
 ### 推荐模型
 
-| 模型 | 适用场景 | 说明 |
+| 厂商 | 推荐模型 | 说明 |
 |------|----------|------|
-| `gpt-4o` | 通用 | OpenAI 最新模型，效果好 |
-| `claude-3-5-sonnet` | 复杂页面 | Anthropic 模型，代码质量高 |
-| `gemini-2.0-flash` | 快速生成 | Google 模型，速度快 |
-| `deepseek-chat` | 高性价比 | 国产模型，价格便宜 |
+| OpenAI | `gpt-5.2`, `gpt-5.3` | 最新一代模型，能力最强 |
+| Anthropic | `claude-4.5-sonnet`, `claude-4.6-sonnet` | 代码质量高，理解力强 |
+| Google | `gemini-3-pro`, `gemini-3-flash` | 多模态能力强，速度快 |
+| 字节豆包 | `doubao-vision-pro`, `doubao-vision-lite` | 国产多模态模型 |
+| 阿里千问 | `qwen-vl-max`, `qwen-vl-plus` | 多模态理解能力优秀 |
+| Moonshot | `kimi-vision`, `moonshot-v1-128k` | 长上下文支持好 |
 
 ---
 
