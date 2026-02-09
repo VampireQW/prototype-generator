@@ -308,6 +308,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_upload()
         elif self.path == '/generate':
             self.handle_generate()
+        elif self.path == '/generate-async':
+            self.handle_generate_async()
         elif self.path == '/save-project':
             self.handle_save_project()
         elif self.path == '/delete-project':
@@ -583,6 +585,215 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             import traceback
             traceback.print_exc()
             self.send_error_response(str(e))
+
+    def handle_generate_async(self):
+        """异步处理AI生成请求：立即返回项目信息，后台线程完成生成"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode('utf-8'))
+            
+            prompt = data.get('prompt', '')
+            images = data.get('images', [])
+            project_name = data.get('projectName', '未命名项目')
+            form_data = data.get('formData', {})
+            is_incremental = data.get('incremental', False)
+            source_project_id = data.get('sourceProjectId', None)
+            changes = data.get('changes', None)
+            
+            if not prompt:
+                self.send_error_response("缺少 prompt")
+                return
+            
+            # 生成项目ID
+            project_id = generate_project_id(project_name)
+            project_folder = os.path.join(PROJECTS_DIR, project_id)
+            os.makedirs(project_folder, exist_ok=True)
+            
+            # 保存参考图片
+            ref_images_folder = os.path.join(project_folder, 'reference')
+            os.makedirs(ref_images_folder, exist_ok=True)
+            
+            saved_image_names = []
+            for i, img_base64 in enumerate(images):
+                filename = f"ref_{i+1}"
+                saved = save_base64_image(img_base64, ref_images_folder, filename)
+                if saved:
+                    saved_image_names.append(saved)
+            
+            # 创建初始 record.json
+            record = {
+                'global': form_data.get('global', {}),
+                'pages': [],
+                'status': STATUS_GENERATING,
+                'createdAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'sourceProjectId': source_project_id if is_incremental else None
+            }
+            
+            pages_data = form_data.get('pages', [])
+            img_index = 0
+            for page in pages_data:
+                page_record = {
+                    'name': page.get('name', ''),
+                    'layout': page.get('layout', ''),
+                    'features': page.get('features', ''),
+                    'interaction': page.get('interaction', ''),
+                    'similarity': page.get('similarity', 'layout'),
+                    'images': []
+                }
+                img_count = page.get('imageCount', 0)
+                for _ in range(img_count):
+                    if img_index < len(saved_image_names):
+                        page_record['images'].append(saved_image_names[img_index])
+                        img_index += 1
+                record['pages'].append(page_record)
+            
+            record_path = os.path.join(project_folder, 'record.json')
+            with open(record_path, 'w', encoding='utf-8') as f:
+                json.dump(record, f, ensure_ascii=False, indent=2)
+            
+            # 保存 prompt
+            prompt_path = os.path.join(project_folder, 'prompt.txt')
+            with open(prompt_path, 'w', encoding='utf-8') as f:
+                f.write(prompt)
+            
+            # 更新项目列表（带 generating 状态）
+            projects = self.load_projects()
+            new_project = {
+                'id': project_id,
+                'name': project_name,
+                'status': STATUS_GENERATING,
+                'url': f'/projects/{project_id}/index.html',
+                'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            projects.insert(0, new_project)
+            self.save_projects(projects)
+            
+            # 注册异步任务
+            with tasks_lock:
+                generating_tasks[project_id] = {
+                    'status': STATUS_GENERATING,
+                    'progress': 0,
+                    'error': ''
+                }
+            
+            # 启动后台线程
+            def generate_in_background():
+                try:
+                    print(f"[异步] 开始后台生成: {project_id}")
+                    
+                    # 更新进度
+                    with tasks_lock:
+                        generating_tasks[project_id]['progress'] = 10
+                    
+                    # 增量处理
+                    source_html_content = None
+                    reused_pages = 0
+                    if is_incremental and source_project_id and changes:
+                        source_folder = os.path.join(PROJECTS_DIR, source_project_id)
+                        source_html_path = os.path.join(source_folder, 'index.html')
+                        if os.path.exists(source_html_path):
+                            with open(source_html_path, 'r', encoding='utf-8') as f:
+                                source_html_content = f.read()
+                        
+                        # 复制原项目图片
+                        source_images_folder = os.path.join(source_folder, 'images')
+                        dest_images_folder = os.path.join(project_folder, 'images')
+                        if os.path.exists(source_images_folder):
+                            import shutil
+                            if not os.path.exists(dest_images_folder):
+                                shutil.copytree(source_images_folder, dest_images_folder)
+                        
+                        reused_pages = len(changes.get('pagesUnchanged', []))
+                    
+                    with tasks_lock:
+                        generating_tasks[project_id]['progress'] = 20
+                    
+                    # 调用AI（这里复用现有逻辑）
+                    enhanced_prompt = prompt
+                    if is_incremental and source_html_content and reused_pages > 0:
+                        enhanced_prompt += f"\n\n# 重要提示\n这是一个增量更新任务。原项目中有{reused_pages}个页面内容未变化。请保持整体风格一致。"
+                    
+                    # 使用类似 call_ai_model 的逻辑
+                    html_content = self._call_ai_for_async(enhanced_prompt, images)
+                    
+                    with tasks_lock:
+                        generating_tasks[project_id]['progress'] = 80
+                    
+                    if not html_content:
+                        raise Exception("AI未返回有效内容")
+                    
+                    # 下载图片
+                    html_content = download_html_images(html_content, project_folder)
+                    
+                    # 注入导航监听器
+                    html_content = self.inject_page_navigation_listener(html_content)
+                    
+                    # 保存HTML
+                    html_path = os.path.join(project_folder, 'index.html')
+                    with open(html_path, 'w', encoding='utf-8') as f:
+                        f.write(html_content)
+                    
+                    # 更新项目状态
+                    projects = self.load_projects()
+                    for p in projects:
+                        if p['id'] == project_id:
+                            p['status'] = None  # 清除 generating 状态
+                            break
+                    self.save_projects(projects)
+                    
+                    # 更新record.json状态
+                    if os.path.exists(record_path):
+                        with open(record_path, 'r', encoding='utf-8') as f:
+                            record = json.load(f)
+                        record['status'] = STATUS_COMPLETED
+                        with open(record_path, 'w', encoding='utf-8') as f:
+                            json.dump(record, f, ensure_ascii=False, indent=2)
+                    
+                    with tasks_lock:
+                        generating_tasks[project_id]['status'] = STATUS_COMPLETED
+                        generating_tasks[project_id]['progress'] = 100
+                    
+                    print(f"[异步] 生成完成: {project_id}")
+                    
+                except Exception as e:
+                    print(f"[异步错误] {project_id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # 更新失败状态
+                    with tasks_lock:
+                        generating_tasks[project_id]['status'] = STATUS_FAILED
+                        generating_tasks[project_id]['error'] = str(e)
+                    
+                    # 更新项目列表状态
+                    projects = self.load_projects()
+                    for p in projects:
+                        if p['id'] == project_id:
+                            p['status'] = STATUS_FAILED
+                            break
+                    self.save_projects(projects)
+            
+            # 启动线程
+            thread = threading.Thread(target=generate_in_background, daemon=True)
+            thread.start()
+            
+            print(f"[异步] 项目已创建，后台生成中: {project_id}")
+            self.send_json_response({
+                'success': True,
+                'project': new_project,
+                'async': True
+            })
+            
+        except Exception as e:
+            print(f"[错误] 异步生成启动失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_error_response(str(e))
+
+    def _call_ai_for_async(self, prompt, images):
+        """异步生成专用的AI调用（复用现有逻辑）"""
+        return self.call_ai_model(prompt, images)
 
     def copy_project(self, source_project_id, new_project_name):
         """复制项目（当内容完全无变化时）"""

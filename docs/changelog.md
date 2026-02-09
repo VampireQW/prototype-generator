@@ -1,5 +1,27 @@
 # 更新日志 (Changelog)
 
+## 2026-02-09
+### 新增功能
+- **异步生成模式**：点击"AI 生成"后，项目立即出现在左侧列表并显示🔵"生成中..."状态，后台线程完成生成后自动更新状态并打开预览。
+- **剪切板粘贴图片**：参考图上传区域支持直接粘贴剪切板中的图片（Ctrl+V），鼠标悬停即可粘贴，无需点击。
+- **前端状态轮询**：新增 `pollGenerationStatus` 函数，每3秒轮询后端状态，实时更新项目列表。
+
+### 后端改进
+- **新增 API**：`POST /generate-async` - 异步生成项目，立即返回带 `generating` 状态的项目信息，后台线程完成 AI 调用。
+- **线程管理**：`handle_generate_async` 函数使用 `threading.Thread` 实现后台生成，避免阻塞前端请求。
+
+### 前端优化
+- **上传区焦点样式**：dropzone 添加 `tabindex="0"` 和焦点样式，支持键盘粘贴。
+- **提示文字更新**：上传区提示更新为"点击、拖拽或粘贴上传"。
+
+### 文件修改
+- `server.py`: 新增 `handle_generate_async` 和 `_call_ai_for_async` 方法
+- `src/script.js`: 修改 `generateWithAI`、新增 `pollGenerationStatus`、增强 `setupPageListeners`
+
+## 2026-02-06
+### 新增功能
+- 优化微调模式提示词（新增目标文件路径、页面信息、元素详情）；新增整页面修改功能；复制提示改为Toast通知
+
 ## 2026-02-05
 ### 修复
 - **复制 Prompt 项目ID不一致**：修复了前端 `generateProjectIdFromName()` 与后端 `generate_project_id()` 时间戳格式不一致的问题。现在前端也使用12小时制（含am/pm和秒数），确保外部AI工具能正确定位到占位项目文件夹。

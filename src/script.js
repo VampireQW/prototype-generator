@@ -593,9 +593,9 @@ function createPageCardHtml(id, index) {
                             <option value="pixel">像素级还原</option>
                         </select>
                     </div>
-                    <div id="dropZone_${id}" class="border-2 border-dashed border-gray-200 rounded-lg h-24 flex items-center justify-center text-center hover:border-indigo-500 hover:bg-indigo-50/50 transition-all cursor-pointer">
+                    <div id="dropZone_${id}" tabindex="0" class="border-2 border-dashed border-gray-200 rounded-lg h-24 flex items-center justify-center text-center hover:border-indigo-500 hover:bg-indigo-50/50 transition-all cursor-pointer focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
                         <div class="text-gray-400 text-sm">
-                            <i class="fas fa-image mr-2"></i>点击或拖拽上传
+                            <i class="fas fa-image mr-2"></i>点击、拖拽或粘贴上传
                         </div>
                         <input type="file" id="fileInput_${id}" class="hidden" accept="image/*" multiple>
                     </div>
@@ -642,6 +642,9 @@ function setupPageListeners(id) {
     const dropZone = $(`dropZone_${id}`);
     const fileInput = $(`fileInput_${id}`);
 
+    // 鼠标悬停时自动聚焦，使粘贴无需点击
+    dropZone.onmouseenter = () => dropZone.focus();
+
     dropZone.onclick = () => fileInput.click();
 
     dropZone.ondragover = (e) => {
@@ -663,6 +666,26 @@ function setupPageListeners(id) {
         handleFiles(id, e.target.files);
         fileInput.value = '';
     };
+
+    // 支持粘贴剪切板中的图片
+    dropZone.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const items = e.clipboardData?.items;
+        if (!items) return;
+
+        const imageFiles = [];
+        for (const item of items) {
+            if (item.type.startsWith('image/')) {
+                const file = item.getAsFile();
+                if (file) imageFiles.push(file);
+            }
+        }
+
+        if (imageFiles.length > 0) {
+            handleFiles(id, imageFiles);
+            showToast(`已粘贴 ${imageFiles.length} 张图片`);
+        }
+    });
 }
 
 function handleFiles(id, files) {
@@ -1040,10 +1063,6 @@ async function generateWithAI() {
         console.log('[增量更新] 非增量模式：sourceProjectId或originalFormData为空');
     }
 
-    // 显示加载
-    $('loadingModal').classList.remove('hidden');
-    $('loadingModal').classList.add('flex');
-
     // 生成prompt
     const prompt = generatePrompt();
     console.log('=== Prompt ===');
@@ -1056,7 +1075,7 @@ async function generateWithAI() {
     });
 
     // 项目名称
-    const projectName = pages.map(id => $(`pageName_${id}`).value).filter(Boolean).join(' + ');
+    const projectName = pages.map(id => $(`pageName_${id}`).value).filter(Boolean).join(' + ') || '未命名项目';
 
     try {
         // 构建请求数据
@@ -1074,7 +1093,10 @@ async function generateWithAI() {
             requestData.changes = changes;
         }
 
-        const response = await fetch('/generate', {
+        // ==================== 异步生成模式 ====================
+        showToast('🚀 开始生成，请稍候...', 'info');
+
+        const response = await fetch('/generate-async', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestData)
@@ -1082,31 +1104,19 @@ async function generateWithAI() {
 
         const result = await response.json();
 
-        $('loadingModal').classList.add('hidden');
-
         if (result.error) {
             showToast('生成失败: ' + result.error, 'error');
             return;
         }
 
-        if (result.success) {
-            // 显示是否使用了增量更新
-            if (result.incremental) {
-                if (result.reusedPages === 'all') {
-                    showToast('✅ 内容无变化，已复制原项目（0 API调用）');
-                } else {
-                    showToast(`✅ 增量生成成功！复用了${result.reusedPages || 0}个页面`);
-                }
-            } else {
-                showToast('✅ 生成成功！');
-            }
-
-            // 添加到列表
+        if (result.success && result.project) {
+            // 立即添加带 generating 状态的项目到列表
             allProjects.unshift(result.project);
             renderProjectList();
+            showToast('🔵 已开始生成 "' + result.project.name + '"，请查看左侧列表');
 
-            // 打开预览
-            window.open(result.project.url, '_blank');
+            // 开始轮询状态
+            pollGenerationStatus(result.project.id);
 
             // 重置增量更新状态
             sourceProjectId = null;
@@ -1115,10 +1125,69 @@ async function generateWithAI() {
         }
 
     } catch (error) {
-        $('loadingModal').classList.add('hidden');
         showToast('请求失败: ' + error.message, 'error');
         console.error(error);
     }
+}
+
+// ==================== 异步状态轮询 ====================
+function pollGenerationStatus(projectId) {
+    const POLL_INTERVAL = 3000; // 每3秒轮询一次
+    const MAX_POLLS = 120; // 最多轮询120次（6分钟超时）
+    let pollCount = 0;
+
+    const poll = async () => {
+        pollCount++;
+        console.log(`[轮询] 第${pollCount}次检查项目状态: ${projectId}`);
+
+        try {
+            const response = await fetch(`/api/generation-status?id=${encodeURIComponent(projectId)}`);
+            const data = await response.json();
+
+            console.log('[轮询] 状态:', data);
+
+            // 更新列表中的项目状态
+            const projectIndex = allProjects.findIndex(p => p.id === projectId);
+            if (projectIndex !== -1) {
+                if (data.status === 'completed') {
+                    // 生成完成
+                    allProjects[projectIndex].status = null; // 清除 generating 状态
+                    renderProjectList();
+                    showToast('✅ "' + allProjects[projectIndex].name + '" 生成完成！');
+
+                    // 自动打开预览
+                    setTimeout(() => {
+                        window.open(`/projects/${projectId}/index.html`, '_blank');
+                    }, 500);
+                    return; // 停止轮询
+
+                } else if (data.status === 'failed') {
+                    // 生成失败
+                    allProjects[projectIndex].status = 'failed';
+                    renderProjectList();
+                    showToast('❌ "' + allProjects[projectIndex].name + '" 生成失败: ' + (data.error || '未知错误'), 'error');
+                    return; // 停止轮询
+                }
+            }
+
+            // 继续轮询
+            if (pollCount < MAX_POLLS) {
+                setTimeout(poll, POLL_INTERVAL);
+            } else {
+                showToast('⚠️ 生成超时，请刷新页面查看状态', 'error');
+            }
+
+        } catch (error) {
+            console.error('[轮询错误]', error);
+            // 网络错误时继续轮询
+            if (pollCount < MAX_POLLS) {
+                setTimeout(poll, POLL_INTERVAL);
+            }
+        }
+    };
+
+    // 首次轮询延迟3秒开始（给后端一点启动时间）
+    setTimeout(poll, POLL_INTERVAL);
 }
 
 // ==================== 复制Prompt功能 ====================
