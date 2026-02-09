@@ -725,6 +725,62 @@
             border-color: #8b5cf6;
             box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.1);
         }
+
+        /* Toast 提示样式 */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        .toast {
+            background: rgba(0, 0, 0, 0.85);
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 8px;
+            opacity: 0;
+            transform: translateY(-20px);
+            animation: toastIn 0.3s ease forwards;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .toast.success {
+            background: linear-gradient(135deg, #10b981, #059669);
+        }
+
+        .toast.error {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+        }
+
+        .toast.warning {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+        }
+
+        .toast.hide {
+            animation: toastOut 0.3s ease forwards;
+        }
+
+        @keyframes toastIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes toastOut {
+            to {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+        }
     </style>
 </head>
 
@@ -1039,6 +1095,9 @@
         </div>
     </div>
 
+    <!-- Toast 容器 -->
+    <div id="toastContainer" class="toast-container"></div>
+
     <script>
         console.log('%c[MAIN VIEWER] Script 开始加载', 'background: blue; color: white; font-weight: bold');
         // ==================== 状态管理 ====================
@@ -1060,6 +1119,22 @@
 
         // ==================== DOM 元素 ====================
         const $ = id => document.getElementById(id);
+
+        // ==================== Toast 通知函数 ====================
+        function showToast(message, type = 'success', duration = 2000) {
+            const container = $('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            const icon = type === 'success' ? 'check-circle' : (type === 'warning' ? 'exclamation-triangle' : 'exclamation-circle');
+            toast.innerHTML = `<i class="fas fa-${icon}"></i> ${message}`;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.add('hide');
+                setTimeout(() => toast.remove(), 300);
+            }, duration);
+        }
+
         const previewFrame = $('previewFrame');
         const previewWrapper = $('previewWrapper');
         const prdSidebar = $('prdSidebar');
@@ -2164,7 +2239,7 @@
         function generatePrompt() {
             const userInput = $('inspectorInput').value.trim();
             if (!userInput) {
-                alert('请输入修改需求');
+                showToast('请输入修改需求', 'warning');
                 return null;
             }
 
@@ -2222,7 +2297,7 @@ ${userInput}
             if (!prompt) return;
 
             navigator.clipboard.writeText(prompt).then(() => {
-                alert('Prompt 已复制到剪贴板！\n\n您可以将其粘贴给 AI 工具（如 Claude, ChatGPT, Cursor）来完成修改。');
+                showToast('Prompt 已复制到剪贴板！');
                 closeInspectorModal();
                 clearAllSelections();
             }).catch(err => {
@@ -2234,7 +2309,7 @@ ${userInput}
                 textarea.select();
                 document.execCommand('copy');
                 document.body.removeChild(textarea);
-                alert('Prompt 已复制到剪贴板！');
+                showToast('Prompt 已复制到剪贴板！');
                 closeInspectorModal();
                 clearAllSelections();
             });
@@ -2333,7 +2408,7 @@ ${userInput}
         function generateFullPagePrompt() {
             const userInput = $('fullPageInput').value.trim();
             if (!userInput) {
-                alert('请输入修改需求');
+                showToast('请输入修改需求', 'warning');
                 return null;
             }
 
@@ -2367,7 +2442,7 @@ ${userInput}
             if (!prompt) return;
 
             navigator.clipboard.writeText(prompt).then(() => {
-                alert('整页面 Prompt 已复制到剪贴板！\n\n您可以将其粘贴给 AI IDE 工具来完成修改。');
+                showToast('整页面 Prompt 已复制到剪贴板！');
                 closeFullPageModal();
             }).catch(err => {
                 console.error('复制失败:', err);
@@ -2377,7 +2452,7 @@ ${userInput}
                 textarea.select();
                 document.execCommand('copy');
                 document.body.removeChild(textarea);
-                alert('整页面 Prompt 已复制到剪贴板！');
+                showToast('整页面 Prompt 已复制到剪贴板！');
                 closeFullPageModal();
             });
         }
