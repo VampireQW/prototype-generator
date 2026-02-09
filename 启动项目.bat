@@ -7,7 +7,7 @@ echo [INFO] 正在启动服务...
 :: 2. 自动打开浏览器
 start http://localhost:8080/src/index.html
 
-:: 3. 启动服务器 (使用您电脑上验证通过的 Python 路径)
-"C:\python.exe" server.py
+:: 3. 启动服务器 (使用系统 PATH 中的 Python)
+python server.py
 
 pause
