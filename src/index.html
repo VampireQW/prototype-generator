@@ -39,6 +39,85 @@
             overflow: hidden;
             word-break: break-all;
         }
+
+        /* 模型选择器 */
+        .model-selector {
+            position: relative;
+        }
+
+        .model-selector-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #6366f1;
+            background: #eef2ff;
+            border: 1px solid #c7d2fe;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+
+        .model-selector-btn:hover {
+            background: #e0e7ff;
+            border-color: #a5b4fc;
+        }
+
+        .model-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            right: 0;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.12);
+            min-width: 220px;
+            z-index: 100;
+            display: none;
+            overflow: hidden;
+        }
+
+        .model-dropdown.show {
+            display: block;
+        }
+
+        .model-dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.1s;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .model-dropdown-item:last-child {
+            border-bottom: none;
+        }
+
+        .model-dropdown-item:hover {
+            background: #f9fafb;
+        }
+
+        .model-dropdown-item.active {
+            background: #eef2ff;
+            color: #4f46e5;
+            font-weight: 500;
+        }
+
+        .model-dropdown-item .check {
+            width: 16px;
+            color: #6366f1;
+        }
+
+        .model-dropdown-footer {
+            padding: 8px 14px;
+            border-top: 1px solid #e5e7eb;
+            background: #f9fafb;
+        }
     </style>
 </head>
 
@@ -75,7 +154,7 @@
             </div>
         </div>
 
-        <div id="projectList" class="flex-1 overflow-y-auto px-3 space-y-1 pb-4 scrollbar-thin">
+        <div id="projectList" class="flex-1 overflow-y-auto px-3 space-y-3 pb-4 scrollbar-thin">
             <div class="text-center py-8 text-gray-400 text-sm">加载中...</div>
         </div>
 
@@ -91,6 +170,25 @@
         <header class="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-8">
             <h2 id="headerTitle" class="text-lg font-medium text-gray-900">请输入您的设计灵感</h2>
             <div class="flex items-center gap-3">
+                <!-- 模型选择器 -->
+                <div class="model-selector" id="modelSelector">
+                    <button class="model-selector-btn" id="modelSelectorBtn" onclick="toggleModelDropdown(event)">
+                        <i class="fas fa-robot"></i>
+                        <span id="currentModelName">加载中...</span>
+                        <i class="fas fa-chevron-down text-xs"></i>
+                    </button>
+                    <div class="model-dropdown" id="modelDropdown">
+                        <div id="modelDropdownList">
+                            <!-- 动态填充 -->
+                        </div>
+                        <div class="model-dropdown-footer">
+                            <button onclick="openModelManager()"
+                                class="text-xs text-indigo-600 hover:text-indigo-800 flex items-center gap-1 w-full justify-center py-1 transition">
+                                <i class="fas fa-cog"></i> 管理模型
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 <button id="aiGenerateBtn"
                     class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-2 rounded-lg text-sm font-medium shadow-md hover:shadow-lg transition-all flex items-center gap-2">
                     <i class="fas fa-magic"></i> AI 生成原型
@@ -103,8 +201,8 @@
         </header>
 
         <!-- 工作区 -->
-        <div class="flex-1 overflow-y-auto p-8">
-            <div class="max-w-4xl mx-auto space-y-6">
+        <div class="flex-1 overflow-y-auto px-4 py-6">
+            <div class="max-w-5xl mx-auto space-y-6">
 
                 <!-- 全局设置 -->
                 <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -260,7 +358,72 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260114_2"></script>
+    <!-- 模型管理弹窗 -->
+    <div id="modelManagerModal" class="fixed inset-0 z-50 hidden items-center justify-center">
+        <div id="modelManagerOverlay" class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm"
+            onclick="closeModelManager()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden mx-4">
+            <!-- 头部 -->
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50">
+                <h3 class="font-bold text-lg text-gray-900 flex items-center gap-2">
+                    <i class="fas fa-robot text-indigo-500"></i> 模型管理
+                </h3>
+                <button onclick="closeModelManager()" class="text-gray-400 hover:text-gray-600 p-2">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <!-- 模型列表 -->
+            <div id="modelManagerList" class="p-4 overflow-y-auto max-h-[40vh] space-y-2">
+                <!-- 动态填充 -->
+            </div>
+
+            <!-- 添加/编辑表单 -->
+            <div class="px-6 py-4 border-t border-gray-100 bg-gray-50">
+                <h4 id="modelFormTitle" class="text-sm font-semibold text-gray-700 mb-3">添加新模型</h4>
+                <input type="hidden" id="editModelId">
+                <div class="grid grid-cols-2 gap-3 mb-3">
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">显示名称</label>
+                        <input type="text" id="modelFormName" placeholder="如: GPT-4o"
+                            class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs text-gray-500 mb-1">提供商</label>
+                        <input type="text" id="modelFormProvider" placeholder="如: OpenAI"
+                            class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="block text-xs text-gray-500 mb-1">模型标识 (API model 参数)</label>
+                    <input type="text" id="modelFormModel" placeholder="如: gpt-4o"
+                        class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                </div>
+                <div class="mb-3">
+                    <label class="block text-xs text-gray-500 mb-1">API Base URL</label>
+                    <input type="text" id="modelFormBaseUrl" placeholder="如: https://api.openai.com/v1"
+                        class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                </div>
+                <div class="mb-3">
+                    <label class="block text-xs text-gray-500 mb-1">API Key</label>
+                    <input type="password" id="modelFormApiKey" placeholder="sk-..."
+                        class="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="saveModelForm()"
+                        class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm font-medium transition">
+                        <i class="fas fa-save"></i> 保存
+                    </button>
+                    <button onclick="resetModelForm()"
+                        class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm transition">
+                        取消
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js?v=20260213"></script>
 </body>
 
 </html>

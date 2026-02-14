@@ -1,0 +1,13 @@
+{
+    "models": [
+        {
+            "id": "default-model",
+            "name": "My AI Model",
+            "provider": "OpenAI",
+            "model": "gpt-4o",
+            "base_url": "https://api.openai.com/v1/chat/completions",
+            "api_key": "YOUR_API_KEY_HERE"
+        }
+    ],
+    "selected_model_id": "default-model"
+}

@@ -36,6 +36,45 @@ STATUS_GENERATING = 'generating'
 STATUS_COMPLETED = 'completed'
 STATUS_FAILED = 'failed'
 
+# ==================== 模型配置 ====================
+MODELS_FILE = 'models.json'
+
+def load_models():
+    """加载模型配置文件"""
+    if not os.path.exists(MODELS_FILE):
+        # 创建默认模型配置
+        default_models = {
+            "models": [{
+                "id": "default",
+                "name": "Default Model",
+                "provider": "",
+                "base_url": "",
+                "api_key": "YOUR_API_KEY_HERE",
+                "model": "gpt-4"
+            }],
+            "selected_model_id": "default"
+        }
+        save_models(default_models)
+        return default_models
+    with open(MODELS_FILE, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+def save_models(data):
+    """保存模型配置文件"""
+    with open(MODELS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def get_selected_model():
+    """获取当前选中的模型配置"""
+    data = load_models()
+    selected_id = data.get('selected_model_id', '')
+    for m in data.get('models', []):
+        if m['id'] == selected_id:
+            return m
+    # 兜底返回第一个
+    models = data.get('models', [])
+    return models[0] if models else None
+
 # ==================== 配置加载 ====================
 CONFIG_FILE = 'config.json'
 
@@ -47,11 +86,6 @@ def load_config():
         print("")
         print("请创建 config.json 文件，内容格式如下:")
         print(json.dumps({
-            "api": {
-                "base_url": "https://your-api-url/v1",
-                "api_key": "your-api-key-here",
-                "model": "your-model-name"
-            },
             "server": {
                 "port": 8080
             },
@@ -62,17 +96,27 @@ def load_config():
                 "system_prompt": "You are a professional UI/UX Developer."
             }
         }, indent=2, ensure_ascii=False))
+        print("")
+        print("模型配置请在 models.json 或页面「管理模型」中设置")
         print("=" * 60)
         raise FileNotFoundError("config.json 不存在，请创建配置文件")
     
     with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
         config = json.load(f)
     
-    # 验证必要字段
-    api_config = config.get('api', {})
-    if not api_config.get('api_key') or api_config.get('api_key') == 'your-api-key-here':
+    # 验证模型配置（从 models.json）
+    try:
+        selected = get_selected_model()
+        if not selected or not selected.get('api_key') or selected.get('api_key') == 'YOUR_API_KEY_HERE':
+            print("=" * 60)
+            print("⚠️ 警告: 请在 models.json 中配置有效的 API 密钥!")
+            print("   或启动后在页面顶栏「管理模型」中配置")
+            print("=" * 60)
+        else:
+            print(f"[INFO] 当前模型: {selected.get('name', '未命名')}")
+    except Exception as e:
         print("=" * 60)
-        print("⚠️ 警告: 请在 config.json 中配置有效的 API 密钥!")
+        print(f"⚠️ 警告: models.json 加载失败，请检查文件格式 ({e})")
         print("=" * 60)
     
     return config
@@ -89,6 +133,7 @@ AI_OPTIONS = CONFIG.get('ai_options', {
     'timeout': 300,
     'system_prompt': 'You are a professional UI/UX Developer. Generate complete, standalone HTML prototypes with realistic data.'
 })
+
 
 UPLOAD_DIR = 'uploads'
 DATA_DIR = 'data'
@@ -295,6 +340,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_get_flowchart(query)
         elif path == '/api/generation-status':
             self.handle_generation_status(query)
+        elif path == '/api/models':
+            self.handle_get_models()
         elif path == '/data/projects.json':
             # 拦截项目列表请求，确保返回最新数据
             self.load_projects()
@@ -328,6 +375,12 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_prd_save()
         elif self.path == '/api/inspector/apply':
             self.handle_inspector_apply()
+        elif self.path == '/api/models/select':
+            self.handle_model_select()
+        elif self.path == '/api/models/save':
+            self.handle_model_save()
+        elif self.path == '/api/models/delete':
+            self.handle_model_delete()
         else:
             self.send_error(404, "Not Found")
 
@@ -884,18 +937,25 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 {"role": "user", "content": user_content}
             ]
             
+            # 动态获取当前选中模型配置
+            selected_model = get_selected_model()
+            model_name = selected_model.get('model', API_CONFIG.get('model', 'gpt-4'))
+            base_url = selected_model.get('base_url', API_CONFIG.get('base_url', ''))
+            api_key = selected_model.get('api_key', API_CONFIG.get('api_key', ''))
+            print(f"[AI] 使用模型: {selected_model.get('name', model_name)} ({model_name})")
+            
             # 准备请求数据
             payload = {
-                "model": API_CONFIG.get('model', 'gpt-4'),
+                "model": model_name,
                 "messages": messages,
                 "max_tokens": AI_OPTIONS.get('max_tokens', 100000),
                 "temperature": AI_OPTIONS.get('temperature', 0.7)
             }
             
-            url = f"{API_CONFIG.get('base_url', '')}/chat/completions"
+            url = f"{base_url}/chat/completions"
             headers = {
                 'Content-Type': 'application/json',
-                'Authorization': f"Bearer {API_CONFIG.get('api_key', '')}"
+                'Authorization': f"Bearer {api_key}"
             }
             
             timeout = AI_OPTIONS.get('timeout', 300)
@@ -1562,6 +1622,96 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             print(f"[PRD错误] 保存失败: {e}")
             import traceback
             traceback.print_exc()
+            self.send_error_response(str(e))
+    
+    # ==================== 模型管理 API ====================
+    
+    def handle_get_models(self):
+        """获取模型列表和当前选中模型"""
+        try:
+            data = load_models()
+            self.send_json_response(data)
+        except Exception as e:
+            self.send_error_response(str(e))
+    
+    def handle_model_select(self):
+        """切换选中的模型"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
+            req = json.loads(body.decode('utf-8'))
+            model_id = req.get('id', '')
+            
+            data = load_models()
+            # 验证模型存在
+            found = any(m['id'] == model_id for m in data.get('models', []))
+            if not found:
+                self.send_error_response("模型不存在")
+                return
+            
+            data['selected_model_id'] = model_id
+            save_models(data)
+            
+            selected = next(m for m in data['models'] if m['id'] == model_id)
+            print(f"[模型] 切换到: {selected.get('name', model_id)}")
+            self.send_json_response({'success': True, 'selected': selected})
+        except Exception as e:
+            self.send_error_response(str(e))
+    
+    def handle_model_save(self):
+        """添加或编辑模型"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
+            model_info = json.loads(body.decode('utf-8'))
+            
+            if not model_info.get('id'):
+                self.send_error_response("缺少模型 ID")
+                return
+            
+            data = load_models()
+            models = data.get('models', [])
+            
+            # 查找是否已存在
+            existing_idx = next((i for i, m in enumerate(models) if m['id'] == model_info['id']), None)
+            if existing_idx is not None:
+                models[existing_idx] = model_info
+                print(f"[模型] 更新: {model_info.get('name', model_info['id'])}")
+            else:
+                models.append(model_info)
+                print(f"[模型] 新增: {model_info.get('name', model_info['id'])}")
+            
+            data['models'] = models
+            save_models(data)
+            self.send_json_response({'success': True, 'model': model_info})
+        except Exception as e:
+            self.send_error_response(str(e))
+    
+    def handle_model_delete(self):
+        """删除模型"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
+            req = json.loads(body.decode('utf-8'))
+            model_id = req.get('id', '')
+            
+            data = load_models()
+            models = data.get('models', [])
+            
+            if len(models) <= 1:
+                self.send_error_response("至少保留一个模型")
+                return
+            
+            data['models'] = [m for m in models if m['id'] != model_id]
+            
+            # 如果删除的是当前选中的，自动选第一个
+            if data.get('selected_model_id') == model_id and data['models']:
+                data['selected_model_id'] = data['models'][0]['id']
+            
+            save_models(data)
+            print(f"[模型] 删除: {model_id}")
+            self.send_json_response({'success': True})
+        except Exception as e:
             self.send_error_response(str(e))
     
     # ==================== Inspector 微调 API ====================

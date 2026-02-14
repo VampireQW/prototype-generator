@@ -284,11 +284,226 @@
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
         }
 
+        /* App 模式下隐藏 iframe 滚动条 */
+        .preview-frame-mobile iframe {
+            scrollbar-width: none;
+            /* Firefox */
+            -ms-overflow-style: none;
+            /* IE/Edge */
+        }
+
+        .preview-frame-mobile iframe::-webkit-scrollbar {
+            display: none;
+            /* Chrome/Safari */
+        }
+
         .preview-frame-web {
             width: 100%;
             height: 100%;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        /* ==================== iPhone 真机外壳 ==================== */
+        .device-frame {
+            position: relative;
+            width: 402px;
+            height: 868px;
+            background: linear-gradient(145deg, #3a3a40, #2a2a30);
+            border-radius: 56px;
+            padding: 10px;
+            box-shadow:
+                inset 0 0 0 1.5px rgba(255, 255, 255, 0.08),
+                0 0 0 1px #1a1a20,
+                0 0 0 2.5px #3a3a42,
+                0 0 0 3.5px #1a1a20,
+                0 30px 70px -10px rgba(0, 0, 0, 0.5),
+                0 15px 30px -8px rgba(0, 0, 0, 0.3);
+        }
+
+        /* 右侧按钮 - 电源键（凸出写实） */
+        .device-frame::before {
+            content: '';
+            position: absolute;
+            right: -4px;
+            top: 200px;
+            width: 4px;
+            height: 72px;
+            background: linear-gradient(to right, #2a2a2e, #1a1a1e, #2a2a2e);
+            border-radius: 0 3px 3px 0;
+            box-shadow:
+                1px 0 1px rgba(255, 255, 255, 0.08),
+                2px 0 3px rgba(0, 0, 0, 0.4),
+                inset -1px 0 1px rgba(255, 255, 255, 0.06),
+                inset 0 1px 1px rgba(255, 255, 255, 0.04),
+                inset 0 -1px 1px rgba(0, 0, 0, 0.2);
+        }
+
+        /* 左侧按钮 - 静音+音量上+音量下（凸出写实） */
+        .device-frame::after {
+            content: '';
+            position: absolute;
+            left: -4px;
+            top: 148px;
+            width: 4px;
+            height: 28px;
+            background: linear-gradient(to left, #2a2a2e, #1a1a1e, #2a2a2e);
+            border-radius: 3px 0 0 3px;
+            box-shadow:
+                -1px 0 1px rgba(255, 255, 255, 0.08),
+                -2px 0 3px rgba(0, 0, 0, 0.4),
+                inset 1px 0 1px rgba(255, 255, 255, 0.06),
+                inset 0 1px 1px rgba(255, 255, 255, 0.04),
+                inset 0 -1px 1px rgba(0, 0, 0, 0.2),
+                0 42px 0 0 #222226,
+                -1px 42px 1px rgba(255, 255, 255, 0.08),
+                -2px 42px 3px rgba(0, 0, 0, 0.4),
+                0 82px 0 0 #222226,
+                -1px 82px 1px rgba(255, 255, 255, 0.08),
+                -2px 82px 3px rgba(0, 0, 0, 0.4);
+        }
+
+        .device-screen {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            border-radius: 46px;
+            overflow: hidden;
+            background: #000;
+        }
+
+        /* iOS 状态栏 - 不透明背景 */
+        .device-status-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 54px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 28px;
+            z-index: 20;
+            pointer-events: none;
+            background: #fff;
+        }
+
+        .status-time {
+            font-family: -apple-system, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            color: #000;
+            letter-spacing: 0.5px;
+            min-width: 54px;
+        }
+
+        .status-icons {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            min-width: 72px;
+            justify-content: flex-end;
+        }
+
+        .status-icons svg {
+            fill: #000;
+        }
+
+        /* Dynamic Island */
+        .device-notch {
+            position: absolute;
+            top: 11px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 126px;
+            height: 36px;
+            background: #000;
+            border-radius: 20px;
+            z-index: 30;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 14px;
+        }
+
+        .device-notch::before {
+            content: '';
+            width: 12px;
+            height: 12px;
+            background: radial-gradient(circle at 40% 40%, #1e3a5f 0%, #0d1b2a 50%, #050510 100%);
+            border-radius: 50%;
+            box-shadow: inset 0 0.5px 1px rgba(255, 255, 255, 0.15);
+        }
+
+        .device-screen iframe {
+            width: 100%;
+            height: 100%;
+            border: 0;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        .device-screen iframe::-webkit-scrollbar {
+            display: none;
+        }
+
+        /* Home indicator bar */
+        .device-home-bar {
+            position: absolute;
+            bottom: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 134px;
+            height: 5px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 3px;
+            z-index: 20;
+        }
+
+        /* 外壳模式开关样式 */
+        .device-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #6b7280;
+            cursor: pointer;
+            padding: 4px 0;
+            user-select: none;
+        }
+
+        .device-toggle input[type="checkbox"] {
+            width: 34px;
+            height: 18px;
+            appearance: none;
+            -webkit-appearance: none;
+            background: #d1d5db;
+            border-radius: 18px;
+            position: relative;
+            cursor: pointer;
+            transition: background 0.2s;
+            flex-shrink: 0;
+        }
+
+        .device-toggle input[type="checkbox"]::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 14px;
+            height: 14px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+        }
+
+        .device-toggle input[type="checkbox"]:checked {
+            background: #6366f1;
+        }
+
+        .device-toggle input[type="checkbox"]:checked::after {
+            transform: translateX(16px);
         }
 
         /* 隐藏 PRD 侧边栏（预览模式） */
@@ -802,6 +1017,15 @@
                     <button class="view-btn" data-view="mobile">App</button>
                 </div>
             </div>
+            <!-- 真机外壳开关 -->
+            <div id="floatingDeviceToggle" style="display: none;">
+                <div class="text-xs text-gray-400 mb-2">外壳</div>
+                <label class="device-toggle">
+                    <input type="checkbox" id="floatingDeviceFrameToggle" checked
+                        onchange="toggleDeviceFrame(this.checked)">
+                    <span>显示真机外壳</span>
+                </label>
+            </div>
             <!-- 模式切换 -->
             <div>
                 <div class="text-xs text-gray-400 mb-2">模式</div>
@@ -938,8 +1162,44 @@
 
             <!-- iframe 预览 -->
             <div id="previewContainer" class="flex-1 flex items-center justify-center p-4 relative">
-                <div id="previewWrapper" class="bg-white overflow-hidden preview-frame-mobile">
-                    <iframe id="previewFrame" class="w-full h-full border-0" src=""></iframe>
+                <!-- 带外壳的预览 -->
+                <div id="deviceFrameWrapper" class="device-frame">
+                    <div class="device-screen">
+                        <!-- Dynamic Island -->
+                        <div class="device-notch"></div>
+                        <!-- iOS 状态栏 -->
+                        <div class="device-status-bar">
+                            <span class="status-time">12:00</span>
+                            <div class="status-icons">
+                                <!-- Signal bars -->
+                                <svg width="17" height="12" viewBox="0 0 17 12">
+                                    <rect x="0" y="9" width="3" height="3" rx="0.5" />
+                                    <rect x="4.5" y="6" width="3" height="6" rx="0.5" />
+                                    <rect x="9" y="3" width="3" height="9" rx="0.5" />
+                                    <rect x="13.5" y="0" width="3" height="12" rx="0.5" />
+                                </svg>
+                                <!-- WiFi -->
+                                <svg width="16" height="12" viewBox="0 0 16 12">
+                                    <path d="M8 9.6a1.6 1.6 0 110 3.2 1.6 1.6 0 010-3.2zM3.6 7.2a6.2 6.2 0 018.8 0"
+                                        fill="none" stroke="#000" stroke-width="1.5" stroke-linecap="round" />
+                                    <path d="M1 4.2a10 10 0 0114 0" fill="none" stroke="#000" stroke-width="1.5"
+                                        stroke-linecap="round" />
+                                </svg>
+                                <!-- Battery -->
+                                <svg width="27" height="12" viewBox="0 0 27 12">
+                                    <rect x="0" y="0.5" width="23" height="11" rx="2.5" fill="none" stroke="#000"
+                                        stroke-width="1" />
+                                    <rect x="24" y="3.5" width="2.5" height="4" rx="1" fill="#000" opacity="0.4" />
+                                    <rect x="1.5" y="2" width="20" height="8" rx="1.5" fill="#000" />
+                                </svg>
+                            </div>
+                        </div>
+                        <div id="previewWrapper" class="bg-white overflow-hidden"
+                            style="width:100%;height:100%;border-radius:0;">
+                            <iframe id="previewFrame" class="w-full h-full border-0" src=""></iframe>
+                        </div>
+                        <div class="device-home-bar"></div>
+                    </div>
                 </div>
                 <!-- 微调模式覆盖层 -->
                 <div id="inspectorOverlay" class="hidden">
@@ -1304,11 +1564,91 @@
             }
         }
 
+        let currentPreviewMode = 'mobile';
+        let showDeviceFrame = true;
+
         function setPreviewMode(mode) {
+            currentPreviewMode = mode;
+            const deviceFrame = $('deviceFrameWrapper');
+            const toggleEls = document.querySelectorAll('#floatingDeviceToggle, #headerDeviceToggle');
+
+            // 获取状态栏/灵动岛/底部横条元素
+            const notchEl = deviceFrame.querySelector('.device-notch');
+            const statusBarEl = deviceFrame.querySelector('.device-status-bar');
+            const homeBarEl = deviceFrame.querySelector('.device-home-bar');
+
             if (mode === 'mobile') {
-                previewWrapper.className = 'bg-white overflow-hidden preview-frame-mobile';
+                // 显示/隐藏外壳开关
+                toggleEls.forEach(el => el.style.display = '');
+
+                if (showDeviceFrame) {
+                    // 带外壳模式 - 显示所有元素
+                    deviceFrame.className = 'device-frame';
+                    previewWrapper.className = 'bg-white overflow-hidden';
+                    previewWrapper.style.cssText = 'width:100%;height:100%;border-radius:0;';
+                    if (notchEl) notchEl.style.display = '';
+                    if (statusBarEl) statusBarEl.style.display = '';
+                    if (homeBarEl) homeBarEl.style.display = '';
+                } else {
+                    // 无外壳模式 - 隐藏状态栏、灵动岛、底部横条，纯显示页面
+                    deviceFrame.className = '';
+                    deviceFrame.style.cssText = '';
+                    previewWrapper.className = 'bg-white overflow-hidden preview-frame-mobile';
+                    previewWrapper.style.cssText = '';
+                    if (notchEl) notchEl.style.display = 'none';
+                    if (statusBarEl) statusBarEl.style.display = 'none';
+                    if (homeBarEl) homeBarEl.style.display = 'none';
+                }
+
+                // 注入隐藏滚动条的样式到 iframe 内部
+                injectHideScrollbar(true);
             } else {
+                // Web 模式：隐藏外壳开关，移除外壳
+                toggleEls.forEach(el => el.style.display = 'none');
+                deviceFrame.className = '';
+                deviceFrame.style.cssText = 'display:contents;';
                 previewWrapper.className = 'bg-white overflow-hidden preview-frame-web';
+                previewWrapper.style.cssText = '';
+                if (notchEl) notchEl.style.display = 'none';
+                if (statusBarEl) statusBarEl.style.display = 'none';
+                if (homeBarEl) homeBarEl.style.display = 'none';
+                injectHideScrollbar(false);
+            }
+        }
+
+        function injectHideScrollbar(inject) {
+            try {
+                const iframeDoc = $('previewFrame').contentDocument || $('previewFrame').contentWindow.document;
+                if (!iframeDoc) return;
+                if (inject) {
+                    let s = iframeDoc.getElementById('hideScrollbarStyle');
+                    if (!s) {
+                        s = iframeDoc.createElement('style');
+                        s.id = 'hideScrollbarStyle';
+                        iframeDoc.head.appendChild(s);
+                    }
+                    // 当有真机外壳时，需要额外的 padding-top 让内容在状态栏下方显示
+                    const statusBarPadding = showDeviceFrame ? 'body { padding-top: 54px !important; box-sizing: border-box !important; }' : '';
+                    s.textContent = `
+                        html, body { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+                        html::-webkit-scrollbar, body::-webkit-scrollbar { display: none !important; }
+                        *::-webkit-scrollbar { width: 0 !important; height: 0 !important; }
+                        ${statusBarPadding}
+                    `;
+                } else {
+                    const s = iframeDoc.getElementById('hideScrollbarStyle');
+                    if (s) s.remove();
+                }
+            } catch (e) { /* 跨域忽略 */ }
+        }
+
+        function toggleDeviceFrame(checked) {
+            showDeviceFrame = checked;
+            // 同步所有开关
+            document.querySelectorAll('#floatingDeviceFrameToggle, #headerDeviceFrameToggle').forEach(el => el.checked = checked);
+            // 重新应用当前模式
+            if (currentPreviewMode === 'mobile') {
+                setPreviewMode('mobile');
             }
         }
 

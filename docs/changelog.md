@@ -1,5 +1,41 @@
 # 更新日志 (Changelog)
 
+## 2026-02-14
+### 前端优化
+- **外壳按钮写实化**：iPhone 真机外壳的电源键、静音键、音量键改为凸出的黑色金属质感，增加 3D 阴影和高光反射效果。
+- **状态栏不透明**：iOS 状态栏（时间、信号、电池）增加白色不透明背景，页面上滑时不再与内容重叠。
+- **外壳开关联动**：关闭「显示真机外壳」开关时，同步隐藏灵动岛、状态栏和底部横条，纯显示页面内容；重新开启时恢复。
+
+### 文件修改
+- `src/viewer.html`: 外壳按钮 CSS 样式优化 + 状态栏 `background: #fff` + `setPreviewMode` 逻辑增强
+
+## 2026-02-13
+### 新增功能
+- **AI 模型切换器**：顶栏新增模型选择器，支持快速切换 AI 模型；点击「管理模型」可添加/编辑/删除模型配置。
+- **模型配置存储**：新增 `models.json` 文件，集中管理多个 AI 模型的连接信息（base_url、api_key、model）。
+- **统一模型调用**：`call_ai_model()` 改为动态读取 `models.json` 中选中的模型，主页生成和微调模式「AI 直接修改」均使用同一模型。
+
+### 后端改进
+- **新增 API**：`GET /api/models` - 获取模型列表和当前选中模型
+- **新增 API**：`POST /api/models/select` - 切换选中模型
+- **新增 API**：`POST /api/models/save` - 添加或编辑模型
+- **新增 API**：`POST /api/models/delete` - 删除模型（至少保留一个）
+- **配置拆分**：`config.json` 仅保留 `server` 和 `ai_options`，模型连接信息迁移至 `models.json`
+
+### 前端优化
+- **App 预览隐藏滚动条**：App 模式（手机框）下隐藏 iframe 内的原生滚动条，页面仍可正常滑动。
+
+### 文件修改
+- `server.py`: 新增 `load_models`/`save_models`/`get_selected_model` + 4 个模型管理 API + `call_ai_model` 重构
+- `src/script.js`: 新增模型管理全套函数（loadModels、selectModel、saveModelForm 等）
+- `src/index.html`: 顶栏模型选择器 + 模型管理弹窗
+- `src/viewer.html`: App 模式注入隐藏滚动条样式
+- `models.json`: 新增文件
+- `models.example.json`: 新增分享版模板
+- `config.json`: 移除 api 节点
+- `.gitignore`: 新增 `models.json`
+- `打包分享版.bat`: 增加 `models.json` 模板复制，更新 README
+
 ## 2026-02-09
 ### 新增功能
 - **异步生成模式**：点击"AI 生成"后，项目立即出现在左侧列表并显示🔵"生成中..."状态，后台线程完成生成后自动更新状态并打开预览。

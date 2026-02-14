@@ -10,6 +10,11 @@ let allProjects = [];
 let searchQuery = '';
 let currentRecordProject = null; // 当前查看的记录项目
 
+// ==================== 模型管理 ====================
+let modelsList = [];
+let currentModel = null;
+let selectedModelId = '';
+
 // ==================== 增量更新相关 ====================
 let sourceProjectId = null;       // 来源项目ID（用于增量更新）
 let originalFormData = null;      // 原始表单数据快照
@@ -22,6 +27,7 @@ const $ = (id) => document.getElementById(id);
 document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
     loadProjects();
+    loadModels();
     addPage(); // 默认添加一个页面
 });
 
@@ -120,57 +126,62 @@ function renderProjectList() {
     }
 
     container.innerHTML = filtered.map(p => {
-        // 状态显示
+        // 状态标签
         let statusHTML = '';
         if (p.status === 'generating') {
             statusHTML = `
-                <div class="flex items-center gap-2 text-blue-600 text-xs mt-1 animate-pulse">
-                    <i class="fas fa-spinner fa-spin"></i>
-                    <span>生成中...</span>
-                </div>
-            `;
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-600 animate-pulse">
+                    <i class="fas fa-spinner fa-spin text-[10px]"></i>生成中
+                </span>`;
         } else if (p.status === 'failed') {
             statusHTML = `
-                <div class="flex items-center gap-2 text-red-500 text-xs mt-1">
-                    <i class="fas fa-exclamation-circle"></i>
-                    <span>生成失败</span>
-                </div>
-            `;
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-500">
+                    <i class="fas fa-times-circle text-[10px]"></i>失败
+                </span>`;
         } else if (p.status === 'pending_external') {
             statusHTML = `
-                <div class="flex items-center gap-2 text-amber-600 text-xs mt-1">
-                    <i class="fas fa-clock"></i>
-                    <span>待外部生成</span>
-                </div>
-            `;
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-600">
+                    <i class="fas fa-clock text-[10px]"></i>待生成
+                </span>`;
+        } else {
+            statusHTML = `
+                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-600">
+                    <i class="fas fa-check-circle text-[10px]"></i>已完成
+                </span>`;
         }
 
+        const safeName = p.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
         return `
-        <div class="group p-3 rounded-lg hover:bg-gray-50 transition-all">
-            <div class="cursor-pointer" onclick="window.open('viewer.html?project=${encodeURIComponent(p.id)}', '_blank')">
-                <p class="text-sm font-medium text-gray-900 line-clamp-2" title="${p.name}">${p.name}</p>
-                <p class="text-xs text-gray-400 mt-1">${p.date}</p>
-                ${statusHTML}
+        <div class="project-card group bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md hover:border-indigo-200 transition-all duration-200 cursor-pointer"
+             onclick="window.open('viewer.html?project=${encodeURIComponent(p.id)}', '_blank')">
+            <div class="p-3.5">
+                <div class="flex items-start justify-between gap-2 mb-2">
+                    <p class="text-sm font-semibold text-gray-800 line-clamp-2 leading-snug flex-1" title="${p.name}">${p.name}</p>
+                    ${statusHTML}
+                </div>
+                <p class="text-xs text-gray-400">${p.date}</p>
             </div>
-            <div class="flex items-center gap-1 mt-2">
-                <button onclick="event.stopPropagation(); editProjectTitle('${p.id}', '${p.name.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')" 
-                        class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50" title="编辑标题">
+            <div class="flex items-center border-t border-gray-100 bg-gray-50/50 px-2 py-1.5 transition-opacity duration-150"
+                 onclick="event.stopPropagation()">
+                <button onclick="editProjectTitle('${p.id}', '${safeName}')" 
+                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors" title="编辑">
                     <i class="fas fa-edit"></i>
                 </button>
-                <button onclick="event.stopPropagation(); copyProject('${p.id}', '${p.name.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')" 
-                        class="p-1.5 text-gray-400 hover:text-purple-600 rounded hover:bg-purple-50" title="复制项目">
+                <button onclick="copyProject('${p.id}', '${safeName}')" 
+                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-purple-600 rounded hover:bg-purple-50 transition-colors" title="复制">
                     <i class="fas fa-copy"></i>
                 </button>
-                <button onclick="event.stopPropagation(); window.open('viewer.html?project=${encodeURIComponent(p.id)}', '_blank')" 
-                        class="p-1.5 text-gray-400 hover:text-indigo-600 rounded hover:bg-indigo-50" title="预览">
+                <button onclick="window.open('viewer.html?project=${encodeURIComponent(p.id)}', '_blank')" 
+                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-indigo-600 rounded hover:bg-indigo-50 transition-colors" title="预览">
                     <i class="fas fa-eye"></i>
                 </button>
-                <button onclick="event.stopPropagation(); viewRecord('${p.id}')" 
-                        class="p-1.5 text-gray-400 hover:text-green-600 rounded hover:bg-green-50" title="查看记录">
+                <button onclick="viewRecord('${p.id}')" 
+                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-green-600 rounded hover:bg-green-50 transition-colors" title="记录">
                     <i class="fas fa-history"></i>
                 </button>
-                <button onclick="event.stopPropagation(); deleteProject('${p.id}', '${p.name.replace(/'/g, "\\'").replace(/"/g, '&quot;')}')" 
-                        class="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-red-50" title="删除">
+                <button onclick="deleteProject('${p.id}', '${safeName}')" 
+                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-red-500 rounded hover:bg-red-50 transition-colors" title="删除">
                     <i class="fas fa-trash-alt"></i>
                 </button>
             </div>
@@ -1305,4 +1316,199 @@ function showToast(msg, type = 'success') {
 
     toast.classList.remove('translate-y-20', 'opacity-0');
     setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);
+}
+
+// ==================== 模型管理 ====================
+
+async function loadModels() {
+    try {
+        const res = await fetch('/api/models?t=' + Date.now());
+        const data = await res.json();
+        modelsList = data.models || [];
+        selectedModelId = data.selected_model_id || '';
+
+        // 找到当前选中的模型
+        currentModel = modelsList.find(m => m.id === selectedModelId) || modelsList[0] || null;
+
+        // 更新顶栏显示
+        $('currentModelName').textContent = currentModel ? currentModel.name : '未配置';
+
+        // 渲染下拉列表
+        renderModelDropdown();
+    } catch (e) {
+        console.error('加载模型列表失败:', e);
+        $('currentModelName').textContent = '加载失败';
+    }
+}
+
+function renderModelDropdown() {
+    const container = $('modelDropdownList');
+    if (!modelsList.length) {
+        container.innerHTML = '<div class="px-4 py-3 text-sm text-gray-400 text-center">暂无模型</div>';
+        return;
+    }
+    container.innerHTML = modelsList.map(m => `
+        <div class="model-dropdown-item ${m.id === selectedModelId ? 'active' : ''}" onclick="selectModel('${m.id}')">
+            <span class="check">${m.id === selectedModelId ? '<i class="fas fa-check"></i>' : ''}</span>
+            <div class="flex-1 min-w-0">
+                <div class="font-medium truncate">${m.name}</div>
+                <div class="text-xs text-gray-400 truncate">${m.provider || ''} · ${m.model}</div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function toggleModelDropdown(e) {
+    e.stopPropagation();
+    const dropdown = $('modelDropdown');
+    dropdown.classList.toggle('show');
+}
+
+// 点击外部关闭下拉
+document.addEventListener('click', (e) => {
+    const dropdown = $('modelDropdown');
+    if (dropdown && !e.target.closest('#modelSelector')) {
+        dropdown.classList.remove('show');
+    }
+});
+
+async function selectModel(id) {
+    try {
+        const res = await fetch('/api/models/select', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+        const data = await res.json();
+        if (data.success) {
+            selectedModelId = id;
+            currentModel = modelsList.find(m => m.id === id);
+            $('currentModelName').textContent = currentModel ? currentModel.name : id;
+            renderModelDropdown();
+            $('modelDropdown').classList.remove('show');
+            showToast('已切换到: ' + (currentModel?.name || id));
+        }
+    } catch (e) {
+        showToast('切换失败', 'error');
+    }
+}
+
+function openModelManager() {
+    $('modelDropdown').classList.remove('show');
+    $('modelManagerModal').classList.remove('hidden');
+    $('modelManagerModal').classList.add('flex');
+    renderModelManagerList();
+    resetModelForm();
+}
+
+function closeModelManager() {
+    $('modelManagerModal').classList.add('hidden');
+    $('modelManagerModal').classList.remove('flex');
+}
+
+function renderModelManagerList() {
+    const container = $('modelManagerList');
+    if (!modelsList.length) {
+        container.innerHTML = '<div class="text-center py-6 text-gray-400 text-sm">暂无模型配置</div>';
+        return;
+    }
+    container.innerHTML = modelsList.map(m => `
+        <div class="flex items-center gap-3 p-3 rounded-lg border ${m.id === selectedModelId ? 'border-indigo-200 bg-indigo-50/50' : 'border-gray-100 bg-white'} hover:border-indigo-200 transition">
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                    <span class="font-medium text-sm text-gray-900 truncate">${m.name}</span>
+                    ${m.id === selectedModelId ? '<span class="text-xs bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded">当前</span>' : ''}
+                </div>
+                <div class="text-xs text-gray-400 mt-0.5 truncate">${m.provider || '—'} · ${m.model}</div>
+            </div>
+            <div class="flex items-center gap-1 flex-shrink-0">
+                ${m.id !== selectedModelId ? `<button onclick="selectModel('${m.id}')" class="p-1.5 text-gray-400 hover:text-indigo-600 rounded hover:bg-indigo-50" title="选用"><i class="fas fa-check-circle"></i></button>` : ''}
+                <button onclick="editModel('${m.id}')" class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50" title="编辑"><i class="fas fa-edit"></i></button>
+                <button onclick="deleteModel('${m.id}')" class="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-red-50" title="删除"><i class="fas fa-trash-alt"></i></button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function editModel(id) {
+    const m = modelsList.find(x => x.id === id);
+    if (!m) return;
+    $('editModelId').value = m.id;
+    $('modelFormName').value = m.name || '';
+    $('modelFormProvider').value = m.provider || '';
+    $('modelFormModel').value = m.model || '';
+    $('modelFormBaseUrl').value = m.base_url || '';
+    $('modelFormApiKey').value = m.api_key || '';
+    $('modelFormTitle').textContent = '编辑模型: ' + m.name;
+}
+
+async function saveModelForm() {
+    const existingId = $('editModelId').value;
+    const name = $('modelFormName').value.trim();
+    const provider = $('modelFormProvider').value.trim();
+    const model = $('modelFormModel').value.trim();
+    const baseUrl = $('modelFormBaseUrl').value.trim();
+    const apiKey = $('modelFormApiKey').value.trim();
+
+    if (!name || !model || !baseUrl || !apiKey) {
+        showToast('请填写所有必填字段', 'error');
+        return;
+    }
+
+    // 生成 ID：编辑时沿用，新增时自动生成
+    const id = existingId || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now().toString(36);
+
+    const modelData = { id, name, provider, model, base_url: baseUrl, api_key: apiKey };
+
+    try {
+        const res = await fetch('/api/models/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(modelData)
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(existingId ? '模型已更新' : '模型已添加');
+            await loadModels();
+            renderModelManagerList();
+            resetModelForm();
+        } else {
+            showToast('保存失败: ' + (data.error || ''), 'error');
+        }
+    } catch (e) {
+        showToast('保存失败', 'error');
+    }
+}
+
+async function deleteModel(id) {
+    const m = modelsList.find(x => x.id === id);
+    if (!confirm(`确定要删除模型 "${m?.name || id}" 吗？`)) return;
+
+    try {
+        const res = await fetch('/api/models/delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('模型已删除');
+            await loadModels();
+            renderModelManagerList();
+        } else {
+            showToast(data.error || '删除失败', 'error');
+        }
+    } catch (e) {
+        showToast('删除失败', 'error');
+    }
+}
+
+function resetModelForm() {
+    $('editModelId').value = '';
+    $('modelFormName').value = '';
+    $('modelFormProvider').value = '';
+    $('modelFormModel').value = '';
+    $('modelFormBaseUrl').value = '';
+    $('modelFormApiKey').value = '';
+    $('modelFormTitle').textContent = '添加新模型';
 }

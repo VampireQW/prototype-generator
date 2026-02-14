@@ -1,5 +1,6 @@
 # 配置文件（包含 API 密钥，不要提交到版本控制）
 config.json
+models.json
 
 # 上传的临时文件
 uploads/
