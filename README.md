@@ -124,12 +124,12 @@ python server.py
 
 | 厂商 | 推荐模型 | 说明 |
 |------|----------|------|
-| OpenAI | `gpt-4o`, `o1` | 综合能力强 |
-| Anthropic | `claude-sonnet-4`, `claude-3.5-sonnet` | 代码质量高，理解力强 |
-| Google | `gemini-2.5-pro`, `gemini-2.5-flash` | 多模态能力强，速度快 |
-| 字节豆包 | `doubao-vision-pro`, `doubao-vision-lite` | 国产多模态模型 |
-| 阿里千问 | `qwen-vl-max`, `qwen-vl-plus` | 多模态理解能力优秀 |
-| Moonshot | `kimi-vision`, `moonshot-v1-128k` | 长上下文支持好 |
+| OpenAI | `gpt-5.2`, `gpt-5.3-codex` | 最强综合能力，5.3-codex 专精代码 |
+| Anthropic | `claude-opus-4.6`, `claude-sonnet-4.5` | Opus 旗舰推理，Sonnet 性价比高 |
+| Google | `gemini-3-pro`, `gemini-3-flash` | 多模态最强，Flash 速度极快 |
+| 字节豆包 | `doubao-2.0-pro`, `doubao-2.0-lite` | 万亿参数，多模态能力强 |
+| 阿里千问 | `qwen3-max`, `qwen3-vl-max` | 旗舰推理模型，VL 多模态优秀 |
+| Moonshot | `kimi-k2.5`, `kimi-k2.5-vision` | 原生多模态，视觉编程能力强 |
 
 ---
 
