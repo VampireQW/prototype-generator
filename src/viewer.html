@@ -1495,21 +1495,49 @@
                 const html = iframeDoc.documentElement;
                 const htmlContent = html.innerHTML;
 
+                // 辅助函数：检测 aside 是否为始终可见的侧边栏（排除响应式隐藏的）
+                const hasVisibleAside = (() => {
+                    const asides = iframeDoc.querySelectorAll('aside');
+                    for (const aside of asides) {
+                        const cls = aside.className || '';
+                        // 如果 aside 带有 hidden（且不是 md:flex/lg:flex 这种响应式显示），则是移动端隐藏的侧边栏
+                        if (cls.includes('hidden') && (cls.includes('md:flex') || cls.includes('md:block') || cls.includes('lg:flex') || cls.includes('lg:block'))) {
+                            continue; // 响应式隐藏的侧边栏，不算 Web 特征
+                        }
+                        return true; // 始终可见的侧边栏，算 Web 特征
+                    }
+                    return false;
+                })();
+
+                // 辅助函数：检测 w-64 是否为始终生效的（排除 md:w-64 等响应式类）
+                const hasAlwaysVisibleSidebar = (() => {
+                    // 检测 class="w-64"（非 md:w-64）的元素
+                    const els = iframeDoc.querySelectorAll('[class*="w-64"]');
+                    for (const el of els) {
+                        const cls = el.className || '';
+                        // 检查是否是响应式隐藏的元素
+                        if (cls.includes('hidden') && (cls.includes('md:') || cls.includes('lg:'))) {
+                            continue;
+                        }
+                        return true;
+                    }
+                    return false;
+                })();
+
                 // 检测 Web 端（后台管理系统）的特征
                 const hasWebFeatures =
-                    // 检测是否有侧边栏结构
-                    iframeDoc.querySelector('aside') !== null ||
+                    // 检测始终可见的侧边栏
+                    hasVisibleAside ||
                     iframeDoc.querySelector('[class*="sidebar"]') !== null ||
                     // 检测 Ant Design 后台特征
                     htmlContent.includes('ant-dark') ||
                     htmlContent.includes('ant-table') ||
-                    // 检测全屏 flex 布局
-                    (body.classList.contains('flex') && htmlContent.includes('h-screen')) ||
+                    // 检测全屏 flex 布局（排除带有移动端底部导航的情况）
+                    (body.classList.contains('flex') && htmlContent.includes('h-screen') && !htmlContent.includes('bottom-0')) ||
                     htmlContent.includes('w-screen') ||
-                    // 检测后台管理常用宽度类
-                    htmlContent.includes('w-64') || // 常见侧边栏宽度
+                    // 检测后台管理常用宽度类（排除响应式隐藏的）
+                    hasAlwaysVisibleSidebar ||
                     htmlContent.includes('w-72') ||
-                    htmlContent.includes('min-w-0') ||
                     // 检测表格
                     iframeDoc.querySelector('table') !== null;
 
@@ -1527,9 +1555,14 @@
                     htmlContent.includes('max-w-[430px]') ||
                     // 检测移动端 viewport 设置
                     htmlContent.includes('user-scalable=no') ||
-                    // 检测底部导航栏（移动端常见）
+                    // 检测底部导航栏（移动端常见）- 更广泛的检测
                     iframeDoc.querySelector('[class*="bottom-nav"]') !== null ||
                     iframeDoc.querySelector('[class*="safe-area"]') !== null ||
+                    iframeDoc.querySelector('nav[class*="fixed"][class*="bottom-0"]') !== null ||
+                    iframeDoc.querySelector('[class*="pb-safe"]') !== null ||
+                    // 检测 md:hidden 的 mobile header（表示有移动端专用头部）
+                    iframeDoc.querySelector('header[class*="md:hidden"]') !== null ||
+                    iframeDoc.querySelector('[class*="md:hidden"][class*="header"]') !== null ||
                     // 检测移动端路由（vue-router）
                     htmlContent.includes('router-view') ||
                     // 检测 #app 容器有移动端样式约束
@@ -1537,13 +1570,15 @@
                         (iframeDoc.querySelector('#app').style.maxWidth === '480px' ||
                             iframeDoc.querySelector('#app').className.includes('max-w-')));
 
-                // 优先检测 Web 特征
-                if (hasWebFeatures && !hasMobileFeatures) {
+                console.log('[Viewer] 自动检测详情：hasWebFeatures=' + hasWebFeatures + ', hasMobileFeatures=' + hasMobileFeatures + ', hasVisibleAside=' + hasVisibleAside + ', hasAlwaysVisibleSidebar=' + hasAlwaysVisibleSidebar);
+
+                // 移动端特征优先（因为很多 App 页面在桌面宽度下也会有类似 Web 的布局）
+                if (hasMobileFeatures) {
+                    console.log('[Viewer] 自动检测：识别为移动端（检测到移动端特征）');
+                    setPreviewMode('mobile');
+                } else if (hasWebFeatures) {
                     console.log('[Viewer] 自动检测：识别为 Web 端');
                     setPreviewMode('web');
-                } else if (hasMobileFeatures) {
-                    console.log('[Viewer] 自动检测：识别为移动端');
-                    setPreviewMode('mobile');
                 } else {
                     // 兜底：根据内容宽度判断
                     const maxWidth = Math.max(
@@ -1584,6 +1619,7 @@
                 if (showDeviceFrame) {
                     // 带外壳模式 - 显示所有元素
                     deviceFrame.className = 'device-frame';
+                    deviceFrame.style.cssText = ''; // 清除残留行内样式（如 web 模式的 display:contents）
                     previewWrapper.className = 'bg-white overflow-hidden';
                     previewWrapper.style.cssText = 'width:100%;height:100%;border-radius:0;';
                     if (notchEl) notchEl.style.display = '';
