@@ -11,7 +11,9 @@
 - 🖼️ **参考图驱动** - 支持上传参考图，AI 会模仿布局和风格
 - 📋 **剪切板粘贴** - 直接 Ctrl+V 粘贴截图作为参考图
 - 🔄 **异步生成** - 点击生成后立即在列表显示，后台完成后自动更新
-- 📝 **微调模式** - 可视化点选元素进行 AI 微调修改
+- 🔀 **多模型切换** - 顶栏模型选择器，支持添加/编辑/删除多个 AI 模型配置
+- 📝 **微调模式** - 可视化点选元素进行 AI 微调修改，支持整页面修改
+- 📱 **真机外壳预览** - iPhone 写实外壳，含灵动岛、状态栏、物理按键，可开关
 - 📄 **PRD 文档** - 内置 Markdown 编辑器撰写需求文档
 - 📦 **项目导出** - 导出为独立 HTML，无需服务器即可运行
 
@@ -70,37 +72,37 @@ pip install requests
 
 ---
 
-### 4. 配置 API Key
+### 4. 配置 AI 模型
 
-复制配置模板并编辑：
+复制模型配置模板并编辑：
 
 ```bash
 # Windows
-copy config.example.json config.json
+copy models.example.json models.json
 
 # macOS/Linux
-cp config.example.json config.json
+cp models.example.json models.json
 ```
 
-编辑 `config.json`，填入您的 API 配置：
+编辑 `models.json`，填入您的 AI 模型配置：
 
 ```json
 {
-    "api": {
-        "base_url": "https://api.openai.com/v1",
-        "api_key": "sk-xxxxxxxxxxxxxxxx",
-        "model": "gpt-4o"
-    },
-    "server": {
-        "port": 8080
-    },
-    "ai_options": {
-        "max_tokens": 100000,
-        "temperature": 0.7,
-        "timeout": 300
-    }
+    "models": [
+        {
+            "id": "default-model",
+            "name": "My AI Model",
+            "provider": "OpenAI",
+            "model": "gpt-4o",
+            "base_url": "https://api.openai.com/v1/chat/completions",
+            "api_key": "YOUR_API_KEY_HERE"
+        }
+    ],
+    "selected_model_id": "default-model"
 }
 ```
+
+> 💡 支持配置多个模型，在界面顶栏可随时切换。也可通过界面中的「管理模型」按钮直接添加/编辑。
 
 ---
 
@@ -152,13 +154,14 @@ python server.py
 ```
 原型生成器/
 ├── server.py              # 后端服务 (Python)
-├── config.json            # 配置文件 (包含 API Key)
-├── config.example.json    # 配置模板
+├── config.json            # 服务器和 AI 参数配置
+├── models.json            # AI 模型连接配置 (含 API Key)
+├── models.example.json    # 模型配置模板
 ├── src/
 │   ├── index.html         # 主界面
 │   ├── script.js          # 前端逻辑
 │   ├── style.css          # 样式
-│   └── viewer.html        # 预览器/微调模式
+│   └── viewer.html        # 预览器/微调模式/真机外壳
 ├── projects/              # 生成的项目存放目录
 ├── docs/                  # 项目文档
 ├── templates/             # 页面模板
@@ -174,8 +177,13 @@ python server.py
 1. 填写**页面名称**（如：登录页、首页）
 2. 描述**布局结构**（如：顶部导航栏、左侧菜单、右侧内容区）
 3. 上传**参考图**（可选，支持拖拽或 Ctrl+V 粘贴）
-4. 点击 **AI 生成**
-5. 等待生成完成，自动打开预览
+4. 点击 **AI 生成**（异步模式，项目立即出现在列表，后台完成后自动更新）
+
+### 切换 AI 模型
+
+1. 点击顶栏的**模型选择器**下拉框
+2. 选择已配置的模型
+3. 点击「管理模型」可**添加 / 编辑 / 删除**模型配置
 
 ### 微调模式
 
@@ -183,6 +191,7 @@ python server.py
 2. 点选或框选要修改的元素
 3. 输入修改需求（如："把按钮改成蓝色"）
 4. 点击 **应用修改**
+5. 也可点击底部**「整页面」**按钮对整个页面提修改需求
 
 ---
 
@@ -196,7 +205,7 @@ python server.py
 
 ### Q: API 调用失败 / 超时
 **A:** 
-1. 检查 `config.json` 中的 API Key 是否正确
+1. 检查 `models.json` 中的 API Key 和 base_url 是否正确
 2. 检查网络是否能访问 API 服务
 3. 尝试使用代理或中转服务
 
