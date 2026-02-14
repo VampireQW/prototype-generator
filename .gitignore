@@ -42,3 +42,6 @@ Thumbs.db
 分享版*/
 分享版*.zip
 打包分享版.bat
+
+# Agent 工作流（个人配置）
+.agent/
