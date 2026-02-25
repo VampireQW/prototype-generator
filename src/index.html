@@ -118,6 +118,33 @@
             border-top: 1px solid #e5e7eb;
             background: #f9fafb;
         }
+
+        /* 参考图选项按钮 */
+        .similarity-btn {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            font-size: 12px;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+            background: #fff;
+            color: #6b7280;
+            cursor: pointer;
+            transition: all 0.15s;
+            user-select: none;
+        }
+
+        .similarity-btn:hover {
+            border-color: #a5b4fc;
+            color: #4f46e5;
+        }
+
+        .similarity-btn.active {
+            background: #eef2ff;
+            border-color: #a5b4fc;
+            color: #4f46e5;
+            font-weight: 500;
+        }
     </style>
 </head>
 

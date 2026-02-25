@@ -10,10 +10,11 @@
 - **Web 预览去间距**：Web 模式下移除预览容器内边距和阴影，页面内容贴边占满整个预览区域，无缝显示。
 - **修复 Web/App 检测误判**：优化自动检测逻辑——移除 `router-view` 误判（Vue Web 应用也用）、表格检测改为需 3 行以上才算 Web 特征、新增宽容器检测（`max-w-5xl/6xl/7xl`）、调整优先级为 Web 特征优先（误判率更低）。
 - **悬浮工具栏贴边**：预览模式右上角设置按钮位置从 `16px` 缩至 `6px`，更贴近角落，减少页面内容遮挡。
+- **参考图选项平铺**：参考图的"仅参考布局 / 仅参考风格 / 像素级还原"从下拉菜单改为平铺标签按钮，选中态 indigo 高亮，操作更直观。
 
 ### 文件修改
-- `src/index.html`: 模型管理弹窗重构为 `max-w-3xl` 左右布局 + 多模态 checkbox
-- `src/script.js`: 新增 `duplicateModel`；`editModel`/`saveModelForm`/`resetModelForm` 支持 `multimodal` 字段；`renderModelManagerList` 增加编辑高亮和复制按钮；`renderModelDropdown` 显示多模态标签；`renderProjectList` 显示 `model_name`
+- `src/index.html`: 模型管理弹窗重构为 `max-w-3xl` 左右布局 + 多模态 checkbox + `.similarity-btn` 样式
+- `src/script.js`: 新增 `duplicateModel`；`editModel`/`saveModelForm`/`resetModelForm` 支持 `multimodal` 字段；`renderModelManagerList` 增加编辑高亮和复制按钮；`renderModelDropdown` 显示多模态标签；`renderProjectList` 显示 `model_name`；参考图选项改为 radio 按钮组
 - `src/viewer.html`: Web 预览去圆角/去间距/去阴影 + `device-screen` 圆角重置 + 检测逻辑优化 + 悬浮工具栏位置调整
 - `server.py`: `handle_generate`/`handle_generate_async`/`handle_create_placeholder` 存储 `model_name` 到项目记录
 

@@ -25,6 +25,17 @@ import tempfile
 import shlex
 import threading
 import time
+import sys
+
+# ==================== PyInstaller 兼容 ====================
+def get_base_path():
+    """获取应用根目录（兼容 PyInstaller 打包）"""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+# 切换工作目录到应用根目录
+os.chdir(get_base_path())
 
 # ==================== 异步任务管理 ====================
 generating_tasks = {}  # {project_id: {status, progress, error, thread}}

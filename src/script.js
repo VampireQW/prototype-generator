@@ -506,7 +506,18 @@ async function regenerateFromRecord() {
             if (pageRecord.layout) $(`layout_${id}`).value = pageRecord.layout;
             if (pageRecord.features) $(`features_${id}`).value = pageRecord.features;
             if (pageRecord.interaction) $(`interaction_${id}`).value = pageRecord.interaction;
-            if (pageRecord.similarity) $(`similarity_${id}`).value = pageRecord.similarity;
+            if (pageRecord.similarity) {
+                const radio = document.querySelector(`input[name="similarity_${id}"][value="${pageRecord.similarity}"]`);
+                if (radio) {
+                    radio.checked = true;
+                    // 更新 active 样式
+                    const group = $(`similarityGroup_${id}`);
+                    if (group) {
+                        group.querySelectorAll('.similarity-btn').forEach(btn => btn.classList.remove('active'));
+                        radio.closest('.similarity-btn').classList.add('active');
+                    }
+                }
+            }
 
             // 加载参考图片（从服务器）- 使用Promise确保等待完成
             if (pageRecord.images && pageRecord.images.length > 0) {
@@ -599,11 +610,20 @@ function createPageCardHtml(id, index) {
                 <div>
                     <div class="flex justify-between items-center mb-1">
                         <label class="text-sm font-medium text-gray-700">参考图</label>
-                        <select id="similarity_${id}" class="text-xs border-gray-200 rounded py-1 px-2">
-                            <option value="layout">仅参考布局</option>
-                            <option value="style">仅参考风格</option>
-                            <option value="pixel">像素级还原</option>
-                        </select>
+                        <div class="flex gap-1" id="similarityGroup_${id}">
+                            <label class="similarity-btn active" data-value="layout">
+                                <input type="radio" name="similarity_${id}" value="layout" checked class="hidden">
+                                仅参考布局
+                            </label>
+                            <label class="similarity-btn" data-value="style">
+                                <input type="radio" name="similarity_${id}" value="style" class="hidden">
+                                仅参考风格
+                            </label>
+                            <label class="similarity-btn" data-value="pixel">
+                                <input type="radio" name="similarity_${id}" value="pixel" class="hidden">
+                                像素级还原
+                            </label>
+                        </div>
                     </div>
                     <div id="dropZone_${id}" tabindex="0" class="border-2 border-dashed border-gray-200 rounded-lg h-24 flex items-center justify-center text-center hover:border-indigo-500 hover:bg-indigo-50/50 transition-all cursor-pointer focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
                         <div class="text-gray-400 text-sm">
@@ -698,6 +718,17 @@ function setupPageListeners(id) {
             showToast(`已粘贴 ${imageFiles.length} 张图片`);
         }
     });
+
+    // 参考图相似度选项切换
+    const similarityGroup = $(`similarityGroup_${id}`);
+    if (similarityGroup) {
+        similarityGroup.querySelectorAll('.similarity-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                similarityGroup.querySelectorAll('.similarity-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+    }
 }
 
 function handleFiles(id, files) {
@@ -778,7 +809,7 @@ function generatePrompt() {
         const layout = $(`layout_${id}`).value;
         const features = $(`features_${id}`).value;
         const interaction = $(`interaction_${id}`).value;
-        const similarity = $(`similarity_${id}`).value;
+        const similarity = (document.querySelector(`input[name="similarity_${id}"]:checked`) || {}).value || 'layout';
         const hasImages = pageFiles[id].length > 0;
 
         prompt += `
@@ -837,7 +868,7 @@ function collectFormData() {
         layout: $(`layout_${id}`).value,
         features: $(`features_${id}`).value,
         interaction: $(`interaction_${id}`).value,
-        similarity: $(`similarity_${id}`).value,
+        similarity: (document.querySelector(`input[name="similarity_${id}"]:checked`) || {}).value || 'layout',
         imageCount: pageFiles[id].length
     }));
 
