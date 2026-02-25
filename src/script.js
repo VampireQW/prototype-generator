@@ -161,6 +161,7 @@ function renderProjectList() {
                     ${statusHTML}
                 </div>
                 <p class="text-xs text-gray-400">${p.date}</p>
+                ${p.model_name ? `<p class="text-[11px] text-indigo-400 mt-0.5 flex items-center gap-1"><i class="fas fa-robot text-[9px]"></i>${p.model_name}</p>` : ''}
             </div>
             <div class="flex items-center border-t border-gray-100 bg-gray-50/50 px-2 py-1.5 transition-opacity duration-150"
                  onclick="event.stopPropagation()">
@@ -1351,7 +1352,10 @@ function renderModelDropdown() {
         <div class="model-dropdown-item ${m.id === selectedModelId ? 'active' : ''}" onclick="selectModel('${m.id}')">
             <span class="check">${m.id === selectedModelId ? '<i class="fas fa-check"></i>' : ''}</span>
             <div class="flex-1 min-w-0">
-                <div class="font-medium truncate">${m.name}</div>
+                <div class="font-medium truncate flex items-center gap-1.5">
+                    ${m.name}
+                    ${m.multimodal ? '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-50 text-purple-600 leading-none">多模态</span>' : ''}
+                </div>
                 <div class="text-xs text-gray-400 truncate">${m.provider || ''} · ${m.model}</div>
             </div>
         </div>
@@ -1408,21 +1412,25 @@ function closeModelManager() {
 
 function renderModelManagerList() {
     const container = $('modelManagerList');
+    const editingId = $('editModelId').value;
     if (!modelsList.length) {
         container.innerHTML = '<div class="text-center py-6 text-gray-400 text-sm">暂无模型配置</div>';
         return;
     }
     container.innerHTML = modelsList.map(m => `
-        <div class="flex items-center gap-3 p-3 rounded-lg border ${m.id === selectedModelId ? 'border-indigo-200 bg-indigo-50/50' : 'border-gray-100 bg-white'} hover:border-indigo-200 transition">
+        <div class="flex items-center gap-3 p-3 rounded-lg border ${m.id === editingId ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200' : m.id === selectedModelId ? 'border-indigo-200 bg-indigo-50/50' : 'border-gray-100 bg-white'} hover:border-indigo-200 transition cursor-pointer"
+             onclick="editModel('${m.id}')">
             <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 flex-wrap">
                     <span class="font-medium text-sm text-gray-900 truncate">${m.name}</span>
                     ${m.id === selectedModelId ? '<span class="text-xs bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded">当前</span>' : ''}
+                    ${m.multimodal ? '<span class="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">多模态</span>' : ''}
                 </div>
                 <div class="text-xs text-gray-400 mt-0.5 truncate">${m.provider || '—'} · ${m.model}</div>
             </div>
-            <div class="flex items-center gap-1 flex-shrink-0">
+            <div class="flex items-center gap-1 flex-shrink-0" onclick="event.stopPropagation()">
                 ${m.id !== selectedModelId ? `<button onclick="selectModel('${m.id}')" class="p-1.5 text-gray-400 hover:text-indigo-600 rounded hover:bg-indigo-50" title="选用"><i class="fas fa-check-circle"></i></button>` : ''}
+                <button onclick="duplicateModel('${m.id}')" class="p-1.5 text-gray-400 hover:text-teal-600 rounded hover:bg-teal-50" title="复制"><i class="fas fa-copy"></i></button>
                 <button onclick="editModel('${m.id}')" class="p-1.5 text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50" title="编辑"><i class="fas fa-edit"></i></button>
                 <button onclick="deleteModel('${m.id}')" class="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-red-50" title="删除"><i class="fas fa-trash-alt"></i></button>
             </div>
@@ -1439,7 +1447,44 @@ function editModel(id) {
     $('modelFormModel').value = m.model || '';
     $('modelFormBaseUrl').value = m.base_url || '';
     $('modelFormApiKey').value = m.api_key || '';
+    $('modelFormMultimodal').checked = !!m.multimodal;
     $('modelFormTitle').textContent = '编辑模型: ' + m.name;
+    // 刷新列表以高亮当前编辑项
+    renderModelManagerList();
+}
+
+async function duplicateModel(id) {
+    const m = modelsList.find(x => x.id === id);
+    if (!m) return;
+
+    const newId = m.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now().toString(36);
+    const newModel = {
+        id: newId,
+        name: m.name + ' (副本)',
+        provider: m.provider || '',
+        model: m.model || '',
+        base_url: m.base_url || '',
+        api_key: m.api_key || '',
+        multimodal: !!m.multimodal
+    };
+
+    try {
+        const res = await fetch('/api/models/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newModel)
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('模型已复制: ' + newModel.name);
+            await loadModels();
+            renderModelManagerList();
+        } else {
+            showToast('复制失败: ' + (data.error || ''), 'error');
+        }
+    } catch (e) {
+        showToast('复制失败', 'error');
+    }
 }
 
 async function saveModelForm() {
@@ -1449,6 +1494,7 @@ async function saveModelForm() {
     const model = $('modelFormModel').value.trim();
     const baseUrl = $('modelFormBaseUrl').value.trim();
     const apiKey = $('modelFormApiKey').value.trim();
+    const multimodal = $('modelFormMultimodal').checked;
 
     if (!name || !model || !baseUrl || !apiKey) {
         showToast('请填写所有必填字段', 'error');
@@ -1458,7 +1504,7 @@ async function saveModelForm() {
     // 生成 ID：编辑时沿用，新增时自动生成
     const id = existingId || name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now().toString(36);
 
-    const modelData = { id, name, provider, model, base_url: baseUrl, api_key: apiKey };
+    const modelData = { id, name, provider, model, base_url: baseUrl, api_key: apiKey, multimodal };
 
     try {
         const res = await fetch('/api/models/save', {
@@ -1495,6 +1541,10 @@ async function deleteModel(id) {
             showToast('模型已删除');
             await loadModels();
             renderModelManagerList();
+            // 如果删除的是当前编辑的，重置表单
+            if ($('editModelId').value === id) {
+                resetModelForm();
+            }
         } else {
             showToast(data.error || '删除失败', 'error');
         }
@@ -1510,5 +1560,11 @@ function resetModelForm() {
     $('modelFormModel').value = '';
     $('modelFormBaseUrl').value = '';
     $('modelFormApiKey').value = '';
+    $('modelFormMultimodal').checked = false;
     $('modelFormTitle').textContent = '添加新模型';
+    // 刷新列表取消高亮
+    if ($('modelManagerModal') && !$('modelManagerModal').classList.contains('hidden')) {
+        renderModelManagerList();
+    }
 }
+

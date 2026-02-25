@@ -606,11 +606,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             with open(prompt_path, 'w', encoding='utf-8') as f:
                 f.write(prompt)
             
+            # 获取当前选中的模型名称
+            current_model = get_selected_model()
+            current_model_name = current_model.get('name', '') if current_model else ''
+            
             # 更新项目列表
             projects = self.load_projects()
             new_project = {
                 'id': project_id,
                 'name': project_name,
+                'model_name': current_model_name,
                 'url': f'/projects/{project_id}/index.html',
                 'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
@@ -710,11 +715,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             with open(prompt_path, 'w', encoding='utf-8') as f:
                 f.write(prompt)
             
+            # 获取当前选中的模型名称
+            current_model = get_selected_model()
+            current_model_name = current_model.get('name', '') if current_model else ''
+            
             # 更新项目列表（带 generating 状态）
             projects = self.load_projects()
             new_project = {
                 'id': project_id,
                 'name': project_name,
+                'model_name': current_model_name,
                 'status': STATUS_GENERATING,
                 'url': f'/projects/{project_id}/index.html',
                 'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -2201,11 +2211,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             with open(record_path, 'w', encoding='utf-8') as f:
                 json.dump(record, f, ensure_ascii=False, indent=2)
             
+            # 获取当前选中的模型名称
+            current_model = get_selected_model()
+            current_model_name = current_model.get('name', '') if current_model else ''
+            
             # 更新项目列表
             projects = self.load_projects()
             new_project = {
                 'id': project_id,
                 'name': project_name + ' (待外部生成)',
+                'model_name': current_model_name,
                 'status': 'pending_external',
                 'url': f'/projects/{project_id}/record.json',  # 暂无HTML
                 'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')

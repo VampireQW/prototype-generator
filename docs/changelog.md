@@ -1,5 +1,18 @@
 # 更新日志 (Changelog)
 
+## 2026-02-25
+### 新增功能
+- **模型管理弹窗左右布局**：弹窗改为左右分栏（左侧模型列表可滚动 + 右侧编辑/添加表单），解决模型多时保存按钮被挤出视口的问题。
+- **模型复制功能**：模型列表新增复制按钮，可一键复制模型配置（名称自动加"(副本)"后缀），避免重复粘贴相同的 API 信息。
+- **多模态标签**：模型新增"多模态"勾选项，勾选后在模型列表和下拉菜单中显示紫色"多模态"标签，方便快速识别模型是否支持图片识别。
+- **项目列表显示模型名称**：左侧项目卡片新增模型名称展示（蓝色小标签），方便查看每个项目使用的 AI 模型。
+
+### 文件修改
+- `src/index.html`: 模型管理弹窗重构为 `max-w-3xl` 左右布局 + 多模态 checkbox
+- `src/script.js`: 新增 `duplicateModel`；`editModel`/`saveModelForm`/`resetModelForm` 支持 `multimodal` 字段；`renderModelManagerList` 增加编辑高亮和复制按钮；`renderModelDropdown` 显示多模态标签；`renderProjectList` 显示 `model_name`
+- `server.py`: `handle_generate`/`handle_generate_async`/`handle_create_placeholder` 存储 `model_name` 到项目记录
+
+
 ## 2026-02-14
 ### 前端优化
 - **外壳按钮写实化**：iPhone 真机外壳的电源键、静音键、音量键改为凸出的黑色金属质感，增加 3D 阴影和高光反射效果。
