@@ -300,8 +300,8 @@
         .preview-frame-web {
             width: 100%;
             height: 100%;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            border-radius: 0;
+            box-shadow: none;
         }
 
         /* ==================== iPhone 真机外壳 ==================== */
@@ -514,8 +514,8 @@
         /* 预览模式悬浮工具栏 - 精简版 */
         .preview-toolbar-wrapper {
             position: fixed;
-            top: 16px;
-            right: 16px;
+            top: 6px;
+            right: 6px;
             z-index: 1000;
         }
 
@@ -639,6 +639,10 @@
 
         body.preview-fullscreen #previewContainer {
             padding: 16px;
+        }
+
+        body.preview-fullscreen #previewContainer.web-mode {
+            padding: 0;
         }
 
         /* ==================== 微调模式 (Inspector) 样式 ==================== */
@@ -1538,8 +1542,13 @@
                     // 检测后台管理常用宽度类（排除响应式隐藏的）
                     hasAlwaysVisibleSidebar ||
                     htmlContent.includes('w-72') ||
-                    // 检测表格
-                    iframeDoc.querySelector('table') !== null;
+                    // 检测大型数据表格（多行多列，后台系统特征）
+                    (iframeDoc.querySelector('table') !== null && iframeDoc.querySelectorAll('table tr').length > 3) ||
+                    // 检测宽容器（非受限宽度，暗示Web布局）
+                    htmlContent.includes('max-w-7xl') ||
+                    htmlContent.includes('max-w-6xl') ||
+                    htmlContent.includes('max-w-5xl') ||
+                    htmlContent.includes('container mx-auto');
 
                 // 检测移动端标识
                 const hasMobileFeatures =
@@ -1563,8 +1572,6 @@
                     // 检测 md:hidden 的 mobile header（表示有移动端专用头部）
                     iframeDoc.querySelector('header[class*="md:hidden"]') !== null ||
                     iframeDoc.querySelector('[class*="md:hidden"][class*="header"]') !== null ||
-                    // 检测移动端路由（vue-router）
-                    htmlContent.includes('router-view') ||
                     // 检测 #app 容器有移动端样式约束
                     (iframeDoc.querySelector('#app') &&
                         (iframeDoc.querySelector('#app').style.maxWidth === '480px' ||
@@ -1572,12 +1579,17 @@
 
                 console.log('[Viewer] 自动检测详情：hasWebFeatures=' + hasWebFeatures + ', hasMobileFeatures=' + hasMobileFeatures + ', hasVisibleAside=' + hasVisibleAside + ', hasAlwaysVisibleSidebar=' + hasAlwaysVisibleSidebar);
 
-                // 移动端特征优先（因为很多 App 页面在桌面宽度下也会有类似 Web 的布局）
-                if (hasMobileFeatures) {
+                // Web 特征优先（因为 Web 端有明确的侧边栏/宽布局等结构特征，更可靠）
+                // 仅当没有 Web 特征时，才考虑移动端特征
+                if (hasWebFeatures && !hasMobileFeatures) {
+                    console.log('[Viewer] 自动检测：识别为 Web 端（检测到 Web 特征）');
+                    setPreviewMode('web');
+                } else if (hasMobileFeatures && !hasWebFeatures) {
                     console.log('[Viewer] 自动检测：识别为移动端（检测到移动端特征）');
                     setPreviewMode('mobile');
-                } else if (hasWebFeatures) {
-                    console.log('[Viewer] 自动检测：识别为 Web 端');
+                } else if (hasWebFeatures && hasMobileFeatures) {
+                    // 两者都有特征时，Web 优先（移动端误判概率更高）
+                    console.log('[Viewer] 自动检测：Web/Mobile 均匹配，优先 Web');
                     setPreviewMode('web');
                 } else {
                     // 兜底：根据内容宽度判断
@@ -1615,6 +1627,18 @@
             if (mode === 'mobile') {
                 // 显示/隐藏外壳开关
                 toggleEls.forEach(el => el.style.display = '');
+                // 恢复预览容器的内边距
+                const container = $('previewContainer');
+                if (container) {
+                    container.style.padding = '';
+                    container.classList.remove('web-mode');
+                }
+                // 恢复 device-screen 的原始样式
+                const deviceScreen = deviceFrame.querySelector('div');
+                if (deviceScreen && !deviceScreen.classList.contains('device-screen')) {
+                    deviceScreen.className = 'device-screen';
+                    deviceScreen.style.cssText = '';
+                }
 
                 if (showDeviceFrame) {
                     // 带外壳模式 - 显示所有元素
@@ -1639,16 +1663,28 @@
                 // 注入隐藏滚动条的样式到 iframe 内部
                 injectHideScrollbar(true);
             } else {
-                // Web 模式：隐藏外壳开关，移除外壳
+                // Web 模式：隐藏外壳开关，移除外壳，去掉间距
                 toggleEls.forEach(el => el.style.display = 'none');
                 deviceFrame.className = '';
                 deviceFrame.style.cssText = 'display:contents;';
+                // device-screen 也需要去掉圆角和外壳样式
+                const deviceScreen = deviceFrame.querySelector('.device-screen');
+                if (deviceScreen) {
+                    deviceScreen.className = '';
+                    deviceScreen.style.cssText = 'width:100%;height:100%;border-radius:0;overflow:hidden;';
+                }
                 previewWrapper.className = 'bg-white overflow-hidden preview-frame-web';
                 previewWrapper.style.cssText = '';
                 if (notchEl) notchEl.style.display = 'none';
                 if (statusBarEl) statusBarEl.style.display = 'none';
                 if (homeBarEl) homeBarEl.style.display = 'none';
                 injectHideScrollbar(false);
+                // Web 模式去掉预览容器的内边距，让页面贴边显示
+                const container = $('previewContainer');
+                if (container) {
+                    container.style.padding = '0';
+                    container.classList.add('web-mode');
+                }
             }
         }
 
