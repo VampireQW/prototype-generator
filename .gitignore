@@ -45,3 +45,8 @@ Thumbs.db
 
 # Agent 工作流（个人配置）
 .agent/
+
+# 编译输出
+dist/
+build/
+*.spec
