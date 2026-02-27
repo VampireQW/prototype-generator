@@ -1130,24 +1130,43 @@
 
     <!-- 主内容区 -->
     <div class="flex-1 flex overflow-hidden">
-        <!-- 左侧边栏 (研发模式) -->
-        <aside id="devSidebar" class="w-64 bg-white border-r border-gray-200 flex-col hidden">
-            <div class="p-4 border-b border-gray-100">
-                <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">页面导航</h3>
+        <!-- 左侧边栏 (编辑/研发模式) -->
+        <aside id="devSidebar" class="bg-white border-r border-gray-200 flex-col hidden relative"
+            style="transition: width 0.2s ease;">
+            <!-- 展开/收起按钮 -->
+            <button id="devSidebarToggle" onclick="toggleDevSidebar()"
+                class="absolute top-1/2 right-0 w-4 h-12 bg-gray-400 hover:bg-gray-500 text-white rounded-r-md flex items-center justify-center cursor-pointer z-20 shadow-sm"
+                style="transform: translateX(100%) translateY(-50%);">
+                <i class="fas fa-chevron-right" style="font-size: 9px;"></i>
+            </button>
+
+            <!-- 收起时的竖向标签 -->
+            <div id="devSidebarCollapsedLabel"
+                class="flex-1 flex items-center justify-center cursor-pointer hover:bg-gray-50"
+                onclick="toggleDevSidebar()" style="width: 28px;">
+                <span class="text-gray-500 text-xs font-medium"
+                    style="writing-mode: vertical-lr; transform: rotate(180deg);">页面</span>
             </div>
 
-            <!-- 流程图入口 -->
-            <div id="flowchartEntry"
-                class="p-3 border-b border-gray-100 cursor-pointer hover:bg-indigo-50 transition-colors">
-                <div class="flex items-center gap-3 text-indigo-600">
-                    <i class="fas fa-project-diagram"></i>
-                    <span class="font-medium">页面流程图</span>
+            <!-- 展开时的内容 -->
+            <div id="devSidebarContent" class="flex-col hidden overflow-hidden" style="width: 256px;">
+                <div class="p-4 border-b border-gray-100">
+                    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">页面导航</h3>
                 </div>
-            </div>
 
-            <!-- 页面列表 -->
-            <div id="pageList" class="flex-1 overflow-y-auto scrollbar-thin">
-                <div class="p-4 text-center text-gray-400 text-sm">加载中...</div>
+                <!-- 流程图入口 -->
+                <div id="flowchartEntry"
+                    class="p-3 border-b border-gray-100 cursor-pointer hover:bg-indigo-50 transition-colors">
+                    <div class="flex items-center gap-3 text-indigo-600">
+                        <i class="fas fa-project-diagram"></i>
+                        <span class="font-medium">页面流程图</span>
+                    </div>
+                </div>
+
+                <!-- 页面列表 -->
+                <div id="pageList" class="flex-1 overflow-y-auto scrollbar-thin">
+                    <div class="p-4 text-center text-gray-400 text-sm">加载中...</div>
+                </div>
             </div>
         </aside>
 
@@ -1217,9 +1236,9 @@
             class="prd-sidebar collapsed hidden-mode bg-white border-l border-gray-200 flex flex-col">
             <!-- 展开/收起按钮 - 固定在侧边栏内部左边缘 -->
             <button id="prdToggle"
-                class="absolute left-0 top-1/2 -translate-y-1/2 w-6 h-20 bg-indigo-600 hover:bg-indigo-700 text-white rounded-l-lg flex items-center justify-center cursor-pointer z-20 shadow-lg"
+                class="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-l-md flex items-center justify-center cursor-pointer z-20 shadow-sm"
                 style="transform: translateX(-100%) translateY(-50%);">
-                <i class="fas fa-chevron-left text-xs"></i>
+                <i class="fas fa-chevron-left" style="font-size: 9px;"></i>
             </button>
 
             <!-- 收起时的标签 -->
@@ -1739,6 +1758,27 @@
             }
         }
 
+        // ==================== 左侧边栏 展开/收起 ====================
+        let devSidebarExpanded = false;
+        function toggleDevSidebar() {
+            devSidebarExpanded = !devSidebarExpanded;
+            const content = $('devSidebarContent');
+            const collapsedLabel = $('devSidebarCollapsedLabel');
+            const toggleBtn = $('devSidebarToggle');
+
+            if (devSidebarExpanded) {
+                collapsedLabel.classList.add('hidden');
+                content.classList.remove('hidden');
+                content.classList.add('flex');
+                toggleBtn.innerHTML = '<i class="fas fa-chevron-left" style="font-size: 9px;"></i>';
+            } else {
+                collapsedLabel.classList.remove('hidden');
+                content.classList.add('hidden');
+                content.classList.remove('flex');
+                toggleBtn.innerHTML = '<i class="fas fa-chevron-right" style="font-size: 9px;"></i>';
+            }
+        }
+
         // ==================== PRD 侧边栏 ====================
         function togglePrdSidebar() {
             prdExpanded = !prdExpanded;
@@ -1748,7 +1788,7 @@
                 prdCollapsedLabel.classList.add('hidden');
                 prdContentEl.classList.remove('hidden');
                 prdContentEl.classList.add('flex');
-                prdToggle.innerHTML = '<i class="fas fa-chevron-right text-xs"></i>';
+                prdToggle.innerHTML = '<i class="fas fa-chevron-right" style="font-size: 9px;"></i>';
                 // 加载当前页面的 PRD
                 loadPrd(currentPage);
             } else {
@@ -1757,7 +1797,7 @@
                 prdCollapsedLabel.classList.remove('hidden');
                 prdContentEl.classList.add('hidden');
                 prdContentEl.classList.remove('flex');
-                prdToggle.innerHTML = '<i class="fas fa-chevron-left text-xs"></i>';
+                prdToggle.innerHTML = '<i class="fas fa-chevron-left" style="font-size: 9px;"></i>';
             }
         }
 
@@ -1798,7 +1838,7 @@
                 const res = await fetch(`/api/prd/load?projectId=${encodeURIComponent(projectId)}&pageName=${encodeURIComponent(pageName)}`);
                 const data = await res.json();
                 prdTextarea.value = data.content || '';
-                prdPageName.textContent = pageName;
+                if (prdPageName) prdPageName.textContent = pageName;
                 prdContent[pageName] = data.content || '';
                 updatePrdPreview();
                 $('saveStatus').textContent = data.content ? '已加载' : '新文档';
@@ -1894,8 +1934,18 @@
                 // 编辑模式：隐藏 header，显示悬浮工具栏（统一交互）
                 mainHeader.style.display = 'none';
                 previewToolbar.style.display = 'block';
-                devSidebar.classList.add('hidden');
-                devSidebar.classList.remove('flex');
+                // 编辑模式也显示左侧边栏（默认收起），便于切换页面和对应 PRD
+                devSidebar.classList.remove('hidden');
+                devSidebar.classList.add('flex');
+                // 确保左侧边栏保持当前状态（默认收起）
+                if (!devSidebarExpanded) {
+                    $('devSidebarCollapsedLabel').classList.remove('hidden');
+                    $('devSidebarContent').classList.add('hidden');
+                    $('devSidebarContent').classList.remove('flex');
+                }
+                // 编辑模式隐藏流程图入口（仅研发模式使用）
+                const flowchartEntryEdit = $('flowchartEntry');
+                if (flowchartEntryEdit) flowchartEntryEdit.style.display = 'none';
                 prdSidebar.classList.remove('hidden-mode');
                 $('prdTabs').classList.remove('hidden');
                 flowchartView.classList.add('hidden');
@@ -1913,6 +1963,15 @@
                 previewToolbar.style.display = 'block';
                 devSidebar.classList.remove('hidden');
                 devSidebar.classList.add('flex');
+                // 确保左侧边栏保持当前状态（默认收起）
+                if (!devSidebarExpanded) {
+                    $('devSidebarCollapsedLabel').classList.remove('hidden');
+                    $('devSidebarContent').classList.add('hidden');
+                    $('devSidebarContent').classList.remove('flex');
+                }
+                // 研发模式显示流程图入口
+                const flowchartEntryDev = $('flowchartEntry');
+                if (flowchartEntryDev) flowchartEntryDev.style.display = '';
                 prdSidebar.classList.remove('hidden-mode');
                 $('prdTabs').classList.add('hidden');
                 prdTextarea.disabled = true;
@@ -2001,7 +2060,9 @@
                     window.addEventListener('message', function(event) {
                         if (event.data && event.data.type === 'navigateTo') {
                             const pageName = event.data.page;
-                            // 尝试修改 Vue 的 currentPage
+                            const routePath = event.data.routePath;
+                            
+                            // 方式1: Vue currentPage ref
                             if (typeof currentPage !== 'undefined') {
                                 if (currentPage.value !== undefined) {
                                     currentPage.value = pageName;
@@ -2009,18 +2070,58 @@
                                     currentPage = pageName;
                                 }
                             }
+                            
+                            // 方式2: Vue Router
+                            if (routePath && window.__vueRouter__) {
+                                window.__vueRouter__.push(routePath);
+                            } else if (routePath) {
+                                // 直接修改 hash（适用于 createWebHashHistory）
+                                window.location.hash = '#' + routePath;
+                            }
+                            
                             // 通知父窗口页面已切换
                             window.parent.postMessage({ type: 'pageChange', page: pageName }, '*');
                         }
                     });
                     
+                    // 尝试暴露 Vue Router 到 window
+                    (function() {
+                        var checkRouter = setInterval(function() {
+                            // 搜索 Vue app 实例中的 router
+                            var appEl = document.getElementById('app');
+                            if (appEl && appEl.__vue_app__) {
+                                var router = appEl.__vue_app__.config.globalProperties.$router;
+                                if (router) {
+                                    window.__vueRouter__ = router;
+                                    clearInterval(checkRouter);
+                                    console.log('[原型] Vue Router 已暴露到 window');
+                                    
+                                    // 监听路由变化并通知父窗口
+                                    router.afterEach(function(to) {
+                                        var pageName = to.path === '/' ? 'home' : to.path.replace(/^\//, '');
+                                        window.parent.postMessage({ type: 'pageChange', page: pageName }, '*');
+                                    });
+                                }
+                            }
+                        }, 200);
+                        // 5秒后停止检查
+                        setTimeout(function() { clearInterval(checkRouter); }, 5000);
+                    })();
+                    
                     // 监听 currentPage 变化并通知父窗口
                     if (typeof currentPage !== 'undefined') {
                         setInterval(function() {
-                            const page = currentPage.value || currentPage;
+                            var page = currentPage.value || currentPage;
                             window.parent.postMessage({ type: 'pageChange', page: page }, '*');
                         }, 500);
                     }
+                    
+                    // 监听 hash 变化（Vue Router hash 模式）
+                    window.addEventListener('hashchange', function() {
+                        var hash = window.location.hash.replace('#', '');
+                        var pageName = hash === '/' || hash === '' ? 'home' : hash.replace(/^\//, '');
+                        window.parent.postMessage({ type: 'pageChange', page: pageName }, '*');
+                    });
                 `;
                 iframeWindow.document.body.appendChild(script);
             } catch (e) {
@@ -2029,37 +2130,67 @@
         }
 
         function navigateToPage(pageName) {
+            // 切换前自动保存当前页面的 PRD（防止丢失编辑内容）
+            if (prdExpanded && prdTextarea.value && currentPage !== pageName) {
+                savePrd();
+            }
+
             // 隐藏流程图，显示预览
             flowchartView.classList.add('hidden');
             previewContainer.classList.remove('hidden');
 
             console.log('[Viewer] 正在切换到页面:', pageName);
 
+            // 查找页面信息（判断是 currentPage 类型还是 router 类型）
+            const pageInfo = pages.find(p => p.name === pageName);
+            const isRouterPage = pageInfo && pageInfo.type === 'router';
+            const routePath = pageInfo && pageInfo.routePath;
+
             // 尝试多种方式切换 iframe 内的页面
             try {
                 const iframeWindow = previewFrame.contentWindow;
 
-                console.log('[Viewer] iframe.currentPage:', iframeWindow.currentPage);
-
-                // 方法1: 直接修改 window.currentPage (Vue 3 ref)
-                if (iframeWindow.currentPage) {
-                    if (iframeWindow.currentPage.value !== undefined) {
-                        const oldPage = iframeWindow.currentPage.value;
-                        iframeWindow.currentPage.value = pageName;
-                        console.log('[Viewer] ✓ 页面已切换:', oldPage, '->', pageName);
-                    } else {
-                        console.log('[Viewer] currentPage 不是 ref:', typeof iframeWindow.currentPage);
+                if (isRouterPage && routePath) {
+                    // Vue Router 模式：直接修改 iframe 的 hash（同源可直接访问）
+                    console.log('[Viewer] 使用 Vue Router 导航:', routePath);
+                    try {
+                        // 方法1: 直接修改 hash（最可靠，适用于 createWebHashHistory）
+                        iframeWindow.location.hash = '#' + routePath;
+                        console.log('[Viewer] ✓ 已设置 hash:', '#' + routePath);
+                    } catch (hashErr) {
+                        console.log('[Viewer] 直接设置 hash 失败:', hashErr);
                     }
+                    // 方法2: 通过 postMessage 备用（可触发 __vueRouter__.push）
+                    iframeWindow.postMessage({
+                        type: 'navigateTo',
+                        page: pageName,
+                        routePath: routePath
+                    }, '*');
                 } else {
-                    console.log('[Viewer] ✗ iframe 中没有 currentPage');
+                    // currentPage 模式
+                    console.log('[Viewer] iframe.currentPage:', iframeWindow.currentPage);
+
+                    // 方法1: 直接修改 window.currentPage (Vue 3 ref)
+                    if (iframeWindow.currentPage) {
+                        if (iframeWindow.currentPage.value !== undefined) {
+                            const oldPage = iframeWindow.currentPage.value;
+                            iframeWindow.currentPage.value = pageName;
+                            console.log('[Viewer] ✓ 页面已切换:', oldPage, '->', pageName);
+                        } else {
+                            console.log('[Viewer] currentPage 不是 ref:', typeof iframeWindow.currentPage);
+                        }
+                    } else {
+                        console.log('[Viewer] ✗ iframe 中没有 currentPage');
+                    }
+
+                    // 方法2: 通过 postMessage
+                    iframeWindow.postMessage({
+                        type: 'navigateTo',
+                        page: pageName
+                    }, '*');
                 }
 
-                // 方法2: 通过 postMessage
-                iframeWindow.postMessage({
-                    type: 'navigateTo',
-                    page: pageName
-                }, '*');
-                console.log('[Viewer] 已发送 postMessage');
+                console.log('[Viewer] 已发送导航请求');
 
             } catch (e) {
                 console.log('[Viewer] 页面切换异常:', e);
@@ -2067,13 +2198,11 @@
 
             // 更新当前页面状态
             currentPage = pageName;
-            prdPageName.textContent = pageName;
+            if (prdPageName) prdPageName.textContent = pageName;
             renderPageList();
 
             // 加载对应 PRD
-            if (prdExpanded) {
-                loadPrd(pageName);
-            }
+            loadPrd(pageName);
         }
 
         // ==================== 流程图 ====================
@@ -2162,7 +2291,7 @@
                         return;
                     }
 
-                    // 尝试直接读取 currentPage 变量
+                    // 方式1: 直接读取 currentPage 变量
                     if (iframeWindow.currentPage) {
                         const detectedPage = iframeWindow.currentPage.value || iframeWindow.currentPage;
                         console.log('[页面检测] iframe页面:', detectedPage, ', viewer页面:', currentPage);
@@ -2170,8 +2299,18 @@
                             console.log('[页面检测] 发现变化:', currentPage, '->', detectedPage);
                             onPageChange(detectedPage);
                         }
-                    } else {
-                        console.log('[页面检测] iframeWindow.currentPage 不存在');
+                        return; // currentPage 模式，不需要检测 hash
+                    }
+
+                    // 方式2: 检测 Vue Router hash 变化
+                    const iframeHash = iframeWindow.location.hash;
+                    if (iframeHash) {
+                        const hashPath = iframeHash.replace('#', '');
+                        const detectedPage = (hashPath === '/' || hashPath === '') ? 'home' : hashPath.replace(/^\//, '');
+                        if (detectedPage && detectedPage !== currentPage) {
+                            console.log('[页面检测] Hash变化:', currentPage, '->', detectedPage);
+                            onPageChange(detectedPage);
+                        }
                     }
                 } catch (e) {
                     console.log('[页面检测] 错误:', e.message);
@@ -2204,14 +2343,17 @@
         function onPageChange(newPage) {
             if (newPage === currentPage) return;
 
+            // 切换前自动保存当前页面的 PRD
+            if (prdExpanded && prdTextarea.value) {
+                savePrd();
+            }
+
             console.log(`[Viewer] 页面切换: ${currentPage} -> ${newPage}`);
             currentPage = newPage;
             renderPageList();
 
             // 加载新页面的 PRD
-            if (prdExpanded) {
-                loadPrd(newPage);
-            }
+            loadPrd(newPage);
         }
 
         // ==================== 微调模式 (Inspector) ====================

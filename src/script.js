@@ -1421,6 +1421,10 @@ async function selectModel(id) {
             $('currentModelName').textContent = currentModel ? currentModel.name : id;
             renderModelDropdown();
             $('modelDropdown').classList.remove('show');
+            // 如果模型管理弹窗打开中，刷新列表以更新"当前"标签
+            if ($('modelManagerModal') && !$('modelManagerModal').classList.contains('hidden')) {
+                renderModelManagerList();
+            }
             showToast('已切换到: ' + (currentModel?.name || id));
         }
     } catch (e) {

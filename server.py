@@ -1916,8 +1916,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def extract_pages_from_html(self, html_content):
         """从 HTML 中提取页面列表"""
         pages = []
+        seen_names = set()
         
-        # 匹配 Vue currentPage 相关的页面定义
+        # ===== 模式A: Vue currentPage 相关的页面定义 =====
         # 模式1: v-if="currentPage === 'xxx'"
         pattern1 = r'v-if=["\']currentPage\s*===?\s*["\']([^"\']+)["\']'
         matches1 = re.findall(pattern1, html_content)
@@ -1926,19 +1927,39 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         pattern2 = r'currentPage(?:\.value)?\s*=\s*["\']([^"\']+)["\']'
         matches2 = re.findall(pattern2, html_content)
         
-        # 合并并去重
-        all_pages = list(set(matches1 + matches2))
-        
-        # 过滤掉非页面名称
-        for page in all_pages:
-            if page and len(page) < 50 and not page.startswith('!'):
+        for page in set(matches1 + matches2):
+            if page and len(page) < 50 and not page.startswith('!') and page not in seen_names:
+                seen_names.add(page)
                 pages.append({
                     'name': page,
-                    'label': self.get_page_label(page)
+                    'label': self.get_page_label(page),
+                    'type': 'currentPage'
                 })
         
-        # 按名称排序
-        pages.sort(key=lambda x: x['name'])
+        # ===== 模式B: Vue Router 路由定义 =====
+        # 匹配 { path: '/xxx', component: YyyPage } 模式
+        router_pattern = r'\{\s*path:\s*["\'](/[^"\']*)["\']'
+        router_matches = re.findall(router_pattern, html_content)
+        
+        if router_matches and not pages:
+            # 仅当没有 currentPage 模式时才使用 Router 模式（避免重复）
+            for route_path in router_matches:
+                # 将路径转换为页面名称: '/scan-result' -> 'scan-result', '/' -> 'home'
+                page_name = route_path.strip('/')
+                if not page_name:
+                    page_name = 'home'
+                
+                if page_name and len(page_name) < 50 and page_name not in seen_names:
+                    seen_names.add(page_name)
+                    pages.append({
+                        'name': page_name,
+                        'label': self.get_page_label(page_name),
+                        'type': 'router',
+                        'routePath': route_path
+                    })
+        
+        # 按名称排序（home 排在最前面）
+        pages.sort(key=lambda x: (0 if x['name'] == 'home' else 1, x['name']))
         
         return pages
     
@@ -1947,18 +1968,31 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         label_map = {
             'home': '首页',
             'scan': '扫描页',
+            'scan-result': '扫描结果',
             'result': '结果页',
             'analysis': '解析页',
             'aiTutor': 'AI讲题',
+            'ai-explain': 'AI讲解',
+            'ai-qa': 'AI答疑',
             'wrongBookHome': '错题本首页',
             'wrongBookList': '错题列表',
             'wrongBookDetail': '错题详情',
+            'mistakes': '错题本',
+            'mistakes-list': '错题列表',
             'login': '登录',
             'register': '注册',
             'profile': '个人中心',
             'settings': '设置',
             'detail': '详情页',
             'list': '列表页',
+            'learning-report': '学情报告',
+            'homework-list': '作业列表',
+            'homework-report': '作业报告',
+            'online-answer': '在线作答',
+            'photo-correction': '拍照批改',
+            'writing-guidance': '写作指导',
+            'english-translation': '英文翻译',
+            'speaking-practice': '口语练习',
         }
         return label_map.get(page_name, page_name)
     
