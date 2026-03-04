@@ -181,6 +181,10 @@ function renderProjectList() {
                         class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-green-600 rounded hover:bg-green-50 transition-colors" title="记录">
                     <i class="fas fa-history"></i>
                 </button>
+                <button onclick="openExportModal('${p.id}', '${safeName}')" 
+                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-orange-500 rounded hover:bg-orange-50 transition-colors" title="导出 & 分享">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
                 <button onclick="deleteProject('${p.id}', '${safeName}')" 
                         class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-red-500 rounded hover:bg-red-50 transition-colors" title="删除">
                     <i class="fas fa-trash-alt"></i>
@@ -1603,3 +1607,298 @@ function resetModelForm() {
     }
 }
 
+
+// ==================== 导出 & 分享弹窗 ====================
+
+let currentExportProjectId = '';
+let currentExportProjectName = '';
+let currentExportMode = 'preview';
+
+async function openExportModal(id, name) {
+    currentExportProjectId = id;
+    currentExportProjectName = name;
+    currentExportMode = 'preview';
+
+    // 重置 UI
+    selectExportMode('preview');
+    $('exportModalProjectName').textContent = name;
+    $('githubPublishedInfo').classList.add('hidden');
+    $('githubNotConfigured').classList.add('hidden');
+    $('githubConfigured').classList.add('hidden');
+    if ($('githubUnpublishBtn')) $('githubUnpublishBtn').classList.add('hidden');
+
+    // 显示弹窗
+    $('exportModal').classList.remove('hidden');
+    $('exportModal').classList.add('flex');
+
+    // 加载 GitHub 配置状态
+    await loadGithubStatus(id);
+}
+
+function closeExportModal() {
+    $('exportModal').classList.add('hidden');
+    $('exportModal').classList.remove('flex');
+}
+
+function selectExportMode(mode) {
+    currentExportMode = mode;
+    ['preview', 'dev', 'embedded'].forEach(m => {
+        const btn = $(`exportMode${m.charAt(0).toUpperCase() + m.slice(1)}`);
+        if (btn) btn.classList.toggle('active', m === mode);
+    });
+}
+
+async function doLocalExport() {
+    const btn = $('localExportBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 导出中...';
+    btn.disabled = true;
+
+    try {
+        const resp = await fetch('/api/export', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId: currentExportProjectId, mode: currentExportMode })
+        });
+        const data = await resp.json();
+        if (data.success) {
+            showToast(`✅ 导出完成，已打开文件夹`);
+        } else {
+            showToast('导出失败: ' + (data.error || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('导出失败: ' + e.message, 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function loadGithubStatus(projectId) {
+    try {
+        const resp = await fetch('/api/github/config');
+        const data = await resp.json();
+
+        if (!data.success || !data.hasToken || !data.username) {
+            $('githubNotConfigured').classList.remove('hidden');
+            return;
+        }
+
+        $('githubConfigured').classList.remove('hidden');
+        $('githubRepoDisplay').textContent = `${data.username}/${data.repo}`;
+
+        // 检查项目是否已发布（从 record.json 读取）
+        try {
+            const recResp = await fetch(`/projects/${projectId}/record.json?t=${Date.now()}`);
+            if (recResp.ok) {
+                const record = await recResp.json();
+                if (record.github_url) {
+                    $('githubPublishedUrl').value = record.github_url;
+                    $('githubPublishedAt').textContent = record.github_published_at || '';
+                    $('githubPublishedInfo').classList.remove('hidden');
+                    $('githubPublishBtnText').textContent = '重新发布 / 更新';
+                    if ($('githubUnpublishBtn')) $('githubUnpublishBtn').classList.remove('hidden');
+
+                    // 如果有记录的模式，尝试恢复选中状态
+                    if (record.github_publish_mode) {
+                        const radio = document.querySelector(`input[name="githubPublishMode"][value="${record.github_publish_mode}"]`);
+                        if (radio) radio.checked = true;
+                    }
+                }
+            }
+        } catch (_) { }
+
+    } catch (e) {
+        $('githubNotConfigured').classList.remove('hidden');
+    }
+}
+
+async function doGitHubPublish() {
+    const btn = $('githubPublishBtn');
+    const btnText = $('githubPublishBtnText');
+    const originalText = btnText ? btnText.textContent : '发布到 GitHub Pages';
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>发布中，请稍候...</span>';
+
+    let finalText = originalText;
+
+    const modeRadio = document.querySelector('input[name="githubPublishMode"]:checked');
+    const publishMode = modeRadio ? modeRadio.value : 'preview';
+
+    try {
+        const resp = await fetch('/api/github/publish', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId: currentExportProjectId, mode: publishMode })
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            $('githubPublishedUrl').value = data.url;
+            $('githubPublishedAt').textContent = '刚刚';
+            $('githubPublishedInfo').classList.remove('hidden');
+            finalText = '重新发布 / 更新';
+            if ($('githubUnpublishBtn')) $('githubUnpublishBtn').classList.remove('hidden');
+            showToast('🚀 发布成功！约 1-3 分钟后链接生效');
+        } else {
+            showToast('发布失败: ' + (data.error || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('发布失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fab fa-github"></i> <span id="githubPublishBtnText">${finalText}</span>`;
+    }
+}
+
+async function doGitHubUnpublish() {
+    if (!confirm('确定要取消发布此原型并从 GitHub Pages 删除相关文件吗？此操作不可恢复。')) return;
+
+    const btn = $('githubUnpublishBtn');
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 取消中...';
+
+    try {
+        const resp = await fetch('/api/github/unpublish', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ projectId: currentExportProjectId })
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            showToast('✅ 已取消发布并删除 GitHub 上的文件');
+            // 更新 UI 状态
+            $('githubPublishedInfo').classList.add('hidden');
+            $('githubPublishBtnText').textContent = '发布到 GitHub';
+            btn.classList.add('hidden');
+        } else {
+            showToast('取消发布失败: ' + (data.error || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('请求失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalText;
+    }
+}
+
+
+function copyGithubUrl() {
+    const url = $('githubPublishedUrl').value;
+    if (!url) return;
+    navigator.clipboard.writeText(url).then(() => {
+        showToast('✅ 链接已复制到剪贴板');
+    }).catch(() => {
+        $('githubPublishedUrl').select();
+        document.execCommand('copy');
+        showToast('✅ 链接已复制');
+    });
+}
+
+function openGithubUrl() {
+    const url = $('githubPublishedUrl').value;
+    if (url) window.open(url, '_blank');
+}
+
+// ==================== GitHub 配置引导 ====================
+
+function openGithubSetup() {
+    // 预加载已有配置
+    fetch('/api/github/config').then(r => r.json()).then(data => {
+        if (data.success) {
+            $('setupUsername').value = data.username || '';
+            $('setupRepo').value = data.repo || 'my-prototypes';
+            $('setupToken').value = ''; // Token 不回显，保持空
+            if (data.tokenMasked) {
+                $('setupToken').placeholder = data.tokenMasked + ' （不修改则留空）';
+            }
+        }
+    }).catch(() => { });
+
+    $('githubTestResult').classList.add('hidden');
+    $('githubSetupModal').classList.remove('hidden');
+    $('githubSetupModal').classList.add('flex');
+}
+
+function closeGithubSetup() {
+    $('githubSetupModal').classList.add('hidden');
+    $('githubSetupModal').classList.remove('flex');
+}
+
+async function testGithubConnection() {
+    const token = $('setupToken').value.trim();
+    const btn = $('testConnBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 验证中...';
+
+    try {
+        const resp = await fetch('/api/github/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token })
+        });
+        const data = await resp.json();
+        const resultEl = $('githubTestResult');
+        resultEl.classList.remove('hidden', 'bg-green-50', 'text-green-700', 'bg-red-50', 'text-red-700');
+
+        if (data.success) {
+            resultEl.classList.add('bg-green-50', 'text-green-700');
+            resultEl.textContent = data.message;
+            // 自动填充用户名
+            if (data.username && !$('setupUsername').value) {
+                $('setupUsername').value = data.username;
+            }
+        } else {
+            resultEl.classList.add('bg-red-50', 'text-red-700');
+            resultEl.textContent = data.message || data.error || '验证失败';
+        }
+    } catch (e) {
+        const resultEl = $('githubTestResult');
+        resultEl.classList.remove('hidden');
+        resultEl.classList.add('bg-red-50', 'text-red-700');
+        resultEl.textContent = '连接失败: ' + e.message;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-plug"></i> 测试连接';
+    }
+}
+
+async function saveGithubConfig() {
+    const token = $('setupToken').value.trim();
+    const username = $('setupUsername').value.trim();
+    const repo = ($('setupRepo').value.trim()) || 'my-prototypes';
+
+    if (!username) {
+        showToast('请填写 GitHub 用户名', 'error');
+        return;
+    }
+
+    const btn = $('saveGithubBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 保存中...';
+
+    try {
+        const resp = await fetch('/api/github/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, username, repo })
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            showToast('✅ GitHub 配置已保存');
+            closeGithubSetup();
+            // 刷新导出弹窗的 GitHub 状态
+            await loadGithubStatus(currentExportProjectId);
+        } else {
+            showToast('保存失败: ' + (data.error || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('保存失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-save"></i> 保存配置';
+    }
+}

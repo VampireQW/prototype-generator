@@ -145,6 +145,84 @@
             color: #4f46e5;
             font-weight: 500;
         }
+
+        /* 导出弹窗样式 */
+        .export-mode-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            padding: 14px 10px;
+            border-radius: 10px;
+            border: 2px solid #e5e7eb;
+            background: #fff;
+            cursor: pointer;
+            transition: all 0.15s;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .export-mode-btn:hover {
+            border-color: #a5b4fc;
+            background: #fafafa;
+        }
+
+        .export-mode-btn.active {
+            border-color: #6366f1;
+            background: #eef2ff;
+        }
+
+        .export-mode-btn .icon {
+            font-size: 20px;
+        }
+
+        .export-mode-btn .label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .export-mode-btn .desc {
+            font-size: 11px;
+            color: #9ca3af;
+            text-align: center;
+            line-height: 1.3;
+        }
+
+        .export-mode-btn.active .label {
+            color: #4f46e5;
+        }
+
+        .export-mode-btn.active .desc {
+            color: #818cf8;
+        }
+
+        .github-setup-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 10px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .github-setup-step:last-child {
+            border-bottom: none;
+        }
+
+        .github-setup-step .step-num {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: #6366f1;
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            margin-top: 1px;
+        }
     </style>
 </head>
 
@@ -304,7 +382,7 @@
 
     <!-- Toast提示 -->
     <div id="toast"
-        class="fixed bottom-6 right-6 bg-gray-900 text-white px-6 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-3 z-50">
+        class="fixed bottom-6 right-6 bg-gray-900 text-white px-6 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-3 z-[9999]">
         <i id="toastIcon" class="fas fa-check-circle text-green-400"></i>
         <span id="toastMessage">操作成功</span>
     </div>
@@ -473,6 +551,237 @@
                             </button>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导出 & 分享弹窗 -->
+    <div id="exportModal" class="fixed inset-0 z-50 hidden items-center justify-center">
+        <div id="exportModalOverlay" class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm"
+            onclick="closeExportModal()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <!-- 头部 -->
+            <div
+                class="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-purple-50">
+                <div>
+                    <h3 class="font-bold text-lg text-gray-900 flex items-center gap-2">
+                        <i class="fas fa-paper-plane text-indigo-500"></i> 导出 & 分享
+                    </h3>
+                    <p id="exportModalProjectName" class="text-sm text-gray-500 mt-0.5"></p>
+                </div>
+                <button onclick="closeExportModal()"
+                    class="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-white/60 transition">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="p-5 space-y-5">
+                <!-- 本地导出区 -->
+                <div>
+                    <h4 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                        <i class="fas fa-download text-blue-500"></i> 本地导出
+                    </h4>
+                    <div class="flex gap-2 mb-3">
+                        <div class="export-mode-btn active" id="exportModePreview"
+                            onclick="selectExportMode('preview')">
+                            <span class="icon">🖼️</span>
+                            <span class="label">纯净版</span>
+                            <span class="desc">直接在浏览器<br>打开查看</span>
+                        </div>
+                        <div class="export-mode-btn" id="exportModeDev" onclick="selectExportMode('dev')">
+                            <span class="icon">🔬</span>
+                            <span class="label">研发版</span>
+                            <span class="desc">含PRD文档<br>和页面流程图</span>
+                        </div>
+                        <div class="export-mode-btn" id="exportModeEmbedded" onclick="selectExportMode('embedded')">
+                            <span class="icon">📦</span>
+                            <span class="label">内嵌版</span>
+                            <span class="desc">单文件分享<br>图片内嵌其中</span>
+                        </div>
+                    </div>
+                    <button onclick="doLocalExport()" id="localExportBtn"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
+                        <i class="fas fa-folder-open"></i> 导出到本地文件夹
+                    </button>
+                </div>
+
+                <div class="border-t border-gray-100"></div>
+
+                <!-- GitHub Pages 发布区 -->
+                <div>
+                    <h4 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                        <i class="fab fa-github text-gray-800"></i> 在线分享 (GitHub Pages)
+                        <span class="text-xs text-gray-400 font-normal">发布后可分享链接给任何人</span>
+                    </h4>
+
+                    <!-- 未配置 GitHub 时显示 -->
+                    <div id="githubNotConfigured" class="hidden">
+                        <div
+                            class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 flex items-start gap-2 text-sm text-amber-700">
+                            <i class="fas fa-exclamation-triangle mt-0.5 flex-shrink-0"></i>
+                            <span>需要先配置 GitHub Token 才能使用发布功能</span>
+                        </div>
+                        <button onclick="openGithubSetup()"
+                            class="w-full border-2 border-dashed border-indigo-300 text-indigo-600 hover:border-indigo-500 hover:bg-indigo-50 py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
+                            <i class="fas fa-cog"></i> 配置 GitHub（一次配置永久使用）
+                        </button>
+                    </div>
+
+                    <!-- 已配置 GitHub 时显示 -->
+                    <div id="githubConfigured" class="hidden space-y-3">
+                        <div id="githubConfigInfo"
+                            class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
+                            <span class="text-gray-600 flex items-center gap-1.5">
+                                <i class="fab fa-github text-gray-500"></i>
+                                <span id="githubRepoDisplay" class="font-mono text-xs"></span>
+                            </span>
+                            <button onclick="openGithubSetup()"
+                                class="text-xs text-indigo-500 hover:text-indigo-700 transition">修改配置</button>
+                        </div>
+
+                        <!-- 发布链接（已发布时显示） -->
+                        <div id="githubPublishedInfo" class="hidden bg-green-50 border border-green-200 rounded-lg p-3">
+                            <div class="flex items-center gap-2 mb-2">
+                                <i class="fas fa-check-circle text-green-500"></i>
+                                <span class="text-sm font-medium text-green-700">已发布</span>
+                                <span class="text-xs text-green-500" id="githubPublishedAt"></span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <input id="githubPublishedUrl" type="text" readonly
+                                    class="flex-1 text-xs bg-white border border-green-200 rounded px-2 py-1.5 text-gray-700 font-mono truncate cursor-pointer"
+                                    onclick="this.select()">
+                                <button onclick="copyGithubUrl()"
+                                    class="flex-shrink-0 px-2 py-1.5 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition"
+                                    title="复制链接">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                                <button onclick="openGithubUrl()"
+                                    class="flex-shrink-0 px-2 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 transition"
+                                    title="在浏览器打开">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 发布模式选择 -->
+                        <div class="mb-3">
+                            <label class="block text-xs font-medium text-gray-700 mb-1.5">发布模式</label>
+                            <div class="flex bg-gray-100 rounded-lg p-1 gap-1">
+                                <label class="flex-1 text-center cursor-pointer">
+                                    <input type="radio" name="githubPublishMode" value="preview" class="peer sr-only"
+                                        checked>
+                                    <div
+                                        class="py-1.5 text-xs font-medium text-gray-500 rounded-md peer-checked:bg-white peer-checked:text-indigo-600 peer-checked:shadow-sm transition">
+                                        纯预览版</div>
+                                </label>
+                                <label class="flex-1 text-center cursor-pointer">
+                                    <input type="radio" name="githubPublishMode" value="dev" class="peer sr-only">
+                                    <div
+                                        class="py-1.5 text-xs font-medium text-gray-500 rounded-md peer-checked:bg-white peer-checked:text-indigo-600 peer-checked:shadow-sm transition">
+                                        研发版</div>
+                                </label>
+                                <label class="flex-1 text-center cursor-pointer">
+                                    <input type="radio" name="githubPublishMode" value="embedded" class="peer sr-only">
+                                    <div
+                                        class="py-1.5 text-xs font-medium text-gray-500 rounded-md peer-checked:bg-white peer-checked:text-indigo-600 peer-checked:shadow-sm transition">
+                                        内嵌版</div>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-2">
+                            <button onclick="doGitHubPublish()" id="githubPublishBtn"
+                                class="flex-1 bg-gray-900 hover:bg-gray-700 text-white py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
+                                <i class="fab fa-github"></i> <span id="githubPublishBtnText">发布到 GitHub</span>
+                            </button>
+                            <button onclick="doGitHubUnpublish()" id="githubUnpublishBtn"
+                                class="hidden px-4 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2"
+                                title="取消发布并删除 GitHub 上的文件">
+                                <i class="fas fa-trash-alt"></i> <span class="hidden sm:inline">取消发布</span>
+                            </button>
+                        </div>
+                        <p class="text-xs text-center text-gray-400 mt-2">发布后约 1-3 分钟链接生效 · 更新内容可重新发布</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GitHub 配置引导弹窗 -->
+    <div id="githubSetupModal" class="fixed inset-0 z-[60] hidden items-center justify-center">
+        <div class="absolute inset-0 bg-gray-900/70 backdrop-blur-sm" onclick="closeGithubSetup()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <!-- 头部 -->
+            <div
+                class="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-gray-900 to-gray-800">
+                <h3 class="font-bold text-white flex items-center gap-2">
+                    <i class="fab fa-github"></i> 配置 GitHub Pages 发布
+                </h3>
+                <button onclick="closeGithubSetup()" class="text-gray-400 hover:text-white p-1 transition">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+
+            <div class="p-5">
+                <!-- 步骤 1 -->
+                <div class="github-setup-step">
+                    <div class="step-num">1</div>
+                    <div class="flex-1">
+                        <p class="text-sm font-semibold text-gray-800 mb-1">创建 Personal Access Token</p>
+                        <ol class="text-xs text-gray-500 space-y-0.5 list-none">
+                            <li>① 打开 GitHub Settings → Developer settings → Tokens (classic)</li>
+                            <li>② Token名称：填 <code class="bg-gray-100 px-1 rounded">prototype-publisher</code></li>
+                            <li>③ 权限勾选：<strong>repo</strong>（私有仓库）或 <strong>public_repo</strong>（公开仓库）</li>
+                            <li>④ 点击「Generate token」并复制</li>
+                        </ol>
+                        <button onclick="window.open('https://github.com/settings/tokens/new','_blank')"
+                            class="mt-2 text-xs px-3 py-1.5 bg-gray-900 text-white rounded-lg hover:bg-gray-700 transition flex items-center gap-1.5 w-fit">
+                            <i class="fab fa-github"></i> 打开 GitHub Token 设置页
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 步骤 2 -->
+                <div class="github-setup-step">
+                    <div class="step-num">2</div>
+                    <div class="flex-1">
+                        <p class="text-sm font-semibold text-gray-800 mb-2">填写配置信息</p>
+                        <div class="space-y-2">
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block">GitHub 用户名 <span
+                                        class="text-red-400">*</span></label>
+                                <input type="text" id="setupUsername" placeholder="如: johndoe"
+                                    class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block">仓库名称（不存在会自动创建）</label>
+                                <input type="text" id="setupRepo" placeholder="my-prototypes" value="my-prototypes"
+                                    class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500 mb-1 block">Personal Access Token <span
+                                        class="text-red-400">*</span></label>
+                                <input type="password" id="setupToken" placeholder="ghp_..."
+                                    class="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 测试结果 -->
+                <div id="githubTestResult" class="hidden text-sm px-3 py-2 rounded-lg mb-3"></div>
+
+                <!-- 操作按钮 -->
+                <div class="flex gap-2 mt-4">
+                    <button onclick="testGithubConnection()" id="testConnBtn"
+                        class="flex-1 border border-gray-200 text-gray-700 hover:bg-gray-50 py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-1.5">
+                        <i class="fas fa-plug"></i> 测试连接
+                    </button>
+                    <button onclick="saveGithubConfig()" id="saveGithubBtn"
+                        class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm font-medium transition flex items-center justify-center gap-1.5">
+                        <i class="fas fa-save"></i> 保存配置
+                    </button>
                 </div>
             </div>
         </div>

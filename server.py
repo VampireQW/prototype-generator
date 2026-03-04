@@ -353,6 +353,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_generation_status(query)
         elif path == '/api/models':
             self.handle_get_models()
+        elif path == '/api/github/config':
+            self.handle_github_config_get()
         elif path == '/data/projects.json':
             # 拦截项目列表请求，确保返回最新数据
             self.load_projects()
@@ -392,6 +394,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_model_save()
         elif self.path == '/api/models/delete':
             self.handle_model_delete()
+        elif self.path == '/api/export':
+            self.handle_export()
+        elif self.path == '/api/github/config':
+            self.handle_github_config_save()
+        elif self.path == '/api/github/test':
+            self.handle_github_test()
+        elif self.path == '/api/github/publish':
+            self.handle_github_publish()
+        elif self.path == '/api/github/unpublish':
+            self.handle_github_unpublish()
         else:
             self.send_error(404, "Not Found")
 
@@ -2281,6 +2293,636 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             import traceback
             traceback.print_exc()
             self.send_error_response(str(e))
+
+    # ==================== GitHub 列表页生成 ====================
+
+    def generate_index_html(self, manifest, username, repo):
+        """生成 projects/index.html 列表页 HTML"""
+        mode_labels = {'preview': '纯净版', 'dev': '研发版', 'embedded': '内嵌版'}
+        mode_colors = {'preview': '#3b82f6', 'dev': '#8b5cf6', 'embedded': '#f59e0b'}
+
+        cards_html = ''
+        sorted_items = sorted(manifest, key=lambda x: x.get('publishedAt', ''), reverse=True)
+        for item in sorted_items:
+            name = item.get('name', '未命名项目')
+            url = item.get('url', '#')
+            published_at = item.get('publishedAt', '')[:10]
+            mode = item.get('mode', 'preview')
+            mode_label = mode_labels.get(mode, mode)
+            mode_color = mode_colors.get(mode, '#6b7280')
+            cards_html += f'''
+            <div class="card" onclick="window.open('{url}','_blank')">
+                <div class="card-header">
+                    <div class="project-icon">🎨</div>
+                </div>
+                <div class="card-body">
+                    <h3 class="project-name" title="{name}">{name}</h3>
+                    <div class="project-meta">
+                        <span class="mode-badge" style="background:{mode_color}20;color:{mode_color};border-color:{mode_color}40">{mode_label}</span>
+                        <span class="published-date">{published_at}</span>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <button class="btn-open" onclick="event.stopPropagation();window.open('{url}','_blank')">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                        打开
+                    </button>
+                    <button class="btn-copy" onclick="event.stopPropagation();copyLink('{url}',this)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+                        复制链接
+                    </button>
+                </div>
+            </div>'''
+
+        count = len(manifest)
+        pages_root = f'https://{username}.github.io/{repo}'
+        return f'''<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>原型作品库 · {username}</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f0f13;color:#e2e8f0;min-height:100vh}}
+  .header{{background:linear-gradient(135deg,#1e1b4b 0%,#312e81 50%,#1e1b4b 100%);padding:48px 24px 40px;text-align:center;border-bottom:1px solid #ffffff12}}
+  .header-icon{{font-size:40px;margin-bottom:12px}}
+  .header h1{{font-size:28px;font-weight:700;color:#fff;margin-bottom:6px;letter-spacing:-0.5px}}
+  .header p{{color:#a5b4fc;font-size:14px}}
+  .header .count{{display:inline-block;background:#4f46e5;color:#fff;font-size:12px;font-weight:600;padding:3px 10px;border-radius:20px;margin-top:10px}}
+  .container{{max-width:1100px;margin:0 auto;padding:32px 24px}}
+  .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:20px}}
+  .card{{background:#1a1a24;border:1px solid #ffffff0f;border-radius:16px;overflow:hidden;cursor:pointer;transition:all .2s;display:flex;flex-direction:column}}
+  .card:hover{{border-color:#6366f140;transform:translateY(-3px);box-shadow:0 12px 40px #6366f120}}
+  .card-header{{background:linear-gradient(135deg,#1e1b4b,#312e81);padding:28px 20px;display:flex;align-items:center;justify-content:center}}
+  .project-icon{{font-size:36px;filter:drop-shadow(0 4px 8px rgba(0,0,0,.3))}}
+  .card-body{{padding:16px 18px;flex:1}}
+  .project-name{{font-size:15px;font-weight:600;color:#f1f5f9;margin-bottom:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+  .project-meta{{display:flex;align-items:center;gap:8px}}
+  .mode-badge{{font-size:11px;font-weight:500;padding:2px 8px;border-radius:6px;border:1px solid;flex-shrink:0}}
+  .published-date{{font-size:12px;color:#64748b}}
+  .card-footer{{padding:12px 18px;border-top:1px solid #ffffff08;display:flex;gap:8px}}
+  .btn-open,.btn-copy{{flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;border-radius:8px;font-size:12px;font-weight:500;border:none;cursor:pointer;transition:all .15s}}
+  .btn-open{{background:#4f46e5;color:#fff}}.btn-open:hover{{background:#4338ca}}
+  .btn-copy{{background:#ffffff0a;color:#94a3b8;border:1px solid #ffffff12}}.btn-copy:hover{{background:#ffffff14;color:#fff}}
+  .btn-copy.copied{{background:#059669;color:#fff;border-color:#059669}}
+  .empty{{text-align:center;padding:80px 24px;color:#475569}}
+  .empty-icon{{font-size:48px;margin-bottom:16px}}
+  .footer{{text-align:center;padding:32px;color:#334155;font-size:12px;border-top:1px solid #ffffff08;margin-top:32px}}
+  .footer a{{color:#6366f1;text-decoration:none}}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="header-icon">🎨</div>
+  <h1>原型作品库</h1>
+  <p>{username} · {repo}</p>
+  <span class="count">共 {count} 个原型</span>
+</div>
+<div class="container">
+  {'<div class="grid">' + cards_html + '</div>' if manifest else '<div class="empty"><div class="empty-icon">📭</div><p>暂无已发布的原型</p></div>'}
+</div>
+<div class="footer">由 <a href="{pages_root}" target="_blank">AI 原型生成器</a> 发布 · GitHub Pages 托管</div>
+<script>
+function copyLink(url, btn) {{
+  navigator.clipboard.writeText(url).then(() => {{
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 12 4 10"/></svg> 已复制';
+    btn.classList.add('copied');
+    setTimeout(() => {{ btn.innerHTML = orig; btn.classList.remove('copied'); }}, 2000);
+  }});
+}}
+</script>
+</body>
+</html>'''
+
+    def update_github_listing(self, session, api_base, username, repo, default_branch,
+                              project_id, project_name, project_url, mode, remove=False):
+        """更新 GitHub 上的 projects/manifest.json 和 projects/index.html"""
+        manifest_api_url = f"{api_base}/repos/{username}/{repo}/contents/projects/manifest.json"
+
+        # 读取现有 manifest
+        existing = session.get(manifest_api_url, timeout=15)
+        manifest = []
+        manifest_sha = None
+        if existing.status_code == 200:
+            import base64 as b64
+            raw = b64.b64decode(existing.json().get('content', '')).decode('utf-8')
+            try:
+                manifest = json.loads(raw)
+            except Exception:
+                manifest = []
+            manifest_sha = existing.json().get('sha', '')
+
+        if remove:
+            # 移除项目
+            manifest = [m for m in manifest if m.get('id') != project_id]
+        else:
+            # 更新或添加项目
+            found = False
+            for m in manifest:
+                if m.get('id') == project_id:
+                    m['name'] = project_name
+                    m['url'] = project_url
+                    m['mode'] = mode
+                    m['publishedAt'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    found = True
+                    break
+            if not found:
+                manifest.append({
+                    'id': project_id,
+                    'name': project_name,
+                    'url': project_url,
+                    'mode': mode,
+                    'publishedAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                })
+
+        # 上传 manifest.json
+        manifest_b64 = base64.b64encode(json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8')).decode()
+        manifest_payload = {
+            'message': 'Update projects manifest',
+            'content': manifest_b64,
+            'branch': default_branch
+        }
+        if manifest_sha:
+            manifest_payload['sha'] = manifest_sha
+        session.put(manifest_api_url, json=manifest_payload, timeout=20)
+        print(f"[GitHub] manifest.json 已更新 ({len(manifest)} 个项目)")
+
+        # 生成并上传 projects/index.html
+        index_html = self.generate_index_html(manifest, username, repo)
+        index_api_url = f"{api_base}/repos/{username}/{repo}/contents/projects/index.html"
+        existing_index = session.get(index_api_url, timeout=10)
+        index_payload = {
+            'message': 'Update projects listing page',
+            'content': base64.b64encode(index_html.encode('utf-8')).decode(),
+            'branch': default_branch
+        }
+        if existing_index.status_code == 200:
+            index_payload['sha'] = existing_index.json().get('sha', '')
+        session.put(index_api_url, json=index_payload, timeout=30)
+        print(f"[GitHub] projects/index.html 已更新")
+
+    # ==================== 取消发布 API ====================
+
+    def handle_github_unpublish(self):
+        """取消发布：删除 GitHub 上的项目文件，更新列表页"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode('utf-8'))
+
+            project_id = data.get('projectId', '')
+            if not project_id:
+                self.send_error_response("缺少 projectId")
+                return
+
+            config = load_config()
+            gh = config.get('github', {})
+            token = gh.get('token', '')
+            username = gh.get('username', '')
+            repo = gh.get('repo', 'my-prototypes')
+
+            if not token or not username:
+                self.send_error_response("请先配置 GitHub Token")
+                return
+
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            retry_strategy = Retry(total=3, backoff_factor=1, connect=3, read=3,
+                                   status_forcelist=[500, 502, 503, 504],
+                                   allowed_methods=["GET", "PUT", "POST", "DELETE"])
+            session = requests.Session()
+            session.mount('https://', HTTPAdapter(max_retries=retry_strategy))
+            session.headers.update({
+                'Authorization': f'token {token}',
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+            })
+
+            api_base = 'https://api.github.com'
+
+            # 获取默认分支
+            repo_info = session.get(f"{api_base}/repos/{username}/{repo}", timeout=15).json()
+            default_branch = repo_info.get('default_branch', 'main')
+
+            # 列出 projects/{id}/ 下的所有文件并逐一删除
+            print(f"[GitHub] 取消发布: {project_id}")
+            folder_url = f"{api_base}/repos/{username}/{repo}/contents/projects/{project_id}"
+            files_resp = session.get(folder_url, timeout=15)
+            if files_resp.status_code == 200:
+                files = files_resp.json()
+                # 如果有子目录（如 images/），需要递归列出
+                all_files = []
+                for f in files:
+                    if f.get('type') == 'file':
+                        all_files.append(f)
+                    elif f.get('type') == 'dir':
+                        sub_resp = session.get(f['url'], timeout=15)
+                        if sub_resp.status_code == 200:
+                            all_files.extend([sf for sf in sub_resp.json() if sf.get('type') == 'file'])
+
+                for f in all_files:
+                    del_resp = session.delete(f['url'], json={
+                        'message': f'Remove prototype: {project_id}',
+                        'sha': f['sha'],
+                        'branch': default_branch
+                    }, timeout=20)
+                    if del_resp.status_code in (200, 201):
+                        print(f"[GitHub] 已删除: {f['path']}")
+                    else:
+                        print(f"[GitHub] 删除失败: {f['path']} ({del_resp.status_code})")
+
+            # 更新列表页（传 remove=True）
+            self.update_github_listing(
+                session, api_base, username, repo, default_branch,
+                project_id=project_id, project_name='', project_url='', mode='', remove=True
+            )
+
+            # 清除本地 record.json 中的 github_url
+            project_dir = os.path.join(PROJECTS_DIR, project_id)
+            record_path = os.path.join(project_dir, 'record.json')
+            if os.path.exists(record_path):
+                with open(record_path, 'r', encoding='utf-8') as f:
+                    record = json.load(f)
+                record.pop('github_url', None)
+                record.pop('github_published_at', None)
+                record.pop('github_mode', None)
+                with open(record_path, 'w', encoding='utf-8') as f:
+                    json.dump(record, f, ensure_ascii=False, indent=2)
+                print(f"[GitHub] 本地 record.json 已清除 github_url")
+
+            self.send_json_response({'success': True, 'message': '已取消发布，GitHub 文件已删除'})
+
+        except Exception as e:
+            print(f"[错误] 取消发布失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_error_response(f"取消发布失败: {str(e)}")
+
+    # ==================== 导出 API ====================
+
+    def handle_export(self):
+        """触发本地导出，支持三种模式: preview / embedded / dev"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode('utf-8'))
+
+            project_id = data.get('projectId', '')
+            mode = data.get('mode', 'preview')  # preview | embedded | dev
+
+            if not project_id:
+                self.send_error_response("缺少 projectId")
+                return
+
+            project_dir = os.path.join(PROJECTS_DIR, project_id)
+            if not os.path.exists(project_dir):
+                self.send_error_response(f"项目不存在: {project_id}")
+                return
+
+            print(f"[导出] 项目: {project_id}, 模式: {mode}")
+
+            # 动态导入 export_project 模块
+            import importlib.util
+            ep_path = os.path.join(get_base_path(), 'export_project.py')
+            spec = importlib.util.spec_from_file_location("export_project", ep_path)
+            ep = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(ep)
+
+            export_dir = ep.export_project(project_id, mode=mode)
+
+            # 自动打开导出目录（Windows）
+            try:
+                import subprocess
+                subprocess.Popen(f'explorer "{os.path.abspath(export_dir)}"')
+            except Exception:
+                pass
+
+            self.send_json_response({
+                'success': True,
+                'exportPath': export_dir,
+                'message': f'已导出到: {export_dir}'
+            })
+
+        except Exception as e:
+            print(f"[错误] 导出失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_error_response(str(e))
+
+    # ==================== GitHub 配置 API ====================
+
+    def handle_github_config_get(self):
+        """读取 GitHub 配置（Token 打码）"""
+        try:
+            config = load_config()
+            gh = config.get('github', {'token': '', 'username': '', 'repo': 'my-prototypes'})
+            token = gh.get('token', '')
+            # 打码显示
+            masked_token = (token[:6] + '****' + token[-4:]) if len(token) > 10 else ('****' if token else '')
+            self.send_json_response({
+                'success': True,
+                'username': gh.get('username', ''),
+                'repo': gh.get('repo', 'my-prototypes'),
+                'tokenMasked': masked_token,
+                'hasToken': bool(token)
+            })
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_github_config_save(self):
+        """保存 GitHub 配置到 config.json"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode('utf-8'))
+
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            if 'github' not in config:
+                config['github'] = {}
+
+            # 只更新非空字段（Token 若用户没改则保持旧值）
+            if data.get('token'):
+                config['github']['token'] = data['token']
+            if 'username' in data:
+                config['github']['username'] = data['username']
+            if 'repo' in data:
+                config['github']['repo'] = data['repo'] or 'my-prototypes'
+
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=4)
+
+            print(f"[GitHub] 配置已保存: {config['github']['username']}/{config['github']['repo']}")
+            self.send_json_response({'success': True, 'message': '配置已保存'})
+
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_github_test(self):
+        """验证 GitHub Token 有效性"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode('utf-8'))
+
+            token = data.get('token', '')
+            if not token:
+                # 从配置读取
+                config = load_config()
+                token = config.get('github', {}).get('token', '')
+
+            if not token:
+                self.send_error_response("请先填写 Personal Access Token")
+                return
+
+            resp = requests.get(
+                'https://api.github.com/user',
+                headers={
+                    'Authorization': f'token {token}',
+                    'Accept': 'application/vnd.github.v3+json'
+                },
+                timeout=15
+            )
+
+            if resp.status_code == 200:
+                user = resp.json()
+                self.send_json_response({
+                    'success': True,
+                    'username': user.get('login', ''),
+                    'name': user.get('name', ''),
+                    'message': f"✅ 验证通过，用户：{user.get('login', '')}"
+                })
+            else:
+                self.send_json_response({
+                    'success': False,
+                    'message': f"Token 无效（HTTP {resp.status_code}）"
+                })
+
+        except Exception as e:
+            self.send_error_response(f"连接失败：{str(e)}")
+
+    # ==================== GitHub 发布 API ====================
+
+    def handle_github_publish(self):
+        """将项目发布到 GitHub Pages"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            body = self.rfile.read(content_length)
+            data = json.loads(body.decode('utf-8'))
+
+            project_id = data.get('projectId', '')
+            mode = data.get('mode', 'preview')  # 导出模式: dev / preview / embedded
+            if not project_id:
+                self.send_error_response("缺少 projectId")
+                return
+
+            config = load_config()
+            gh = config.get('github', {})
+            token = gh.get('token', '')
+            username = gh.get('username', '')
+            repo = gh.get('repo', 'my-prototypes')
+
+            if not token or not username:
+                self.send_error_response("请先在设置中配置 GitHub Token 和用户名")
+                return
+
+            project_dir = os.path.join(PROJECTS_DIR, project_id)
+            if not os.path.exists(project_dir):
+                self.send_error_response(f"项目不存在: {project_id}")
+                return
+
+            api_base = 'https://api.github.com'
+            
+            # 用带自动重试的 Session，解决连接池里的"僵尸连接"被 GitHub 关闭后引发的 ConnectionResetError
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            retry_strategy = Retry(
+                total=3,          # 最多重试 3 次
+                backoff_factor=1, # 重试间隔: 0s, 1s, 2s
+                connect=3,        # 连接失败（ConnectionResetError）也重试
+                read=3,
+                status_forcelist=[500, 502, 503, 504],
+                allowed_methods=["GET", "PUT", "POST", "DELETE"]
+            )
+            adapter = HTTPAdapter(max_retries=retry_strategy)
+            session = requests.Session()
+            session.mount('https://', adapter)
+            session.headers.update({
+                'Authorization': f'token {token}',
+                'Accept': 'application/vnd.github.v3+json',
+                'Content-Type': 'application/json'
+            })
+
+            print(f"[GitHub] 开始发布项目 '{project_id}' 到仓库 '{username}/{repo}'")
+
+            # ---- 1. 检查/创建仓库 ----
+            print(f"[GitHub] 步骤 1/7: 检查或创建 GitHub 仓库 '{username}/{repo}'...")
+            repo_url = f"{api_base}/repos/{username}/{repo}"
+            try:
+                r = session.get(repo_url, timeout=15)
+                if r.status_code == 404:
+                    print(f"[GitHub] 仓库 '{repo}' 不存在，尝试创建...")
+                    create_resp = session.post(
+                        f"{api_base}/user/repos",
+                        json={'name': repo, 'private': False, 'auto_init': True},
+                        timeout=20
+                    )
+                    if create_resp.status_code not in (200, 201):
+                        raise Exception(f"创建仓库失败: {create_resp.json().get('message', create_resp.text)}")
+                    print(f"[GitHub] 仓库 '{repo}' 已成功创建。")
+                    import time
+                    time.sleep(2)  # 等待仓库初始化
+                elif r.status_code != 200:
+                    raise Exception(f"访问仓库失败（HTTP {r.status_code}）: {r.json().get('message', r.text)}")
+                else:
+                    print(f"[GitHub] 仓库 '{repo}' 已存在。")
+            except requests.exceptions.RequestException as req_e:
+                raise Exception(f"连接 GitHub API 失败（检查网络或Token）: {req_e}")
+
+            # ---- 2. 获取默认分支 ----
+            print(f"[GitHub] 步骤 2/7: 获取仓库默认分支...")
+            repo_info = session.get(repo_url, timeout=15).json()
+            default_branch = repo_info.get('default_branch', 'main')
+            print(f"[GitHub] 默认分支为: '{default_branch}'。")
+
+            # ---- 3. 确保 index.html 根文件存在（GitHub Pages 需要） ----
+            print(f"[GitHub] 步骤 3/7: 检查并创建根目录重定向文件 'index.html'...")
+            root_index_path = f"{api_base}/repos/{username}/{repo}/contents/index.html"
+            r_root = session.get(root_index_path, timeout=10)
+            if r_root.status_code == 404:
+                root_content = base64.b64encode(b'<meta http-equiv="refresh" content="0;url=projects/">').decode()
+                put_resp = session.put(root_index_path, json={
+                    'message': 'Add root redirect for GitHub Pages',
+                    'content': root_content,
+                    'branch': default_branch
+                }, timeout=15)
+                if put_resp.status_code not in (200, 201):
+                    raise Exception(f"创建根目录 'index.html' 失败: {put_resp.json().get('message', put_resp.text)}")
+                print(f"[GitHub] 根目录 'index.html' 已创建。")
+            else:
+                print(f"[GitHub] 根目录 'index.html' 已存在。")
+
+            # ---- 4. 启用 GitHub Pages ----
+            print(f"[GitHub] 步骤 4/7: 检查并启用 GitHub Pages...")
+            pages_api_url = f"{api_base}/repos/{username}/{repo}/pages"
+            # Pages API 需要特殊的 Accept header，临时覆盖
+            pages_headers = {'Accept': 'application/vnd.github+json'}
+            pages_resp = session.get(pages_api_url, headers=pages_headers, timeout=10)
+            if pages_resp.status_code == 404:
+                post_resp = session.post(pages_api_url, headers=pages_headers, json={
+                    'source': {'branch': default_branch, 'path': '/'}
+                }, timeout=15)
+                if post_resp.status_code not in (200, 201):
+                    raise Exception(f"启用 GitHub Pages 失败: {post_resp.json().get('message', post_resp.text)}")
+                print(f"[GitHub] GitHub Pages 已成功启用。")
+            elif pages_resp.status_code == 200:
+                print(f"[GitHub] GitHub Pages 已存在，跳过。")
+            else:
+                raise Exception(f"检查 GitHub Pages 状态失败（HTTP {pages_resp.status_code}）: {pages_resp.json().get('message', pages_resp.text)}")
+
+            # ---- 4.5. 执行本地导出 ----
+            print(f"[GitHub] 步骤 4.5/7: 按模式 '{mode}' 执行本地导出...")
+            import importlib.util
+            ep_path = os.path.join(get_base_path(), 'export_project.py')
+            spec = importlib.util.spec_from_file_location("export_project", ep_path)
+            ep = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(ep)
+            
+            export_dir = ep.export_project(project_id, mode=mode)
+            print(f"[GitHub] 导出目录: {export_dir}")
+
+            # ---- 5. 上传项目文件 ----
+            print(f"[GitHub] 步骤 5/7: 上传项目文件到 'projects/{project_id}/' 目录...")
+            def upload_file(local_path, remote_path):
+                with open(local_path, 'rb') as f:
+                    content_b64 = base64.b64encode(f.read()).decode()
+
+                file_api_url = f"{api_base}/repos/{username}/{repo}/contents/{remote_path}"
+                
+                # Check if file exists to get SHA for update
+                existing = session.get(file_api_url, timeout=10)
+                payload = {
+                    'message': f'Update prototype: {project_id}',
+                    'content': content_b64,
+                    'branch': default_branch
+                }
+                if existing.status_code == 200:
+                    payload['sha'] = existing.json().get('sha', '')
+                    print(f"[GitHub] 更新文件: {remote_path}")
+                else:
+                    print(f"[GitHub] 创建文件: {remote_path}")
+
+                put_resp = session.put(file_api_url, json=payload, timeout=30)
+                if put_resp.status_code not in (200, 201):
+                    raise Exception(f"上传文件失败 {remote_path}: {put_resp.json().get('message', put_resp.text)}")
+                print(f"[GitHub] 文件 '{remote_path}' 上传成功。")
+
+            # 遍历 export_dir 下的所有文件并上传
+            if os.path.exists(export_dir):
+                for root_dir, _, files in os.walk(export_dir):
+                    for file_name in files:
+                        local_path = os.path.join(root_dir, file_name)
+                        rel_path = os.path.relpath(local_path, export_dir).replace('\\', '/')
+                        remote_path = f"projects/{project_id}/{rel_path}"
+                        upload_file(local_path, remote_path)
+            else:
+                raise Exception(f"导出目录不存在: {export_dir}")
+                
+            print(f"[GitHub] 项目文件上传完成。")
+
+            # ---- 6. 生成 Pages URL ----
+            print(f"[GitHub] 步骤 6/7: 生成 GitHub Pages URL...")
+            pages_url_result = f"https://{username}.github.io/{repo}/projects/{project_id}/"
+            print(f"[GitHub] 预计发布链接: {pages_url_result}")
+
+            # ---- 7. 更新 record.json + 列表页 ----
+            print(f"[GitHub] 步骤 7/7: 更新本地记录 + GitHub 列表页...")
+            record_path = os.path.join(project_dir, 'record.json')
+            project_name = project_id  # 默认用 ID
+            try:
+                record = {}
+                if os.path.exists(record_path):
+                    with open(record_path, 'r', encoding='utf-8') as f:
+                        record = json.load(f)
+                project_name = record.get('title', record.get('name', project_id))
+                record['github_url'] = pages_url_result
+                record['github_published_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                record['github_mode'] = mode
+                with open(record_path, 'w', encoding='utf-8') as f:
+                    json.dump(record, f, ensure_ascii=False, indent=2)
+                print(f"[GitHub] 'record.json' 已更新。")
+            except Exception as e:
+                print(f"[GitHub] 警告: 更新 'record.json' 失败（非致命错误）: {e}")
+
+            # 更新 GitHub 列表页
+            try:
+                self.update_github_listing(
+                    session, api_base, username, repo, default_branch,
+                    project_id=project_id,
+                    project_name=project_name,
+                    project_url=pages_url_result,
+                    mode=mode,
+                    remove=False
+                )
+            except Exception as e:
+                print(f"[GitHub] 警告: 更新列表页失败（非致命错误）: {e}")
+
+            print(f"[GitHub] 项目 '{project_id}' 发布流程完成。")
+            self.send_json_response({
+                'success': True,
+                'url': pages_url_result,
+                'mode': mode,
+                'message': f'发布成功！约 1-3 分钟后链接生效: {pages_url_result}'
+            })
+
+        except Exception as e:
+            print(f"[错误] GitHub 发布失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_error_response(f"GitHub 发布失败: {str(e)}")
 
 
 print(f"=" * 50)
