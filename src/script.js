@@ -1752,8 +1752,21 @@ async function doGitHubPublish() {
     }
 }
 
-async function doGitHubUnpublish() {
-    if (!confirm('确定要取消发布此原型并从 GitHub Pages 删除相关文件吗？此操作不可恢复。')) return;
+function doGitHubUnpublish() {
+    $('unpublishConfirmModal').classList.remove('hidden');
+    $('unpublishConfirmModal').classList.add('flex');
+}
+
+function closeUnpublishConfirmModal() {
+    $('unpublishConfirmModal').classList.add('hidden');
+    $('unpublishConfirmModal').classList.remove('flex');
+}
+
+async function executeGitHubUnpublish() {
+    const confirmBtn = $('confirmUnpublishBtn');
+    const originalConfirmText = confirmBtn.innerHTML;
+    confirmBtn.disabled = true;
+    confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 取消中...';
 
     const btn = $('githubUnpublishBtn');
     const originalText = btn.innerHTML;
@@ -1774,6 +1787,7 @@ async function doGitHubUnpublish() {
             $('githubPublishedInfo').classList.add('hidden');
             $('githubPublishBtnText').textContent = '立即发布';
             btn.classList.add('hidden');
+            closeUnpublishConfirmModal(); // 成功后关闭确认弹窗
         } else {
             showToast('取消发布失败: ' + (data.error || '未知错误'), 'error');
         }
@@ -1782,6 +1796,8 @@ async function doGitHubUnpublish() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalText;
+        confirmBtn.disabled = false;
+        confirmBtn.innerHTML = originalConfirmText;
     }
 }
 
