@@ -1626,6 +1626,7 @@ async function openExportModal(id, name) {
     $('githubNotConfigured').classList.add('hidden');
     $('githubConfigured').classList.add('hidden');
     if ($('githubUnpublishBtn')) $('githubUnpublishBtn').classList.add('hidden');
+    if ($('githubPublishBtnText')) $('githubPublishBtnText').textContent = '立即发布';
 
     // 显示弹窗
     $('exportModal').classList.remove('hidden');
@@ -1716,7 +1717,7 @@ async function loadGithubStatus(projectId) {
 async function doGitHubPublish() {
     const btn = $('githubPublishBtn');
     const btnText = $('githubPublishBtnText');
-    const originalText = btnText ? btnText.textContent : '发布到 GitHub Pages';
+    const originalText = btnText ? btnText.textContent : '立即发布';
     btn.disabled = true;
     btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>发布中，请稍候...</span>';
 
@@ -1771,7 +1772,7 @@ async function doGitHubUnpublish() {
             showToast('✅ 已取消发布并删除 GitHub 上的文件');
             // 更新 UI 状态
             $('githubPublishedInfo').classList.add('hidden');
-            $('githubPublishBtnText').textContent = '发布到 GitHub';
+            $('githubPublishBtnText').textContent = '立即发布';
             btn.classList.add('hidden');
         } else {
             showToast('取消发布失败: ' + (data.error || '未知错误'), 'error');
