@@ -22,3 +22,4 @@
 | 2026-01-30 | 13:56 | 测试自动备份 | `backups\20260130_135643_测试自动备份` | server.py |  |
 | 2026-01-30 | 14:51 | 异步生成和复制Prompt功能 | `backups\20260130_145123_异步生成和复制Prompt功能` | server.py, src/script.js, src/index.html |  |
 | 2026-01-30 | 15:40 | 添加输入验证功能 | `backups\20260130_154009_添加输入验证功能` | src/script.js |  |
+| 2026-03-04 | 16:05 | 增强 GitHub 发布功能 | Git Repo | server.py, src/index.html, src/script.js | 使用 Git 提交作为备份 |
