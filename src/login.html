@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - AI 原型生成器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+
+<body class="bg-gradient-to-br from-indigo-50 via-white to-purple-50 min-h-screen flex items-center justify-center">
+    <div class="w-full max-w-md px-4">
+        <!-- Logo -->
+        <div class="text-center mb-8">
+            <div class="inline-flex items-center justify-center w-16 h-16 bg-indigo-100 rounded-2xl mb-4">
+                <i class="fas fa-magic text-2xl text-indigo-600"></i>
+            </div>
+            <h1 class="text-2xl font-bold text-gray-800">AI 原型生成器</h1>
+            <p class="text-gray-500 text-sm mt-1">团队协作平台</p>
+        </div>
+
+        <!-- Card -->
+        <div class="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
+            <!-- Tabs -->
+            <div class="flex mb-6 bg-gray-100 rounded-xl p-1">
+                <button id="loginTab" onclick="switchTab('login')"
+                    class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-all bg-white text-gray-800 shadow-sm">
+                    登录
+                </button>
+                <button id="registerTab" onclick="switchTab('register')"
+                    class="flex-1 py-2.5 text-sm font-medium rounded-lg transition-all text-gray-500 hover:text-gray-700">
+                    注册
+                </button>
+            </div>
+
+            <!-- Error message -->
+            <div id="errorMsg" class="hidden mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-sm text-red-600">
+            </div>
+
+            <!-- Login Form -->
+            <form id="loginForm" onsubmit="handleLogin(event)">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">用户名</label>
+                        <input type="text" id="loginUsername" required autocomplete="username"
+                            class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                            placeholder="输入用户名">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">密码</label>
+                        <input type="password" id="loginPassword" required autocomplete="current-password"
+                            class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                            placeholder="输入密码">
+                    </div>
+                    <button type="submit" id="loginBtn"
+                        class="w-full py-3 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2">
+                        <i class="fas fa-sign-in-alt"></i> 登录
+                    </button>
+                </div>
+            </form>
+
+            <!-- Register Form -->
+            <form id="registerForm" class="hidden" onsubmit="handleRegister(event)">
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">用户名</label>
+                        <input type="text" id="regUsername" required autocomplete="username"
+                            class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                            placeholder="2-30 个字符">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">显示名称</label>
+                        <input type="text" id="regDisplayName" autocomplete="name"
+                            class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                            placeholder="团队中显示的昵称（选填）">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">密码</label>
+                        <input type="password" id="regPassword" required autocomplete="new-password"
+                            class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                            placeholder="至少 6 个字符">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1.5">确认密码</label>
+                        <input type="password" id="regPasswordConfirm" required autocomplete="new-password"
+                            class="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+                            placeholder="再次输入密码">
+                    </div>
+                    <button type="submit" id="regBtn"
+                        class="w-full py-3 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2">
+                        <i class="fas fa-user-plus"></i> 注册
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <p class="text-center text-xs text-gray-400 mt-6">AI 原型生成器 · 团队协作版</p>
+    </div>
+
+    <script>
+        // 检查是否已登录
+        fetch('/api/auth/me').then(r => r.json()).then(data => {
+            if (data.user) {
+                window.location.href = '/src/';
+            }
+        });
+
+        function switchTab(tab) {
+            const loginTab = document.getElementById('loginTab');
+            const registerTab = document.getElementById('registerTab');
+            const loginForm = document.getElementById('loginForm');
+            const registerForm = document.getElementById('registerForm');
+            const errorMsg = document.getElementById('errorMsg');
+            errorMsg.classList.add('hidden');
+
+            if (tab === 'login') {
+                loginTab.className = 'flex-1 py-2.5 text-sm font-medium rounded-lg transition-all bg-white text-gray-800 shadow-sm';
+                registerTab.className = 'flex-1 py-2.5 text-sm font-medium rounded-lg transition-all text-gray-500 hover:text-gray-700';
+                loginForm.classList.remove('hidden');
+                registerForm.classList.add('hidden');
+            } else {
+                registerTab.className = 'flex-1 py-2.5 text-sm font-medium rounded-lg transition-all bg-white text-gray-800 shadow-sm';
+                loginTab.className = 'flex-1 py-2.5 text-sm font-medium rounded-lg transition-all text-gray-500 hover:text-gray-700';
+                registerForm.classList.remove('hidden');
+                loginForm.classList.add('hidden');
+            }
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('errorMsg');
+            el.textContent = msg;
+            el.classList.remove('hidden');
+        }
+
+        async function handleLogin(e) {
+            e.preventDefault();
+            const btn = document.getElementById('loginBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 登录中...';
+            document.getElementById('errorMsg').classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('loginUsername').value.trim(),
+                        password: document.getElementById('loginPassword').value
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    window.location.href = '/src/';
+                } else {
+                    showError(data.error || '登录失败');
+                }
+            } catch (err) {
+                showError('网络错误，请重试');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> 登录';
+            }
+        }
+
+        async function handleRegister(e) {
+            e.preventDefault();
+            const password = document.getElementById('regPassword').value;
+            const confirm = document.getElementById('regPasswordConfirm').value;
+            if (password !== confirm) {
+                showError('两次密码不一致');
+                return;
+            }
+
+            const btn = document.getElementById('regBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 注册中...';
+            document.getElementById('errorMsg').classList.add('hidden');
+
+            try {
+                const res = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('regUsername').value.trim(),
+                        password: password,
+                        displayName: document.getElementById('regDisplayName').value.trim()
+                    })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    window.location.href = '/src/';
+                } else {
+                    showError(data.error || '注册失败');
+                }
+            } catch (err) {
+                showError('网络错误，请重试');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-user-plus"></i> 注册';
+            }
+        }
+    </script>
+</body>
+
+</html>

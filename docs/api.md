@@ -7,6 +7,17 @@
 ### 获取项目列表
 `GET /api/projects`
 
+### 获取我的项目
+`GET /api/projects/my`
+- 需登录
+- Returns: `{ projects: [...] }`
+
+### 获取团队项目
+`GET /api/projects/team`
+- 需登录
+- Query: `?teamId=1`
+- Returns: `{ projects: [...] }`
+
 ### 创建项目
 `POST /generate`
 - Body: `{ prompt, images }`
@@ -32,7 +43,72 @@
 - Returns: `{ status: 'pending'|'generating'|'completed'|'failed', progress: 0-100, error: 'xxx' }`
 - 说明：查询项目异步生成状态
 
-## 2. PRD 文档
+## 2. 认证与团队协作
+
+### 注册
+`POST /api/auth/register`
+- Body: `{ username, password, displayName }`
+- Returns: `{ success: true, user: {...} }`
+- 说明：注册成功后会自动写入登录 Cookie。
+
+### 登录
+`POST /api/auth/login`
+- Body: `{ username, password }`
+- Returns: `{ success: true, user: {...} }`
+
+### 获取当前用户
+`GET /api/auth/me`
+- Returns: `{ user: null }` 或 `{ user: {...}, teams: [...] }`
+
+### 退出登录
+`POST /api/auth/logout`
+- Returns: `{ success: true }`
+
+### 创建团队
+`POST /api/teams/create`
+- 需登录
+- Body: `{ name }`
+- Returns: `{ success: true, team: { id, name, inviteCode } }`
+
+### 加入团队
+`POST /api/teams/join`
+- 需登录
+- Body: `{ inviteCode }`
+- Returns: `{ success: true, team: {...} }`
+
+### 获取我的团队
+`GET /api/teams`
+- 需登录
+- Returns: `{ teams: [{ id, name, role, inviteCode }] }`
+
+### 获取团队成员
+`GET /api/teams/{teamId}/members`
+- 需登录且是团队成员
+- Returns: `{ members: [{ id, username, display_name, role, joined_at }] }`
+
+### 退出团队
+`POST /api/teams/{teamId}/leave`
+- 需登录
+- Returns: `{ success: true }`
+
+### 分享项目到团队
+`POST /api/projects/{projectId}/share`
+- 需登录且是项目拥有者
+- Body: `{ teamId }`
+- Returns: `{ success: true }`
+
+### 取消项目分享
+`POST /api/projects/{projectId}/unshare`
+- 需登录且是项目拥有者
+- Body: `{ teamId }`
+- Returns: `{ success: true }`
+
+### 获取项目已分享团队
+`POST /api/projects/{projectId}/shared-teams`
+- 需登录
+- Returns: `{ teams: [{ id, name }] }`
+
+## 3. PRD 文档
 
 ### 保存 PRD
 `POST /api/prd/save`
@@ -42,7 +118,7 @@
 `GET /api/prd/load`
 - Query: `?projectId=xxx&pageName=yyy`
 
-## 3. 研发数据
+## 4. 研发数据
 
 ### 获取页面列表
 `GET /api/pages`
@@ -54,7 +130,7 @@
 - Query: `?projectId=xxx`
 - Returns: `{ pages, transitions, modals, mermaid }`
 
-## 4. 微调模式
+## 5. 微调模式
 
 ### 应用 AI 修改
 `POST /api/inspector/apply`
@@ -70,6 +146,11 @@
   }
   ```
 - Returns: `{ success: true, message: "...", backupFile: "index.html.bak" }`
+
+### 获取服务器路径信息
+`GET /api/server-info`
+- Returns: `{ projectsDir }`
+- 说明：供预览器生成微调提示词时动态定位项目文件路径。
 
 
 ### 📝 最近更新 (2026-01-30)

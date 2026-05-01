@@ -1392,6 +1392,7 @@
         let saveTimer = null;
         let prdContent = {};
         let previewType = 'auto'; // 'auto' | 'mobile' | 'web'
+        let projectsDir = ''; // 由服务端动态提供，避免硬编码路径
 
         // ==================== 微调模式 (Inspector) 状态 ====================
         let inspectorActive = false;
@@ -1442,6 +1443,12 @@
                 alert('缺少项目ID参数');
                 return;
             }
+
+            // 动态获取服务器端 projects 目录路径
+            fetch('/api/server-info')
+                .then(r => r.json())
+                .then(info => { projectsDir = info.projectsDir || ''; })
+                .catch(() => { projectsDir = ''; });
 
             // 设置标题
             $('projectTitle').textContent = decodeURIComponent(projectId.split('_')[0]);
@@ -2800,8 +2807,10 @@
             // 获取当前页面标识
             const currentPageInfo = getCurrentPageInfo();
 
-            // 构建文件路径
-            const filePath = `d:\\ai project\\ky_antigravity\\原型生成器\\projects\\${projectId}\\index.html`;
+            // 构建文件路径（动态，避免硬编码）
+            const filePath = projectsDir
+                ? `${projectsDir}\\${projectId}\\index.html`
+                : `projects/${projectId}/index.html`;
 
             const elements = selectedElements.map((el, i) => {
                 const textContent = (el.innerText || '').trim().slice(0, 50);
@@ -2966,7 +2975,10 @@ ${userInput}
                 return null;
             }
 
-            const filePath = `d:\\ai project\\ky_antigravity\\原型生成器\\projects\\${projectId}\\index.html`;
+            const filePath = projectsDir
+                ? `${projectsDir}\\${projectId}\\index.html`
+                : `projects/${projectId}/index.html`;
+
             const currentPageInfo = getCurrentPageInfo();
 
             return `# 整页面修改请求

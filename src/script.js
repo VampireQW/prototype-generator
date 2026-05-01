@@ -10,6 +10,12 @@ let allProjects = [];
 let searchQuery = '';
 let currentRecordProject = null; // 当前查看的记录项目
 
+// ==================== 协作状态 ====================
+let currentUser = null;   // {id, username, displayName}
+let userTeams = [];       // [{id, name, role, inviteCode}]
+let currentTab = 'my';    // 'my' | 'team'
+let selectedTeamId = null;
+
 // ==================== 模型管理 ====================
 let modelsList = [];
 let currentModel = null;
@@ -24,7 +30,9 @@ let originalImageHashes = {};     // 原始图片哈希 { pageIndex: hash }
 const $ = (id) => document.getElementById(id);
 
 // ==================== 初始化 ====================
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // 检查登录状态
+    await checkAuth();
     setupEventListeners();
     loadProjects();
     loadModels();
@@ -101,15 +109,35 @@ function createNewProject() {
 }
 
 function loadProjects() {
-    fetch('/data/projects.json?t=' + Date.now())
-        .then(res => res.json())
-        .then(data => {
-            allProjects = data || [];
-            renderProjectList();
-        })
-        .catch(() => {
-            $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">暂无项目</div>';
-        });
+    if (!currentUser) {
+        // 未登录，用原始接口
+        fetch('/data/projects.json?t=' + Date.now())
+            .then(res => res.json())
+            .then(data => {
+                allProjects = data || [];
+                renderProjectList();
+            })
+            .catch(() => {
+                $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">暂无项目</div>';
+            });
+        return;
+    }
+
+    if (currentTab === 'my') {
+        fetch('/api/projects/my?t=' + Date.now())
+            .then(res => res.json())
+            .then(data => {
+                allProjects = data.projects || [];
+                renderProjectList();
+            })
+            .catch(() => {
+                $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">暂无项目</div>';
+            });
+    } else if (currentTab === 'team' && selectedTeamId) {
+        loadTeamProjects();
+    } else {
+        $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">请选择团队</div>';
+    }
 }
 
 function renderProjectList() {
@@ -151,6 +179,7 @@ function renderProjectList() {
         }
 
         const safeName = p.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+        const ownerHTML = p.ownerName ? `<p class="text-[11px] text-purple-400 mt-0.5 flex items-center gap-1"><i class="fas fa-user text-[9px]"></i>${p.ownerName}</p>` : '';
 
         return `
         <div class="project-card group bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md hover:border-indigo-200 transition-all duration-200 cursor-pointer"
@@ -162,30 +191,35 @@ function renderProjectList() {
                 </div>
                 <p class="text-xs text-gray-400">${p.date}</p>
                 ${p.model_name ? `<p class="text-[11px] text-indigo-400 mt-0.5 flex items-center gap-1"><i class="fas fa-robot text-[9px]"></i>${p.model_name}</p>` : ''}
+                ${ownerHTML}
             </div>
             <div class="flex items-center border-t border-gray-100 bg-gray-50/50 px-2 py-1.5 transition-opacity duration-150"
                  onclick="event.stopPropagation()">
-                <button onclick="editProjectTitle('${p.id}', '${safeName}')" 
+                <button onclick="editProjectTitle('${p.id}', '${safeName}')"
                         class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors" title="编辑">
                     <i class="fas fa-edit"></i>
                 </button>
-                <button onclick="copyProject('${p.id}', '${safeName}')" 
+                <button onclick="copyProject('${p.id}', '${safeName}')"
                         class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-purple-600 rounded hover:bg-purple-50 transition-colors" title="复制">
                     <i class="fas fa-copy"></i>
                 </button>
-                <button onclick="window.open('viewer.html?project=${encodeURIComponent(p.id)}', '_blank')" 
+                <button onclick="window.open('viewer.html?project=${encodeURIComponent(p.id)}', '_blank')"
                         class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-indigo-600 rounded hover:bg-indigo-50 transition-colors" title="预览">
                     <i class="fas fa-eye"></i>
                 </button>
-                <button onclick="viewRecord('${p.id}')" 
+                <button onclick="viewRecord('${p.id}')"
                         class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-green-600 rounded hover:bg-green-50 transition-colors" title="记录">
                     <i class="fas fa-history"></i>
                 </button>
-                <button onclick="openExportModal('${p.id}', '${safeName}')" 
+                <button onclick="openExportModal('${p.id}', '${safeName}')"
                         class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-orange-500 rounded hover:bg-orange-50 transition-colors" title="导出 & 分享">
                     <i class="fas fa-paper-plane"></i>
                 </button>
-                <button onclick="deleteProject('${p.id}', '${safeName}')" 
+                ${currentUser && currentTab === 'my' ? `<button onclick="openShareModal('${p.id}')"
+                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-cyan-600 rounded hover:bg-cyan-50 transition-colors" title="分享到团队">
+                    <i class="fas fa-share-alt"></i>
+                </button>` : ''}
+                <button onclick="deleteProject('${p.id}', '${safeName}')"
                         class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-red-500 rounded hover:bg-red-50 transition-colors" title="删除">
                     <i class="fas fa-trash-alt"></i>
                 </button>
@@ -327,7 +361,7 @@ function renderRecycleBin(projects) {
                 <p class="text-sm font-medium text-gray-900 line-clamp-2" title="${p.name}">${p.name}</p>
                 <p class="text-xs text-gray-400 mt-1">删除于: ${p.deletedAt || p.date}</p>
             </div>
-            <button onclick="restoreProject('${p.id}')" 
+            <button onclick="restoreProject('${p.id}')"
                     class="flex-shrink-0 ml-2 px-3 py-1.5 text-sm text-indigo-600 hover:bg-indigo-50 rounded-lg transition flex items-center gap-1">
                 <i class="fas fa-undo"></i> 恢复
             </button>
@@ -441,7 +475,7 @@ function renderRecordModal(record, projectId) {
                         <span class="text-gray-500 text-sm">参考图片:</span>
                         <div class="grid grid-cols-4 gap-2 mt-2">
                             ${page.images.map(img => `
-                                <img src="/projects/${projectId}/reference/${img}" 
+                                <img src="/projects/${projectId}/reference/${img}"
                                      class="w-full aspect-square object-cover rounded border cursor-pointer hover:opacity-80"
                                      onclick="previewImage('/projects/${projectId}/reference/${img}')">
                             `).join('')}
@@ -601,7 +635,7 @@ function createPageCardHtml(id, index) {
                 <i class="fas fa-trash-alt"></i>
             </button>
         </div>
-        
+
         <div class="p-6 space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <!-- 布局描述 -->
@@ -609,7 +643,7 @@ function createPageCardHtml(id, index) {
                     <label class="block text-sm font-medium text-gray-700 mb-1">布局描述</label>
                     <textarea id="layout_${id}" rows="4" class="w-full rounded-lg border-gray-200 border p-3 text-sm resize-none" placeholder="描述页面的布局结构...&#10;如：顶部导航、左侧菜单、右侧内容区"></textarea>
                 </div>
-                
+
                 <!-- 参考图上传 -->
                 <div>
                     <div class="flex justify-between items-center mb-1">
@@ -638,14 +672,14 @@ function createPageCardHtml(id, index) {
                     <div id="preview_${id}" class="grid grid-cols-5 gap-2 mt-2 hidden"></div>
                 </div>
             </div>
-            
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <!-- 核心功能 -->
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">核心功能</label>
                     <textarea id="features_${id}" rows="3" class="w-full rounded-lg border-gray-200 border p-3 text-sm resize-none" placeholder="- 表格排序筛选&#10;- 数据导出"></textarea>
                 </div>
-                
+
                 <!-- 交互说明 -->
                 <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">交互说明</label>
@@ -1812,6 +1846,345 @@ function copyGithubUrl() {
         document.execCommand('copy');
         showToast('✅ 链接已复制');
     });
+}
+
+
+// ==================== 协作功能 ====================
+
+async function checkAuth() {
+    try {
+        const res = await fetch('/api/auth/me');
+        const data = await res.json();
+        if (data.user) {
+            currentUser = data.user;
+            userTeams = data.teams || [];
+            updateUserUI();
+        }
+    } catch (e) {
+        // 未登录或网络错误，静默处理
+    }
+}
+
+function updateUserUI() {
+    if (!currentUser) return;
+    const btn = $('userMenuBtn');
+    if (btn) {
+        const initial = (currentUser.displayName || currentUser.username).charAt(0).toUpperCase();
+        btn.textContent = initial;
+    }
+    if ($('userDisplayName')) $('userDisplayName').textContent = currentUser.displayName;
+    if ($('userUsername')) $('userUsername').textContent = '@' + currentUser.username;
+    // 填充团队选择器
+    updateTeamSelector();
+}
+
+function updateTeamSelector() {
+    const sel = $('teamSelect');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">请选择团队</option>' +
+        userTeams.map(t => `<option value="${t.id}" ${t.id == selectedTeamId ? 'selected' : ''}>${t.name}</option>`).join('');
+}
+
+function toggleUserMenu() {
+    const dd = $('userDropdown');
+    dd.classList.toggle('hidden');
+    // 点击外部关闭
+    setTimeout(() => {
+        const handler = (e) => {
+            if (!$('userMenuContainer').contains(e.target)) {
+                dd.classList.add('hidden');
+                document.removeEventListener('click', handler);
+            }
+        };
+        document.addEventListener('click', handler);
+    }, 0);
+}
+
+async function handleLogout() {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/src/login.html';
+}
+
+function switchProjectTab(tab) {
+    currentTab = tab;
+    const tabMy = $('tabMy');
+    const tabTeam = $('tabTeam');
+    const teamSel = $('teamSelector');
+
+    if (tab === 'my') {
+        tabMy.className = 'flex-1 text-xs font-medium py-1.5 rounded-md transition-all bg-white text-gray-800 shadow-sm';
+        tabTeam.className = 'flex-1 text-xs font-medium py-1.5 rounded-md transition-all text-gray-500 hover:text-gray-700';
+        teamSel.classList.add('hidden');
+    } else {
+        tabTeam.className = 'flex-1 text-xs font-medium py-1.5 rounded-md transition-all bg-white text-gray-800 shadow-sm';
+        tabMy.className = 'flex-1 text-xs font-medium py-1.5 rounded-md transition-all text-gray-500 hover:text-gray-700';
+        teamSel.classList.remove('hidden');
+    }
+    loadProjects();
+}
+
+function loadTeamProjects() {
+    const sel = $('teamSelect');
+    selectedTeamId = sel ? sel.value : null;
+    if (!selectedTeamId) {
+        $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">请选择团队</div>';
+        return;
+    }
+    fetch(`/api/projects/team?teamId=${selectedTeamId}&t=${Date.now()}`)
+        .then(res => res.json())
+        .then(data => {
+            allProjects = data.projects || [];
+            renderProjectList();
+        })
+        .catch(() => {
+            $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">加载失败</div>';
+        });
+}
+
+// ==================== 团队管理 ====================
+
+function openTeamManager() {
+    $('userDropdown').classList.add('hidden');
+    $('teamManagerModal').classList.remove('hidden');
+    $('teamManagerModal').classList.add('flex');
+    $('createTeamForm').classList.add('hidden');
+    $('joinTeamForm').classList.add('hidden');
+    renderTeamList();
+}
+
+function closeTeamManager() {
+    $('teamManagerModal').classList.add('hidden');
+    $('teamManagerModal').classList.remove('flex');
+}
+
+function showCreateTeam() {
+    $('createTeamForm').classList.toggle('hidden');
+    $('joinTeamForm').classList.add('hidden');
+}
+
+function showJoinTeam() {
+    $('joinTeamForm').classList.toggle('hidden');
+    $('createTeamForm').classList.add('hidden');
+}
+
+async function createTeam() {
+    const name = $('newTeamName').value.trim();
+    if (!name) return;
+    try {
+        const res = await fetch('/api/teams/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('团队创建成功！邀请码: ' + data.team.inviteCode);
+            $('newTeamName').value = '';
+            $('createTeamForm').classList.add('hidden');
+            await refreshTeams();
+            renderTeamList();
+        } else {
+            showToast(data.error || '创建失败', 'error');
+        }
+    } catch (e) {
+        showToast('网络错误', 'error');
+    }
+}
+
+async function joinTeam() {
+    const code = $('inviteCodeInput').value.trim();
+    if (!code) return;
+    try {
+        const res = await fetch('/api/teams/join', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ inviteCode: code })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('成功加入团队: ' + data.team.name);
+            $('inviteCodeInput').value = '';
+            $('joinTeamForm').classList.add('hidden');
+            await refreshTeams();
+            renderTeamList();
+        } else {
+            showToast(data.error || '加入失败', 'error');
+        }
+    } catch (e) {
+        showToast('网络错误', 'error');
+    }
+}
+
+async function refreshTeams() {
+    try {
+        const res = await fetch('/api/teams');
+        const data = await res.json();
+        userTeams = data.teams || [];
+        updateTeamSelector();
+    } catch (e) { /* ignore */ }
+}
+
+async function renderTeamList() {
+    const container = $('teamList');
+    if (userTeams.length === 0) {
+        container.innerHTML = '<div class="text-center text-sm text-gray-400 py-4">你还没有加入任何团队</div>';
+        return;
+    }
+    container.innerHTML = userTeams.map(t => `
+        <div class="bg-gray-50 rounded-xl p-4">
+            <div class="flex items-center justify-between mb-2">
+                <div>
+                    <h4 class="text-sm font-semibold text-gray-800">${t.name}</h4>
+                    <span class="text-[11px] px-1.5 py-0.5 rounded ${t.role === 'admin' ? 'bg-indigo-100 text-indigo-600' : 'bg-gray-200 text-gray-600'}">${t.role === 'admin' ? '管理员' : '成员'}</span>
+                </div>
+                <button onclick="leaveTeam(${t.id}, '${t.name.replace(/'/g, "\\'")}')" class="text-xs text-red-400 hover:text-red-600 transition">退出</button>
+            </div>
+            <div class="flex items-center gap-2 mt-2">
+                <span class="text-xs text-gray-400">邀请码:</span>
+                <code class="text-xs bg-white px-2 py-1 rounded border border-gray-200 font-mono tracking-widest">${t.inviteCode}</code>
+                <button onclick="navigator.clipboard.writeText('${t.inviteCode}');showToast('邀请码已复制')" class="text-xs text-indigo-500 hover:text-indigo-700">
+                    <i class="fas fa-copy"></i>
+                </button>
+            </div>
+            <button onclick="viewTeamMembers(${t.id})" class="mt-2 text-xs text-gray-500 hover:text-indigo-600 flex items-center gap-1">
+                <i class="fas fa-users"></i> 查看成员
+            </button>
+            <div id="teamMembers_${t.id}" class="hidden mt-2"></div>
+        </div>
+    `).join('');
+}
+
+async function viewTeamMembers(teamId) {
+    const container = $('teamMembers_' + teamId);
+    if (!container.classList.contains('hidden')) {
+        container.classList.add('hidden');
+        return;
+    }
+    container.innerHTML = '<div class="text-xs text-gray-400">加载中...</div>';
+    container.classList.remove('hidden');
+    try {
+        const res = await fetch(`/api/teams/${teamId}/members`);
+        const data = await res.json();
+        const members = data.members || [];
+        container.innerHTML = members.map(m => `
+            <div class="flex items-center justify-between py-1.5 text-xs">
+                <span class="text-gray-700">${m.display_name} <span class="text-gray-400">@${m.username}</span></span>
+                <span class="${m.role === 'admin' ? 'text-indigo-500' : 'text-gray-400'}">${m.role === 'admin' ? '管理员' : '成员'}</span>
+            </div>
+        `).join('');
+    } catch (e) {
+        container.innerHTML = '<div class="text-xs text-red-400">加载失败</div>';
+    }
+}
+
+async function leaveTeam(teamId, name) {
+    if (!confirm(`确定要退出团队「${name}」吗？`)) return;
+    try {
+        const res = await fetch(`/api/teams/${teamId}/leave`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('已退出团队');
+            await refreshTeams();
+            renderTeamList();
+        } else {
+            showToast(data.error || '操作失败', 'error');
+        }
+    } catch (e) {
+        showToast('网络错误', 'error');
+    }
+}
+
+// ==================== 项目分享 ====================
+
+async function openShareModal(projectId) {
+    $('shareProjectId').value = projectId;
+    $('shareProjectModal').classList.remove('hidden');
+    $('shareProjectModal').classList.add('flex');
+
+    const container = $('shareTeamList');
+    container.innerHTML = '<div class="text-center text-sm text-gray-400 py-4">加载中...</div>';
+
+    try {
+        // 获取已分享的团队
+        const sharedRes = await fetch(`/api/projects/${encodeURIComponent(projectId)}/shared-teams`, { method: 'POST' });
+        const sharedData = await sharedRes.json();
+        const sharedTeamIds = new Set((sharedData.teams || []).map(t => t.id));
+
+        if (userTeams.length === 0) {
+            container.innerHTML = '<div class="text-center text-sm text-gray-400 py-4">你还没有加入任何团队</div>';
+            return;
+        }
+
+        container.innerHTML = userTeams.map(t => {
+            const isShared = sharedTeamIds.has(t.id);
+            return `
+                <div class="flex items-center justify-between py-2.5 px-3 rounded-lg ${isShared ? 'bg-green-50' : 'bg-gray-50'}">
+                    <span class="text-sm text-gray-700">${t.name}</span>
+                    ${isShared ?
+                        `<button onclick="unshareProject('${projectId}', ${t.id}, this)" class="text-xs px-3 py-1.5 bg-red-50 text-red-500 rounded-lg hover:bg-red-100 transition">取消分享</button>` :
+                        `<button onclick="shareProject('${projectId}', ${t.id}, this)" class="text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition">分享</button>`
+                    }
+                </div>
+            `;
+        }).join('');
+    } catch (e) {
+        container.innerHTML = '<div class="text-center text-sm text-red-400 py-4">加载失败</div>';
+    }
+}
+
+function closeShareModal() {
+    $('shareProjectModal').classList.add('hidden');
+    $('shareProjectModal').classList.remove('flex');
+}
+
+async function shareProject(projectId, teamId, btn) {
+    btn.disabled = true;
+    btn.textContent = '分享中...';
+    try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/share`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ teamId })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('已分享到团队');
+            openShareModal(projectId); // 刷新
+        } else {
+            showToast(data.error || '分享失败', 'error');
+            btn.disabled = false;
+            btn.textContent = '分享';
+        }
+    } catch (e) {
+        showToast('网络错误', 'error');
+        btn.disabled = false;
+        btn.textContent = '分享';
+    }
+}
+
+async function unshareProject(projectId, teamId, btn) {
+    btn.disabled = true;
+    btn.textContent = '取消中...';
+    try {
+        const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/unshare`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ teamId })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast('已取消分享');
+            openShareModal(projectId); // 刷新
+        } else {
+            showToast(data.error || '取消失败', 'error');
+            btn.disabled = false;
+            btn.textContent = '取消分享';
+        }
+    } catch (e) {
+        showToast('网络错误', 'error');
+        btn.disabled = false;
+        btn.textContent = '取消分享';
+    }
 }
 
 function openGithubUrl() {

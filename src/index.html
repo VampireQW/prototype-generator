@@ -232,7 +232,27 @@
     <aside class="w-72 bg-white border-r border-gray-200 flex flex-col">
         <div class="p-6 border-b border-gray-100 flex items-center gap-3">
             <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">AI</div>
-            <h1 class="text-xl font-bold text-gray-900">原型生成器</h1>
+            <h1 class="text-xl font-bold text-gray-900 flex-1">原型生成器</h1>
+            <!-- 用户菜单 -->
+            <div class="relative" id="userMenuContainer">
+                <button id="userMenuBtn" onclick="toggleUserMenu()" class="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-semibold hover:bg-indigo-200 transition" title="用户菜单">
+                    <i class="fas fa-user"></i>
+                </button>
+                <div id="userDropdown" class="hidden absolute right-0 top-10 bg-white border border-gray-200 rounded-xl shadow-lg min-w-[200px] z-50 overflow-hidden">
+                    <div class="px-4 py-3 border-b border-gray-100">
+                        <p class="text-sm font-semibold text-gray-800" id="userDisplayName">--</p>
+                        <p class="text-xs text-gray-400" id="userUsername">--</p>
+                    </div>
+                    <div class="py-1">
+                        <button onclick="openTeamManager()" class="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                            <i class="fas fa-users text-gray-400 w-4"></i>团队管理
+                        </button>
+                        <button onclick="handleLogout()" class="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+                            <i class="fas fa-sign-out-alt text-red-400 w-4"></i>退出登录
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="p-4">
@@ -243,7 +263,25 @@
             </button>
         </div>
 
+        <!-- 项目标签页：我的项目 / 团队项目 -->
         <div class="px-4 pb-2">
+            <div class="flex items-center gap-1 mb-2 bg-gray-100 rounded-lg p-0.5">
+                <button id="tabMy" onclick="switchProjectTab('my')"
+                    class="flex-1 text-xs font-medium py-1.5 rounded-md transition-all bg-white text-gray-800 shadow-sm">
+                    我的项目
+                </button>
+                <button id="tabTeam" onclick="switchProjectTab('team')"
+                    class="flex-1 text-xs font-medium py-1.5 rounded-md transition-all text-gray-500 hover:text-gray-700">
+                    团队项目
+                </button>
+            </div>
+            <!-- 团队选择器（团队标签页下显示）-->
+            <div id="teamSelector" class="hidden mb-2">
+                <select id="teamSelect" onchange="loadTeamProjects()"
+                    class="w-full text-xs border border-gray-200 rounded-md py-1.5 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-50">
+                    <option value="">请选择团队</option>
+                </select>
+            </div>
             <div class="flex items-center justify-between">
                 <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">生成的原型</h3>
                 <button id="recycleBinBtn"
@@ -378,13 +416,6 @@
         onclick="this.classList.add('hidden')">
         <img id="fullSizeImage" class="max-w-[90vw] max-h-[90vh] object-contain rounded shadow-2xl" src=""
             alt="Preview">
-    </div>
-
-    <!-- Toast提示 -->
-    <div id="toast"
-        class="fixed bottom-6 right-6 bg-gray-900 text-white px-6 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-3 z-[9999]">
-        <i id="toastIcon" class="fas fa-check-circle text-green-400"></i>
-        <span id="toastMessage">操作成功</span>
     </div>
 
     <!-- 记录查看模态框 -->
@@ -813,7 +844,77 @@
         </div>
     </div>
 
-    <script src="script.js?v=20260225"></script>
+    <!-- 团队管理弹窗 -->
+    <div id="teamManagerModal" class="fixed inset-0 z-50 hidden items-center justify-center">
+        <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="closeTeamManager()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <h3 class="font-bold text-lg text-gray-900 flex items-center gap-2">
+                    <i class="fas fa-users text-indigo-500"></i> 团队管理
+                </h3>
+                <button onclick="closeTeamManager()" class="text-gray-400 hover:text-gray-600 p-2"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+                <!-- 创建/加入 -->
+                <div class="flex gap-2">
+                    <button onclick="showCreateTeam()" class="flex-1 py-2.5 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center justify-center gap-1.5">
+                        <i class="fas fa-plus"></i> 创建团队
+                    </button>
+                    <button onclick="showJoinTeam()" class="flex-1 py-2.5 text-sm font-medium bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 transition flex items-center justify-center gap-1.5">
+                        <i class="fas fa-link"></i> 加入团队
+                    </button>
+                </div>
+                <!-- 创建团队表单 -->
+                <div id="createTeamForm" class="hidden bg-indigo-50 rounded-xl p-4">
+                    <label class="text-sm font-medium text-gray-700 mb-1.5 block">团队名称</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="newTeamName" class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="输入团队名称">
+                        <button onclick="createTeam()" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition">创建</button>
+                    </div>
+                </div>
+                <!-- 加入团队表单 -->
+                <div id="joinTeamForm" class="hidden bg-blue-50 rounded-xl p-4">
+                    <label class="text-sm font-medium text-gray-700 mb-1.5 block">邀请码</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="inviteCodeInput" class="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none uppercase tracking-widest" placeholder="输入 8 位邀请码" maxlength="8">
+                        <button onclick="joinTeam()" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition">加入</button>
+                    </div>
+                </div>
+                <!-- 团队列表 -->
+                <div id="teamList" class="space-y-3">
+                    <div class="text-center text-sm text-gray-400 py-4">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 项目分享弹窗 -->
+    <div id="shareProjectModal" class="fixed inset-0 z-50 hidden items-center justify-center">
+        <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="closeShareModal()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <h3 class="font-bold text-gray-900 flex items-center gap-2">
+                    <i class="fas fa-share-alt text-indigo-500"></i> 分享到团队
+                </h3>
+                <button onclick="closeShareModal()" class="text-gray-400 hover:text-gray-600 p-2"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="p-6">
+                <input type="hidden" id="shareProjectId">
+                <div id="shareTeamList" class="space-y-2 max-h-60 overflow-y-auto">
+                    <div class="text-center text-sm text-gray-400 py-4">加载中...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast提示 (置于所有弹窗之后确保层级最高) -->
+    <div id="toast"
+        class="fixed bottom-6 right-6 bg-gray-900 text-white px-6 py-3 rounded-lg shadow-lg transform translate-y-20 opacity-0 transition-all duration-300 flex items-center gap-3" style="z-index: 99999;">
+        <i id="toastIcon" class="fas fa-check-circle text-green-400"></i>
+        <span id="toastMessage">操作成功</span>
+    </div>
+
+    <script src="script.js?v=20260407"></script>
 </body>
 
 </html>

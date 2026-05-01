@@ -26,6 +26,9 @@ import shlex
 import threading
 import time
 import sys
+import http.cookies
+
+import db  # 团队协作数据库
 
 # ==================== PyInstaller 兼容 ====================
 def get_base_path():
@@ -111,10 +114,10 @@ def load_config():
         print("模型配置请在 models.json 或页面「管理模型」中设置")
         print("=" * 60)
         raise FileNotFoundError("config.json 不存在，请创建配置文件")
-    
+
     with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
         config = json.load(f)
-    
+
     # 验证模型配置（从 models.json）
     try:
         selected = get_selected_model()
@@ -129,7 +132,7 @@ def load_config():
         print("=" * 60)
         print(f"⚠️ 警告: models.json 加载失败，请检查文件格式 ({e})")
         print("=" * 60)
-    
+
     return config
 
 # 加载配置
@@ -166,17 +169,21 @@ if not os.path.exists(DELETED_PROJECTS_FILE):
     with open(DELETED_PROJECTS_FILE, 'w', encoding='utf-8') as f:
         json.dump([], f, ensure_ascii=False, indent=2)
 
+# 初始化协作数据库
+db.init_db()
+print("[INFO] 协作数据库已初始化")
+
 
 def chinese_to_pinyin(text):
     """将中文转换为拼音（简化版，只保留英文和数字）"""
     # 简单处理：保留英文字母和数字，去掉中文和特殊字符
     result = re.sub(r'[^\w\s-]', '', text)
     result = re.sub(r'[\s]+', '_', result)
-    
+
     # 如果结果为空或只有下划线，使用默认名称
     if not result or result == '_':
         return 'project'
-    
+
     # 如果包含中文，尝试使用简单映射（常用词）
     chinese_map = {
         '首页': 'home', '登录': 'login', '注册': 'register',
@@ -190,15 +197,15 @@ def chinese_to_pinyin(text):
         '学生': 'student', '老师': 'teacher', '课程': 'course',
         '考试': 'exam', '成绩': 'score', '答案': 'answer',
     }
-    
+
     for cn, en in chinese_map.items():
         result = result.replace(cn, en)
-    
+
     # 移除剩余的非ASCII字符
     result = re.sub(r'[^\x00-\x7F]+', '', result)
     result = re.sub(r'_+', '_', result)  # 合并多个下划线
     result = result.strip('_')
-    
+
     return result if result else 'project'
 
 
@@ -212,14 +219,14 @@ def generate_project_id(project_name):
     if hour_12 == 0:
         hour_12 = 12
     timestamp = now.strftime(f'%Y%m%d_{hour_12}-%M-%S{am_pm}')
-    
+
     # 保留中文名称，但替换不安全字符
     safe_name = re.sub(r'[\\/:*?"<>|]', '', project_name)  # 移除Windows不允许的字符
     safe_name = safe_name.replace(' ', '_')
     # 限制长度
     if len(safe_name) > 30:
         safe_name = safe_name[:30]
-    
+
     return f"{safe_name}_{timestamp}"
 
 
@@ -237,14 +244,14 @@ def download_image(url, save_folder, filename=None):
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        
+
         req = urllib.request.Request(url)
         req.add_header('User-Agent', 'Mozilla/5.0')
-        
+
         with urllib.request.urlopen(req, context=ctx, timeout=30) as response:
             content_type = response.headers.get('Content-Type', '')
             data = response.read()
-            
+
             # 确定文件扩展名
             if not filename:
                 # 从URL或content-type推断
@@ -255,15 +262,15 @@ def download_image(url, save_folder, filename=None):
                     ext = '.gif'
                 elif 'webp' in content_type or url.endswith('.webp'):
                     ext = '.webp'
-                
+
                 # 用URL的hash作为文件名
                 url_hash = hashlib.md5(url.encode()).hexdigest()[:10]
                 filename = f"img_{url_hash}{ext}"
-            
+
             save_path = os.path.join(save_folder, filename)
             with open(save_path, 'wb') as f:
                 f.write(data)
-            
+
             return filename
     except Exception as e:
         print(f"[图片下载失败] {url}: {e}")
@@ -288,15 +295,15 @@ def save_base64_image(base64_data, save_folder, filename):
         else:
             data = base64_data
             ext = '.jpg'
-        
+
         # 确保文件名有正确扩展名
         if not any(filename.endswith(e) for e in ['.jpg', '.png', '.gif', '.webp']):
             filename = filename + ext
-        
+
         save_path = os.path.join(save_folder, filename)
         with open(save_path, 'wb') as f:
             f.write(base64.b64decode(data))
-        
+
         return filename
     except Exception as e:
         print(f"[Base64图片保存失败] {filename}: {e}")
@@ -308,11 +315,11 @@ def download_html_images(html_content, save_folder):
     # 创建images子目录
     images_folder = os.path.join(save_folder, 'images')
     os.makedirs(images_folder, exist_ok=True)
-    
+
     # 匹配图片URL（src="https://..."）
     img_pattern = r'src=["\']?(https?://[^"\'>\s]+\.(jpg|jpeg|png|gif|webp|svg)[^"\'>\s]*)["\']?'
     matches = re.findall(img_pattern, html_content, re.IGNORECASE)
-    
+
     url_map = {}
     for url, ext in matches:
         if url not in url_map:
@@ -320,30 +327,96 @@ def download_html_images(html_content, save_folder):
             if filename:
                 url_map[url] = f"images/{filename}"
                 print(f"[下载] {url} -> {filename}")
-    
+
     # 替换URL
     for old_url, new_path in url_map.items():
         html_content = html_content.replace(old_url, new_path)
-    
+
     return html_content
 
 
 class CustomHandler(http.server.SimpleHTTPRequestHandler):
-    
+
     def end_headers(self):
         """添加禁用缓存的响应头"""
         self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
         self.send_header('Pragma', 'no-cache')
         self.send_header('Expires', '0')
         super().end_headers()
-    
+
+    # ==================== 认证辅助方法 ====================
+
+    def get_current_user(self):
+        """从 Cookie 读取 session，返回 user dict 或 None"""
+        cookie_header = self.headers.get('Cookie', '')
+        cookies = http.cookies.SimpleCookie()
+        try:
+            cookies.load(cookie_header)
+        except Exception:
+            return None
+        token_morsel = cookies.get('session_token')
+        if not token_morsel:
+            return None
+        return db.get_session_user(token_morsel.value)
+
+    def require_auth(self):
+        """要求登录，返回 user dict，未登录则发送 401 并返回 None"""
+        user = self.get_current_user()
+        if not user:
+            self.send_response(401)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': '请先登录'}).encode('utf-8'))
+            return None
+        return user
+
+    def set_session_cookie(self, token):
+        """设置 session cookie"""
+        cookie = http.cookies.SimpleCookie()
+        cookie['session_token'] = token
+        cookie['session_token']['path'] = '/'
+        cookie['session_token']['httponly'] = True
+        cookie['session_token']['samesite'] = 'Lax'
+        cookie['session_token']['max-age'] = 3 * 24 * 3600  # 3天
+        self.send_header('Set-Cookie', cookie['session_token'].OutputString())
+
+    def clear_session_cookie(self):
+        """清除 session cookie"""
+        cookie = http.cookies.SimpleCookie()
+        cookie['session_token'] = ''
+        cookie['session_token']['path'] = '/'
+        cookie['session_token']['max-age'] = 0
+        self.send_header('Set-Cookie', cookie['session_token'].OutputString())
+
+    def read_json_body(self):
+        """读取并解析 JSON 请求体"""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        return json.loads(body.decode('utf-8'))
+
     def do_GET(self):
         """处理 GET 请求"""
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
-        
-        if path == '/api/prd/load':
+
+        # ---- 认证 & 团队 路由 ----
+        if path == '/api/auth/me':
+            self.handle_auth_me()
+        elif path == '/api/teams':
+            self.handle_get_teams()
+        elif path.startswith('/api/teams/') and path.endswith('/members'):
+            team_id = path.split('/')[3]
+            self.handle_get_team_members(team_id)
+        elif path == '/api/projects/my':
+            self.handle_get_my_projects(query)
+        elif path == '/api/projects/team':
+            self.handle_get_team_projects(query)
+        # ---- 项目文件访问控制 ----
+        elif path.startswith('/projects/'):
+            self.handle_project_file_access(path)
+        # ---- 原有路由 ----
+        elif path == '/api/prd/load':
             self.handle_prd_load(query)
         elif path == '/api/pages':
             self.handle_get_pages(query)
@@ -353,6 +426,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_generation_status(query)
         elif path == '/api/models':
             self.handle_get_models()
+        elif path == '/api/server-info':
+            self.handle_server_info()
         elif path == '/api/github/config':
             self.handle_github_config_get()
         elif path == '/data/projects.json':
@@ -362,9 +437,39 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         else:
             # 默认静态文件服务
             super().do_GET()
-    
+
     def do_POST(self):
-        if self.path == '/upload':
+        path = self.path.split('?')[0]  # 去掉查询参数
+        # ---- 认证路由 ----
+        if path == '/api/auth/register':
+            self.handle_auth_register()
+        elif path == '/api/auth/login':
+            self.handle_auth_login()
+        elif path == '/api/auth/logout':
+            self.handle_auth_logout()
+        # ---- 团队路由 ----
+        elif path == '/api/teams/create':
+            self.handle_create_team()
+        elif path == '/api/teams/join':
+            self.handle_join_team()
+        elif path.startswith('/api/teams/') and path.endswith('/leave'):
+            team_id = path.split('/')[3]
+            self.handle_leave_team(team_id)
+        elif path.startswith('/api/teams/') and path.endswith('/remove-member'):
+            team_id = path.split('/')[3]
+            self.handle_remove_member(team_id)
+        # ---- 项目分享路由 ----
+        elif path.startswith('/api/projects/') and path.endswith('/share'):
+            project_id = urllib.parse.unquote(path.split('/api/projects/')[1].rsplit('/share', 1)[0])
+            self.handle_share_project(project_id)
+        elif path.startswith('/api/projects/') and path.endswith('/unshare'):
+            project_id = urllib.parse.unquote(path.split('/api/projects/')[1].rsplit('/unshare', 1)[0])
+            self.handle_unshare_project(project_id)
+        elif path.startswith('/api/projects/') and path.endswith('/shared-teams'):
+            project_id = urllib.parse.unquote(path.split('/api/projects/')[1].rsplit('/shared-teams', 1)[0])
+            self.handle_get_project_shared_teams(project_id)
+        # ---- 原有路由 ----
+        elif self.path == '/upload':
             self.handle_upload()
         elif self.path == '/generate':
             self.handle_generate()
@@ -414,19 +519,19 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             if not content_type.startswith('multipart/form-data'):
                 self.send_error(400, "Expected multipart/form-data")
                 return
-            
+
             boundary_match = re.search(r'boundary=([^;]+)', content_type)
             if not boundary_match:
                 self.send_error(400, "Missing boundary")
                 return
             boundary = boundary_match.group(1).encode()
-            
+
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
-            
+
             saved_paths = []
             parts = body.split(b'--' + boundary)
-            
+
             for part in parts:
                 if not part or part == b'--\r\n' or part == b'--':
                     continue
@@ -434,23 +539,23 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     part = part[2:]
                 if part.endswith(b'\r\n'):
                     part = part[:-2]
-                    
+
                 header_end = part.find(b'\r\n\r\n')
                 if header_end == -1:
                     continue
-                    
+
                 headers = part[:header_end].decode('utf-8', errors='ignore')
                 file_data = part[header_end+4:]
-                
+
                 filename_match = re.search(r'filename="([^"]+)"', headers)
                 if filename_match:
                     filename = filename_match.group(1)
                     filename = os.path.basename(filename)
-                    
+
                     save_path = os.path.join(UPLOAD_DIR, filename)
                     with open(save_path, 'wb') as f:
                         f.write(file_data)
-                        
+
                     saved_paths.append({
                         'name': filename,
                         'path': os.path.abspath(save_path),
@@ -458,7 +563,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     })
 
             self.send_json_response({'files': saved_paths})
-            
+
         except Exception as e:
             self.send_error_response(str(e))
 
@@ -468,44 +573,44 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
-            
+
             prompt = data.get('prompt', '')
             images = data.get('images', [])  # base64 images
             project_name = data.get('projectName', '未命名项目')
             form_data = data.get('formData', {})  # 用户输入的表单数据
-            
+
             # 增量更新参数
             is_incremental = data.get('incremental', False)
             source_project_id = data.get('sourceProjectId', None)
             changes = data.get('changes', None)
-            
+
             if not prompt:
                 self.send_error_response("缺少 prompt")
                 return
-            
+
             print(f"[生成] 项目: {project_name}, 图片数: {len(images)}, 增量模式: {is_incremental}")
-            
+
             # 生成项目ID（日期时间_英文名）
             project_id = generate_project_id(project_name)
             project_folder = os.path.join(PROJECTS_DIR, project_id)
             os.makedirs(project_folder, exist_ok=True)
-            
+
             # 保存用户上传的参考图片
             ref_images_folder = os.path.join(project_folder, 'reference')
             os.makedirs(ref_images_folder, exist_ok=True)
-            
+
             reused_pages = 0
             source_html_content = None
-            
+
             # ==================== 增量更新处理 ====================
             if is_incremental and source_project_id and changes:
                 source_folder = os.path.join(PROJECTS_DIR, source_project_id)
-                
+
                 # 检查是否完全无变化
                 if not changes.get('hasChanges', True):
                     print(f"[增量] 无变化，复制原项目")
                     return self.copy_project(source_project_id, project_name)
-                
+
                 # 复制原项目的reference图片（未变化的页面）
                 source_ref_folder = os.path.join(source_folder, 'reference')
                 if os.path.exists(source_ref_folder):
@@ -516,14 +621,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         if os.path.isfile(src):
                             shutil.copy2(src, dst)
                     print(f"[增量] 复制原项目参考图片")
-                
+
                 # 读取原项目的HTML
                 source_html_path = os.path.join(source_folder, 'index.html')
                 if os.path.exists(source_html_path):
                     with open(source_html_path, 'r', encoding='utf-8') as f:
                         source_html_content = f.read()
                     print(f"[增量] 读取原项目HTML: {len(source_html_content)} 字符")
-                
+
                 # 复制原项目的images文件夹
                 source_images_folder = os.path.join(source_folder, 'images')
                 dest_images_folder = os.path.join(project_folder, 'images')
@@ -531,10 +636,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     import shutil
                     shutil.copytree(source_images_folder, dest_images_folder)
                     print(f"[增量] 复制原项目images文件夹")
-                
+
                 reused_pages = len(changes.get('pagesUnchanged', []))
                 print(f"[增量] 未变化页面数: {reused_pages}, 变化页面数: {len(changes.get('pagesChanged', []))}")
-            
+
             # 保存新上传的图片并记录文件名
             saved_image_names = []
             for i, img_base64 in enumerate(images):
@@ -543,7 +648,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 if saved:
                     saved_image_names.append(saved)
                     print(f"[保存参考图] {saved}")
-            
+
             # 构建并保存record.json（用户输入记录）
             record = {
                 'global': form_data.get('global', {}),
@@ -551,7 +656,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 'createdAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'sourceProjectId': source_project_id if is_incremental else None
             }
-            
+
             # 为每个页面分配图片文件名
             pages_data = form_data.get('pages', [])
             img_index = 0
@@ -571,16 +676,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         page_record['images'].append(saved_image_names[img_index])
                         img_index += 1
                 record['pages'].append(page_record)
-            
+
             # 保存record.json
             record_path = os.path.join(project_folder, 'record.json')
             with open(record_path, 'w', encoding='utf-8') as f:
                 json.dump(record, f, ensure_ascii=False, indent=2)
             print(f"[保存] record.json")
-            
+
             # ==================== 决定是否调用AI ====================
             html_content = None
-            
+
             if is_incremental and source_html_content and reused_pages > 0:
                 # 部分页面可复用，但仍需要调用AI（因为有变化的页面）
                 # 在prompt中提示AI参考原有内容
@@ -590,23 +695,23 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 # 正常调用AI
                 html_content = self.call_ai_model(prompt, images)
-            
+
             if not html_content:
                 self.send_error_response("AI未返回有效内容")
                 return
-            
+
             # 下载HTML中的外部图片并替换URL
             print("[处理] 下载HTML中的外部图片...")
             html_content = download_html_images(html_content, project_folder)
-            
+
             # 注入页面切换消息监听器（用于 viewer.html 的页面导航）
             html_content = self.inject_page_navigation_listener(html_content)
-            
+
             # 保存 HTML
             html_path = os.path.join(project_folder, 'index.html')
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
-            
+
             # 从HTML中提取title作为项目名称
             html_title = extract_title_from_html(html_content)
             if html_title and html_title != project_name:
@@ -614,7 +719,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 # 使用HTML中的title重新生成项目ID
                 new_project_id = generate_project_id(html_title)
                 new_project_folder = os.path.join(PROJECTS_DIR, new_project_id)
-                
+
                 # 重命名文件夹
                 if not os.path.exists(new_project_folder):
                     import shutil
@@ -623,16 +728,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     project_id = new_project_id
                     project_name = html_title
                     print(f"[重命名] 项目文件夹: {project_id}")
-            
+
             # 保存 prompt (用于调试)
             prompt_path = os.path.join(project_folder, 'prompt.txt')
             with open(prompt_path, 'w', encoding='utf-8') as f:
                 f.write(prompt)
-            
+
             # 获取当前选中的模型名称
             current_model = get_selected_model()
             current_model_name = current_model.get('name', '') if current_model else ''
-            
+
             # 更新项目列表
             projects = self.load_projects()
             new_project = {
@@ -649,18 +754,23 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 projects.insert(0, new_project)
             self.save_projects(projects)
-            
+
+            # 记录项目归属
+            cur_user = self.get_current_user()
+            if cur_user:
+                db.set_project_owner(project_id, cur_user['id'])
+
             print(f"[完成] 项目已保存: {project_folder}")
-            
+
             # 返回结果，包含增量信息
             response_data = {
-                'success': True, 
+                'success': True,
                 'project': new_project,
                 'incremental': is_incremental,
                 'reusedPages': reused_pages
             }
             self.send_json_response(response_data)
-            
+
         except Exception as e:
             print(f"[错误] 生成失败: {e}")
             import traceback
@@ -673,7 +783,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
-            
+
             prompt = data.get('prompt', '')
             images = data.get('images', [])
             project_name = data.get('projectName', '未命名项目')
@@ -681,27 +791,27 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             is_incremental = data.get('incremental', False)
             source_project_id = data.get('sourceProjectId', None)
             changes = data.get('changes', None)
-            
+
             if not prompt:
                 self.send_error_response("缺少 prompt")
                 return
-            
+
             # 生成项目ID
             project_id = generate_project_id(project_name)
             project_folder = os.path.join(PROJECTS_DIR, project_id)
             os.makedirs(project_folder, exist_ok=True)
-            
+
             # 保存参考图片
             ref_images_folder = os.path.join(project_folder, 'reference')
             os.makedirs(ref_images_folder, exist_ok=True)
-            
+
             saved_image_names = []
             for i, img_base64 in enumerate(images):
                 filename = f"ref_{i+1}"
                 saved = save_base64_image(img_base64, ref_images_folder, filename)
                 if saved:
                     saved_image_names.append(saved)
-            
+
             # 创建初始 record.json
             record = {
                 'global': form_data.get('global', {}),
@@ -710,7 +820,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 'createdAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'sourceProjectId': source_project_id if is_incremental else None
             }
-            
+
             pages_data = form_data.get('pages', [])
             img_index = 0
             for page in pages_data:
@@ -728,20 +838,20 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         page_record['images'].append(saved_image_names[img_index])
                         img_index += 1
                 record['pages'].append(page_record)
-            
+
             record_path = os.path.join(project_folder, 'record.json')
             with open(record_path, 'w', encoding='utf-8') as f:
                 json.dump(record, f, ensure_ascii=False, indent=2)
-            
+
             # 保存 prompt
             prompt_path = os.path.join(project_folder, 'prompt.txt')
             with open(prompt_path, 'w', encoding='utf-8') as f:
                 f.write(prompt)
-            
+
             # 获取当前选中的模型名称
             current_model = get_selected_model()
             current_model_name = current_model.get('name', '') if current_model else ''
-            
+
             # 更新项目列表（带 generating 状态）
             projects = self.load_projects()
             new_project = {
@@ -754,7 +864,12 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             }
             projects.insert(0, new_project)
             self.save_projects(projects)
-            
+
+            # 记录项目归属
+            cur_user = self.get_current_user()
+            if cur_user:
+                db.set_project_owner(project_id, cur_user['id'])
+
             # 注册异步任务
             with tasks_lock:
                 generating_tasks[project_id] = {
@@ -762,16 +877,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     'progress': 0,
                     'error': ''
                 }
-            
+
             # 启动后台线程
             def generate_in_background():
                 try:
                     print(f"[异步] 开始后台生成: {project_id}")
-                    
+
                     # 更新进度
                     with tasks_lock:
                         generating_tasks[project_id]['progress'] = 10
-                    
+
                     # 增量处理
                     source_html_content = None
                     reused_pages = 0
@@ -781,7 +896,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         if os.path.exists(source_html_path):
                             with open(source_html_path, 'r', encoding='utf-8') as f:
                                 source_html_content = f.read()
-                        
+
                         # 复制原项目图片
                         source_images_folder = os.path.join(source_folder, 'images')
                         dest_images_folder = os.path.join(project_folder, 'images')
@@ -789,37 +904,37 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                             import shutil
                             if not os.path.exists(dest_images_folder):
                                 shutil.copytree(source_images_folder, dest_images_folder)
-                        
+
                         reused_pages = len(changes.get('pagesUnchanged', []))
-                    
+
                     with tasks_lock:
                         generating_tasks[project_id]['progress'] = 20
-                    
+
                     # 调用AI（这里复用现有逻辑）
                     enhanced_prompt = prompt
                     if is_incremental and source_html_content and reused_pages > 0:
                         enhanced_prompt += f"\n\n# 重要提示\n这是一个增量更新任务。原项目中有{reused_pages}个页面内容未变化。请保持整体风格一致。"
-                    
+
                     # 使用类似 call_ai_model 的逻辑
                     html_content = self._call_ai_for_async(enhanced_prompt, images)
-                    
+
                     with tasks_lock:
                         generating_tasks[project_id]['progress'] = 80
-                    
+
                     if not html_content:
                         raise Exception("AI未返回有效内容")
-                    
+
                     # 下载图片
                     html_content = download_html_images(html_content, project_folder)
-                    
+
                     # 注入导航监听器
                     html_content = self.inject_page_navigation_listener(html_content)
-                    
+
                     # 保存HTML
                     html_path = os.path.join(project_folder, 'index.html')
                     with open(html_path, 'w', encoding='utf-8') as f:
                         f.write(html_content)
-                    
+
                     # 更新项目状态
                     projects = self.load_projects()
                     for p in projects:
@@ -827,7 +942,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                             p['status'] = None  # 清除 generating 状态
                             break
                     self.save_projects(projects)
-                    
+
                     # 更新record.json状态
                     if os.path.exists(record_path):
                         with open(record_path, 'r', encoding='utf-8') as f:
@@ -835,23 +950,23 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         record['status'] = STATUS_COMPLETED
                         with open(record_path, 'w', encoding='utf-8') as f:
                             json.dump(record, f, ensure_ascii=False, indent=2)
-                    
+
                     with tasks_lock:
                         generating_tasks[project_id]['status'] = STATUS_COMPLETED
                         generating_tasks[project_id]['progress'] = 100
-                    
+
                     print(f"[异步] 生成完成: {project_id}")
-                    
+
                 except Exception as e:
                     print(f"[异步错误] {project_id}: {e}")
                     import traceback
                     traceback.print_exc()
-                    
+
                     # 更新失败状态
                     with tasks_lock:
                         generating_tasks[project_id]['status'] = STATUS_FAILED
                         generating_tasks[project_id]['error'] = str(e)
-                    
+
                     # 更新项目列表状态
                     projects = self.load_projects()
                     for p in projects:
@@ -859,18 +974,18 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                             p['status'] = STATUS_FAILED
                             break
                     self.save_projects(projects)
-            
+
             # 启动线程
             thread = threading.Thread(target=generate_in_background, daemon=True)
             thread.start()
-            
+
             print(f"[异步] 项目已创建，后台生成中: {project_id}")
             self.send_json_response({
                 'success': True,
                 'project': new_project,
                 'async': True
             })
-            
+
         except Exception as e:
             print(f"[错误] 异步生成启动失败: {e}")
             import traceback
@@ -885,24 +1000,24 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         """复制项目（当内容完全无变化时）"""
         try:
             import shutil
-            
+
             source_folder = os.path.join(PROJECTS_DIR, source_project_id)
             if not os.path.exists(source_folder):
                 self.send_error_response(f"源项目不存在: {source_project_id}")
                 return
-            
+
             # 生成新项目ID
             project_id = generate_project_id(new_project_name)
             project_folder = os.path.join(PROJECTS_DIR, project_id)
-            
+
             # 如果目标目录已存在，先删除
             if os.path.exists(project_folder):
                 shutil.rmtree(project_folder)
-            
+
             # 复制整个文件夹
             shutil.copytree(source_folder, project_folder)
             print(f"[复制] {source_folder} -> {project_folder}")
-            
+
             # 更新record.json的时间戳
             record_path = os.path.join(project_folder, 'record.json')
             if os.path.exists(record_path):
@@ -912,7 +1027,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 record['copiedFrom'] = source_project_id
                 with open(record_path, 'w', encoding='utf-8') as f:
                     json.dump(record, f, ensure_ascii=False, indent=2)
-            
+
             # 更新项目列表
             projects = self.load_projects()
             new_project = {
@@ -928,16 +1043,21 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 projects.insert(0, new_project)
             self.save_projects(projects)
-            
+
+            # 记录项目归属
+            cur_user = self.get_current_user()
+            if cur_user:
+                db.set_project_owner(project_id, cur_user['id'])
+
             print(f"[完成] 项目已复制: {project_folder} (0 API调用)")
             self.send_json_response({
-                'success': True, 
+                'success': True,
                 'project': new_project,
                 'incremental': True,
                 'reusedPages': 'all',
                 'message': '内容无变化，已复制原项目'
             })
-            
+
         except Exception as e:
             print(f"[错误] 复制失败: {e}")
             import traceback
@@ -953,30 +1073,30 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 "type": "text",
                 "text": prompt
             })
-            
+
             # 添加图片
             for img_base64 in images:
                 user_content.append({
                     "type": "image_url",
                     "image_url": {"url": img_base64}
                 })
-            
+
             # 从配置读取 system prompt
-            system_prompt = AI_OPTIONS.get('system_prompt', 
+            system_prompt = AI_OPTIONS.get('system_prompt',
                 'You are a professional UI/UX Developer. Generate complete, standalone HTML prototypes with realistic data.')
-            
+
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_content}
             ]
-            
+
             # 动态获取当前选中模型配置
             selected_model = get_selected_model()
             model_name = selected_model.get('model', API_CONFIG.get('model', 'gpt-4'))
             base_url = selected_model.get('base_url', API_CONFIG.get('base_url', ''))
             api_key = selected_model.get('api_key', API_CONFIG.get('api_key', ''))
             print(f"[AI] 使用模型: {selected_model.get('name', model_name)} ({model_name})")
-            
+
             # 准备请求数据
             payload = {
                 "model": model_name,
@@ -984,29 +1104,29 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 "max_tokens": AI_OPTIONS.get('max_tokens', 100000),
                 "temperature": AI_OPTIONS.get('temperature', 0.7)
             }
-            
+
             url = f"{base_url}/chat/completions"
             headers = {
                 'Content-Type': 'application/json',
                 'Authorization': f"Bearer {api_key}"
             }
-            
+
             timeout = AI_OPTIONS.get('timeout', 300)
             print(f"[AI] 正在调用大模型... (超时: {timeout}s)")
-            
+
             result = None
             max_retries = 3
             last_error = None
-            
+
             for attempt in range(max_retries):
                 try:
                     if attempt > 0:
                         print(f"[AI] 重试第 {attempt+1} 次...")
-                        
+
                     # 每次重试创建新 Session，确保无状态污染
                     session = requests.Session()
                     session.trust_env = False # 强制直连，不使用系统代理 (针对国内 API 域名优化)
-                    
+
                     # 伪装浏览器，并禁用长连接
                     session.headers.update({
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -1015,13 +1135,13 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
                     # 使用 session 发送请求，verify=False 忽略 SSL 验证
                     response = session.post(
-                        url, 
-                        json=payload, 
-                        headers=headers, 
-                        timeout=timeout, 
+                        url,
+                        json=payload,
+                        headers=headers,
+                        timeout=timeout,
                         verify=False
                     )
-                    
+
                     response.raise_for_status() # 检查 HTTP 错误
                     result = response.json()
                     break # 成功则跳出循环
@@ -1031,26 +1151,26 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     if attempt < max_retries - 1:
                         import time
                         time.sleep(1)
-            
+
             # 如果 requests 全部失败，尝试使用 curl 命令行兜底
             if not result:
                 print("[AI] 尝试使用 curl 命令行兜底...")
                 result = self.call_ai_model_via_curl(url, headers, payload, timeout)
-            
+
             if not result:
                 raise last_error
-            
+
             content = result['choices'][0]['message']['content']
             finish_reason = result['choices'][0].get('finish_reason', '')
-            
+
             print(f"[AI] 响应长度: {len(content)} 字符, finish_reason: {finish_reason}")
-            
+
             if finish_reason == 'length':
                 print("[警告] AI响应可能被截断!")
-            
+
             # 提取HTML代码
             return self.extract_html(content)
-            
+
         except Exception as e:
             print(f"[AI错误] {e}")
             import traceback
@@ -1064,44 +1184,44 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             with tempfile.NamedTemporaryFile(mode='w', delete=False, encoding='utf-8', suffix='.json') as f:
                 json.dump(payload, f, ensure_ascii=False)
                 temp_payload_path = f.name
-            
+
             # 构建 curl 命令
             # -k: 忽略 SSL 验证
             # -s: 静默模式
             cmd = ['curl', '-k', '-s', '-X', 'POST', url]
-            
+
             # 添加 header
             for k, v in headers.items():
                 cmd.extend(['-H', f'{k}: {v}'])
-            
+
             # 添加 body 文件
             cmd.extend(['-d', f'@{temp_payload_path}'])
-            
+
             print(f"[AI] 执行 curl 命令: {' '.join(cmd[:6])} ...")
-            
+
             # 执行命令
             process = subprocess.run(
-                cmd, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE, 
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 timeout=timeout,
                 encoding='utf-8',
                 errors='ignore'
             )
-            
+
             # 清理临时文件
             try:
                 os.remove(temp_payload_path)
             except:
                 pass
-            
+
             if process.returncode != 0:
                 print(f"[curl错误] returncode: {process.returncode}, stderr: {process.stderr}")
                 return None
-            
+
             # 解析结果
             return json.loads(process.stdout)
-            
+
         except Exception as e:
             print(f"[curl异常] {e}")
             return None
@@ -1114,14 +1234,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             html = html_match.group(1).strip()
             if '<!DOCTYPE html>' in html or '<html' in html:
                 return html
-        
+
         # 直接查找HTML文档
         doctype_idx = content.find('<!DOCTYPE html>')
         if doctype_idx != -1:
             end_idx = content.rfind('</html>')
             if end_idx != -1:
                 return content[doctype_idx:end_idx + 7]
-        
+
         # 返回原始内容作为预览
         return f'''<!DOCTYPE html>
 <html lang="zh-CN">
@@ -1145,10 +1265,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
-            
+
             html_content = data.get('htmlContent')
             project_meta = data.get('projectData')
-            
+
             if not html_content or not project_meta:
                 self.send_error_response("Missing htmlContent or projectData")
                 return
@@ -1156,26 +1276,26 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             project_id = project_meta.get('id', generate_project_id(project_meta.get('name', 'project')))
             project_folder = os.path.join(PROJECTS_DIR, project_id)
             os.makedirs(project_folder, exist_ok=True)
-            
+
             file_path = os.path.join(project_folder, 'index.html')
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
-                
+
             projects = self.load_projects()
             existing_idx = next((i for i, p in enumerate(projects) if p['id'] == project_id), None)
-            
+
             new_record = {
                 "id": project_id,
                 "name": project_meta['name'],
                 "url": f"/projects/{project_id}/index.html",
                 "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
-            
+
             if existing_idx is not None:
                 projects[existing_idx] = new_record
             else:
                 projects.insert(0, new_record)
-                
+
             self.save_projects(projects)
             self.send_json_response({'success': True, 'project': new_record})
 
@@ -1188,7 +1308,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
-            
+
             project_id = data.get('id')
             if not project_id:
                 self.send_error_response("Missing project ID")
@@ -1196,7 +1316,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
             projects = self.load_projects()
             project = next((p for p in projects if p['id'] == project_id), None)
-            
+
             if project:
                 # 移动文件夹到deleted目录
                 project_folder = os.path.join(PROJECTS_DIR, project_id)
@@ -1208,17 +1328,20 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         shutil.rmtree(deleted_folder)
                     shutil.move(project_folder, deleted_folder)
                     print(f"[删除] 项目移动到回收站: {project_id}")
-                
+
                 # 从项目列表移除
                 projects = [p for p in projects if p['id'] != project_id]
                 self.save_projects(projects)
-                
+
                 # 添加到已删除列表
                 deleted_projects = self.load_deleted_projects()
                 project['deletedAt'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 project['url'] = f'/deleted/{project_id}/index.html'
                 deleted_projects.insert(0, project)
                 self.save_deleted_projects(deleted_projects)
+
+                # 清理项目归属和分享记录
+                db.delete_project_ownership(project_id)
 
             self.send_json_response({'success': True})
 
@@ -1231,10 +1354,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
-            
+
             project_id = data.get('id')
             new_name = data.get('newName', '').strip()
-            
+
             if not project_id:
                 self.send_error_response("Missing project ID")
                 return
@@ -1244,14 +1367,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
             projects = self.load_projects()
             project = next((p for p in projects if p['id'] == project_id), None)
-            
+
             if not project:
                 self.send_error_response("Project not found")
                 return
-            
+
             old_name = project['name']
             old_folder = os.path.join(PROJECTS_DIR, project_id)
-            
+
             # 生成新的文件夹名称（新名称 + 原时间戳）
             # 从原ID中提取时间戳部分
             parts = project_id.rsplit('_', 2)
@@ -1259,16 +1382,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 timestamp = '_'.join(parts[-2:])  # 例如 "20260114_11-20-20"
             else:
                 timestamp = datetime.datetime.now().strftime('%Y%m%d_%H-%M-%S')
-            
+
             # 处理新名称，移除不安全字符
             safe_new_name = re.sub(r'[\\/:*?"<>|]', '', new_name)
             safe_new_name = safe_new_name.replace(' ', '_')
             if len(safe_new_name) > 30:
                 safe_new_name = safe_new_name[:30]
-            
+
             new_project_id = f"{safe_new_name}_{timestamp}"
             new_folder = os.path.join(PROJECTS_DIR, new_project_id)
-            
+
             # 重命名文件夹
             if os.path.exists(old_folder) and old_folder != new_folder:
                 import shutil
@@ -1278,13 +1401,13 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     new_folder = os.path.join(PROJECTS_DIR, new_project_id)
                 shutil.move(old_folder, new_folder)
                 print(f"[重命名文件夹] {project_id} -> {new_project_id}")
-            
+
             # 更新项目信息
             project['id'] = new_project_id
             project['name'] = new_name
             project['url'] = f'/projects/{new_project_id}/index.html'
             self.save_projects(projects)
-            
+
             print(f"[重命名] {old_name} -> {new_name}")
             self.send_json_response({'success': True, 'project': project})
 
@@ -1299,7 +1422,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
-            
+
             project_id = data.get('id')
             if not project_id:
                 self.send_error_response("Missing project ID")
@@ -1307,15 +1430,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
             deleted_projects = self.load_deleted_projects()
             project = next((p for p in deleted_projects if p['id'] == project_id), None)
-            
+
             if not project:
                 self.send_error_response("Deleted project not found")
                 return
-            
+
             # 移动文件夹回projects目录
             deleted_folder = os.path.join(DELETED_DIR, project_id)
             project_folder = os.path.join(PROJECTS_DIR, project_id)
-            
+
             if os.path.exists(deleted_folder):
                 import shutil
                 # 如果目标已存在，先删除
@@ -1323,11 +1446,11 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     shutil.rmtree(project_folder)
                 shutil.move(deleted_folder, project_folder)
                 print(f"[恢复] 项目从回收站恢复: {project_id}")
-            
+
             # 从已删除列表移除
             deleted_projects = [p for p in deleted_projects if p['id'] != project_id]
             self.save_deleted_projects(deleted_projects)
-            
+
             # 添加回项目列表
             projects = self.load_projects()
             # 移除deletedAt字段，更新url
@@ -1341,7 +1464,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 projects.insert(0, project)
             self.save_projects(projects)
-            
+
             self.send_json_response({'success': True, 'project': project})
 
         except Exception as e:
@@ -1353,31 +1476,31 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
-            
+
             source_project_id = data.get('sourceProjectId')
             new_project_name = data.get('newProjectName', '').strip()
-            
+
             if not source_project_id:
                 self.send_error_response("缺少源项目ID")
                 return
             if not new_project_name:
                 self.send_error_response("缺少新项目名称")
                 return
-            
+
             source_folder = os.path.join(PROJECTS_DIR, source_project_id)
             if not os.path.exists(source_folder):
                 self.send_error_response("源项目不存在")
                 return
-            
+
             # 生成新项目ID
             new_project_id = generate_project_id(new_project_name)
             new_folder = os.path.join(PROJECTS_DIR, new_project_id)
-            
+
             # 复制整个文件夹
             import shutil
             shutil.copytree(source_folder, new_folder)
             print(f"[复制项目] {source_project_id} -> {new_project_id}")
-            
+
             # 更新项目列表 (load_projects会自动同步新文件夹)
             projects = self.load_projects()
             new_project = {
@@ -1394,9 +1517,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 projects.insert(0, new_project)
             self.save_projects(projects)
-            
+
+            # 记录项目归属
+            cur_user = self.get_current_user()
+            if cur_user:
+                db.set_project_owner(new_project_id, cur_user['id'])
+
             self.send_json_response({'success': True, 'project': new_project})
-            
+
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -1419,7 +1547,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     projects = json.load(f)
             except:
                 pass
-        
+
         # 扫描projects文件夹获取实际存在的项目
         # 包含有 index.html 的项目 和 有 record.json 的占位项目
         existing_folders = set()
@@ -1434,14 +1562,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         existing_folders.add(folder_name)
                     if has_html:
                         folders_with_html.add(folder_name)
-        
+
         original_count = len(projects)
         original_ids = [p['id'] for p in projects]
         status_updated = False
-        
+
         # 1. 移除不存在的项目
         projects = [p for p in projects if p['id'] in existing_folders]
-        
+
         # 2. 去重：确保每个ID只出现一次（保留第一个）
         seen_ids = set()
         unique_projects = []
@@ -1450,7 +1578,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 seen_ids.add(p['id'])
                 unique_projects.append(p)
         projects = unique_projects
-        
+
         # 3. 检查并更新占位项目状态（pending_external -> 正常）
         for p in projects:
             if p.get('status') == 'pending_external' and p['id'] in folders_with_html:
@@ -1460,7 +1588,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 p['name'] = p['name'].replace(' (待外部生成)', '')  # 移除后缀
                 p['url'] = f"/projects/{p['id']}/index.html"  # 更新URL
                 status_updated = True
-        
+
         # 4. 添加新发现的项目（不在列表中的文件夹）
         existing_ids = {p['id'] for p in projects}
         new_added = False
@@ -1472,7 +1600,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     name = parts[0]
                     date_part = parts[1]
                     time_part = parts[2]
-                    
+
                     # 解析日期
                     try:
                         year = date_part[:4]
@@ -1481,36 +1609,36 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         date_str = f"{year}-{month}-{day}"
                     except:
                         date_str = datetime.datetime.now().strftime('%Y-%m-%d')
-                    
+
                     # 解析时间 (format: 4-15-23pm)
                     try:
                         # 移除am/pm后缀
                         is_pm = time_part.lower().endswith('pm')
                         time_pure = time_part[:-2] if (time_part.lower().endswith('am') or time_part.lower().endswith('pm')) else time_part
-                        
+
                         t_parts = time_pure.split('-')
                         if len(t_parts) >= 3:
                             h = int(t_parts[0])
                             m = int(t_parts[1])
                             s = int(t_parts[2])
-                            
+
                             # 转换12小时制到24小时制
                             if is_pm and h < 12:
                                 h += 12
                             elif not is_pm and h == 12:  # 12am is 00:00
                                 h = 0
-                                
+
                             time_str = f"{h:02d}:{m:02d}:{s:02d}"
                         else:
                             time_str = "00:00:00"
                     except:
                         time_str = "00:00:00"
-                        
+
                     date = f"{date_str} {time_str}"
                 else:
                     name = folder_name
                     date = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                
+
                 new_project = {
                     'id': folder_name,
                     'name': name,
@@ -1520,16 +1648,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 projects.append(new_project)
                 new_added = True
                 print(f"[同步] 发现新项目: {folder_name}")
-        
+
         # 按日期排序（新的在前）
         projects.sort(key=lambda p: p.get('date', ''), reverse=True)
-        
+
         # 只在有变化时保存
         new_ids = [p['id'] for p in projects]
         if len(projects) != original_count or new_ids != original_ids or new_added or status_updated:
             self.save_projects(projects)
             print(f"[同步] 项目列表已更新: {len(projects)}个项目")
-        
+
         return projects
 
     def save_projects(self, projects):
@@ -1554,16 +1682,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
     def inject_page_navigation_listener(self, html_content):
         """在 HTML 中注入页面切换消息监听器"""
-        
+
         # 1. 首先在 Vue 的 return 语句前注入暴露代码
         # 查找模式: "return {" 前插入 "window.currentPage = currentPage;"
         expose_pattern = r'(return\s*\{\s*\n?\s*currentPage)'
         expose_replacement = r'// 暴露 currentPage 到 window (由原型生成器注入)\n                window.currentPage = currentPage;\n\n                \1'
-        
+
         if re.search(expose_pattern, html_content):
             html_content = re.sub(expose_pattern, expose_replacement, html_content, count=1)
             print("[注入] currentPage 已暴露到 window")
-        
+
         # 2. 注入消息监听器
         listener_script = '''
 <!-- 页面导航监听器 (由原型生成器自动注入) -->
@@ -1576,26 +1704,26 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             console.log('[原型] currentPage 已就绪');
         }
     }, 100);
-    
+
     // 监听来自 viewer 的页面切换消息
     window.addEventListener('message', function(event) {
         if (event.data && event.data.type === 'navigateTo') {
             var pageName = event.data.page;
             console.log('[原型] 收到页面切换请求:', pageName);
-            
+
             // 使用 window.currentPage (Vue ref)
             if (window.currentPage && window.currentPage.value !== undefined) {
                 window.currentPage.value = pageName;
                 console.log('[原型] 已切换到页面:', pageName);
             }
-            
+
             // 通知父窗口页面已切换
             if (window.parent !== window) {
                 window.parent.postMessage({ type: 'pageChange', page: pageName }, '*');
             }
         }
     });
-    
+
     // 定期向父窗口报告当前页面
     if (window.parent !== window) {
         setInterval(function() {
@@ -1607,7 +1735,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 })();
 </script>
 '''
-        
+
         # 在 </body> 标签前注入
         if '</body>' in html_content:
             html_content = html_content.replace('</body>', listener_script + '\n</body>')
@@ -1615,50 +1743,50 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             html_content = html_content.replace('</html>', listener_script + '\n</html>')
         else:
             html_content += listener_script
-        
+
         print("[注入] 页面导航监听器已添加")
         return html_content
 
     # ==================== PRD 相关 API ====================
-    
+
     def handle_prd_save(self):
         """保存 PRD 文档"""
         try:
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
-            
+
             project_id = data.get('projectId')
             page_name = data.get('pageName', 'default')
             content = data.get('content', '')
-            
+
             if not project_id:
                 self.send_error_response("缺少 projectId")
                 return
-            
+
             # 创建 PRD 目录
             prd_dir = os.path.join(PROJECTS_DIR, project_id, 'prd')
             os.makedirs(prd_dir, exist_ok=True)
-            
+
             # 保存 PRD 文件
             # 清理页面名称，防止路径注入
             safe_page_name = re.sub(r'[^\w\u4e00-\u9fff-]', '_', page_name)
             prd_file = os.path.join(prd_dir, f'{safe_page_name}.md')
-            
+
             with open(prd_file, 'w', encoding='utf-8') as f:
                 f.write(content)
-            
+
             print(f"[PRD] 保存: {project_id}/{safe_page_name}.md")
             self.send_json_response({'success': True, 'file': f'{safe_page_name}.md'})
-            
+
         except Exception as e:
             print(f"[PRD错误] 保存失败: {e}")
             import traceback
             traceback.print_exc()
             self.send_error_response(str(e))
-    
+
     # ==================== 模型管理 API ====================
-    
+
     def handle_get_models(self):
         """获取模型列表和当前选中模型"""
         try:
@@ -1666,7 +1794,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.send_json_response(data)
         except Exception as e:
             self.send_error_response(str(e))
-    
+
     def handle_model_select(self):
         """切换选中的模型"""
         try:
@@ -1674,37 +1802,37 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             body = self.rfile.read(content_length)
             req = json.loads(body.decode('utf-8'))
             model_id = req.get('id', '')
-            
+
             data = load_models()
             # 验证模型存在
             found = any(m['id'] == model_id for m in data.get('models', []))
             if not found:
                 self.send_error_response("模型不存在")
                 return
-            
+
             data['selected_model_id'] = model_id
             save_models(data)
-            
+
             selected = next(m for m in data['models'] if m['id'] == model_id)
             print(f"[模型] 切换到: {selected.get('name', model_id)}")
             self.send_json_response({'success': True, 'selected': selected})
         except Exception as e:
             self.send_error_response(str(e))
-    
+
     def handle_model_save(self):
         """添加或编辑模型"""
         try:
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             model_info = json.loads(body.decode('utf-8'))
-            
+
             if not model_info.get('id'):
                 self.send_error_response("缺少模型 ID")
                 return
-            
+
             data = load_models()
             models = data.get('models', [])
-            
+
             # 查找是否已存在
             existing_idx = next((i for i, m in enumerate(models) if m['id'] == model_info['id']), None)
             if existing_idx is not None:
@@ -1713,13 +1841,13 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 models.append(model_info)
                 print(f"[模型] 新增: {model_info.get('name', model_info['id'])}")
-            
+
             data['models'] = models
             save_models(data)
             self.send_json_response({'success': True, 'model': model_info})
         except Exception as e:
             self.send_error_response(str(e))
-    
+
     def handle_model_delete(self):
         """删除模型"""
         try:
@@ -1727,71 +1855,71 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             body = self.rfile.read(content_length)
             req = json.loads(body.decode('utf-8'))
             model_id = req.get('id', '')
-            
+
             data = load_models()
             models = data.get('models', [])
-            
+
             if len(models) <= 1:
                 self.send_error_response("至少保留一个模型")
                 return
-            
+
             data['models'] = [m for m in models if m['id'] != model_id]
-            
+
             # 如果删除的是当前选中的，自动选第一个
             if data.get('selected_model_id') == model_id and data['models']:
                 data['selected_model_id'] = data['models'][0]['id']
-            
+
             save_models(data)
             print(f"[模型] 删除: {model_id}")
             self.send_json_response({'success': True})
         except Exception as e:
             self.send_error_response(str(e))
-    
+
     # ==================== Inspector 微调 API ====================
-    
+
     def handle_inspector_apply(self):
         """处理微调模式的 AI 修改请求"""
         try:
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
-            
+
             project_id = data.get('projectId')
             user_request = data.get('userRequest', '')
             elements = data.get('elements', [])
             prompt = data.get('prompt', '')
-            
+
             if not project_id:
                 self.send_error_response("缺少 projectId")
                 return
-            
+
             if not user_request:
                 self.send_error_response("缺少修改需求")
                 return
-            
+
             if not elements:
                 self.send_error_response("未选中任何元素")
                 return
-            
+
             # 读取当前 HTML
             html_file = os.path.join(PROJECTS_DIR, project_id, 'index.html')
             if not os.path.exists(html_file):
                 self.send_error_response("项目不存在")
                 return
-            
+
             with open(html_file, 'r', encoding='utf-8') as f:
                 current_html = f.read()
-            
+
             print(f"[Inspector] 收到微调请求: {project_id}")
             print(f"[Inspector] 选中元素数: {len(elements)}")
             print(f"[Inspector] 用户需求: {user_request}")
-            
+
             # 构建 AI Prompt
             elements_desc = "\n".join([
                 f"元素 {i+1}:\n- 选择器: {el.get('selector', 'unknown')}\n- HTML:\n```html\n{el.get('html', '')}\n```"
                 for i, el in enumerate(elements)
             ])
-            
+
             ai_prompt = f"""你是一个精准的 HTML 修改专家。请根据用户的需求，精确修改指定的 HTML 元素。
 
 ## 当前完整 HTML
@@ -1816,129 +1944,139 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             # 调用 AI
             try:
                 modified_html = self.call_ai_model(ai_prompt, [])
-                
+
                 if not modified_html or len(modified_html) < 100:
                     self.send_error_response("AI 返回内容无效")
                     return
-                
+
                 # 备份原文件
                 backup_file = os.path.join(PROJECTS_DIR, project_id, 'index.html.bak')
                 with open(backup_file, 'w', encoding='utf-8') as f:
                     f.write(current_html)
                 print(f"[Inspector] 备份已创建: {backup_file}")
-                
+
                 # 保存修改后的 HTML
                 with open(html_file, 'w', encoding='utf-8') as f:
                     f.write(modified_html)
-                
+
                 print(f"[Inspector] HTML 已更新: {html_file}")
                 self.send_json_response({
-                    'success': True, 
+                    'success': True,
                     'message': '修改成功',
                     'backupFile': 'index.html.bak'
                 })
-                
+
             except Exception as ai_error:
                 print(f"[Inspector] AI 调用失败: {ai_error}")
                 import traceback
                 traceback.print_exc()
                 self.send_error_response(f"AI 调用失败: {str(ai_error)}")
-            
+
         except Exception as e:
             print(f"[Inspector错误] {e}")
             import traceback
             traceback.print_exc()
             self.send_error_response(str(e))
-    
+
+    def handle_server_info(self):
+        """返回服务器运行时的基础目录信息，供前端动态构建文件路径"""
+        try:
+            projects_abs_path = os.path.abspath(PROJECTS_DIR)
+            self.send_json_response({
+                'projectsDir': projects_abs_path
+            })
+        except Exception as e:
+            self.send_error_response(str(e))
+
     def handle_prd_load(self, query):
         """加载 PRD 文档"""
         try:
             project_id = query.get('projectId', [''])[0]
             page_name = query.get('pageName', ['default'])[0]
-            
+
             if not project_id:
                 self.send_error_response("缺少 projectId")
                 return
-            
+
             # 清理页面名称
             safe_page_name = re.sub(r'[^\w\u4e00-\u9fff-]', '_', page_name)
             prd_file = os.path.join(PROJECTS_DIR, project_id, 'prd', f'{safe_page_name}.md')
-            
+
             content = ''
             if os.path.exists(prd_file):
                 with open(prd_file, 'r', encoding='utf-8') as f:
                     content = f.read()
-            
+
             self.send_json_response({'content': content, 'pageName': safe_page_name})
-            
+
         except Exception as e:
             print(f"[PRD错误] 加载失败: {e}")
             self.send_error_response(str(e))
-    
+
     def handle_get_pages(self, query):
         """获取项目的页面列表（解析 HTML）"""
         try:
             project_id = query.get('projectId', [''])[0]
-            
+
             if not project_id:
                 self.send_error_response("缺少 projectId")
                 return
-            
+
             html_file = os.path.join(PROJECTS_DIR, project_id, 'index.html')
             if not os.path.exists(html_file):
                 self.send_error_response("项目不存在")
                 return
-            
+
             with open(html_file, 'r', encoding='utf-8') as f:
                 html_content = f.read()
-            
+
             pages = self.extract_pages_from_html(html_content)
             self.send_json_response({'pages': pages})
-            
+
         except Exception as e:
             print(f"[Pages错误] {e}")
             self.send_error_response(str(e))
-    
+
     def handle_get_flowchart(self, query):
         """生成流程图（解析 HTML 中的页面跳转关系）"""
         try:
             project_id = query.get('projectId', [''])[0]
-            
+
             if not project_id:
                 self.send_error_response("缺少 projectId")
                 return
-            
+
             html_file = os.path.join(PROJECTS_DIR, project_id, 'index.html')
             if not os.path.exists(html_file):
                 self.send_error_response("项目不存在")
                 return
-            
+
             with open(html_file, 'r', encoding='utf-8') as f:
                 html_content = f.read()
-            
+
             flowchart = self.generate_flowchart_from_html(html_content)
             self.send_json_response(flowchart)
-            
+
         except Exception as e:
             print(f"[Flowchart错误] {e}")
             import traceback
             traceback.print_exc()
             self.send_error_response(str(e))
-    
+
     def extract_pages_from_html(self, html_content):
         """从 HTML 中提取页面列表"""
         pages = []
         seen_names = set()
-        
+
         # ===== 模式A: Vue currentPage 相关的页面定义 =====
         # 模式1: v-if="currentPage === 'xxx'"
         pattern1 = r'v-if=["\']currentPage\s*===?\s*["\']([^"\']+)["\']'
         matches1 = re.findall(pattern1, html_content)
-        
+
         # 模式2: currentPage = 'xxx' 或 currentPage.value = 'xxx'
         pattern2 = r'currentPage(?:\.value)?\s*=\s*["\']([^"\']+)["\']'
         matches2 = re.findall(pattern2, html_content)
-        
+
         for page in set(matches1 + matches2):
             if page and len(page) < 50 and not page.startswith('!') and page not in seen_names:
                 seen_names.add(page)
@@ -1947,12 +2085,12 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     'label': self.get_page_label(page),
                     'type': 'currentPage'
                 })
-        
+
         # ===== 模式B: Vue Router 路由定义 =====
         # 匹配 { path: '/xxx', component: YyyPage } 模式
         router_pattern = r'\{\s*path:\s*["\'](/[^"\']*)["\']'
         router_matches = re.findall(router_pattern, html_content)
-        
+
         if router_matches and not pages:
             # 仅当没有 currentPage 模式时才使用 Router 模式（避免重复）
             for route_path in router_matches:
@@ -1960,7 +2098,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 page_name = route_path.strip('/')
                 if not page_name:
                     page_name = 'home'
-                
+
                 if page_name and len(page_name) < 50 and page_name not in seen_names:
                     seen_names.add(page_name)
                     pages.append({
@@ -1969,12 +2107,12 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         'type': 'router',
                         'routePath': route_path
                     })
-        
+
         # 按名称排序（home 排在最前面）
         pages.sort(key=lambda x: (0 if x['name'] == 'home' else 1, x['name']))
-        
+
         return pages
-    
+
     def get_page_label(self, page_name):
         """获取页面的中文标签"""
         label_map = {
@@ -2007,34 +2145,34 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             'speaking-practice': '口语练习',
         }
         return label_map.get(page_name, page_name)
-    
+
     def generate_flowchart_from_html(self, html_content):
         """从 HTML 生成 Mermaid 流程图"""
         pages = []
         transitions = []
         modals = []
-        
+
         # 1. 提取所有页面
         page_patterns = [
             r'v-if=["\']currentPage\s*===?\s*["\']([^"\']+)["\']',
             r'currentPage(?:\.value)?\s*=\s*["\']([^"\']+)["\']',
             r':class="[^"]*currentPage\s*===?\s*["\']([^"\']+)["\']',
         ]
-        
+
         all_pages = set()
         for pattern in page_patterns:
             matches = re.findall(pattern, html_content)
             for m in matches:
                 if m and len(m) < 50 and not m.startswith('!'):
                     all_pages.add(m)
-        
+
         pages = list(all_pages)
-        
+
         # 2. 提取页面跳转关系 - 改进算法
         # 分割成页面区块来分析
         page_block_pattern = r'(v-if=["\']currentPage\s*===?\s*["\'][^"\']+["\'])'
         blocks = re.split(page_block_pattern, html_content)
-        
+
         current_page = None
         for i, block in enumerate(blocks):
             # 检查是否是页面标识块
@@ -2042,7 +2180,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             if page_match:
                 current_page = page_match.group(1)
                 continue
-            
+
             # 如果有当前页面，分析这个块中的跳转
             if current_page and current_page in pages:
                 # 模式1: currentPage = 'xxx' 或 currentPage.value = 'xxx'
@@ -2054,7 +2192,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                             'to': target,
                             'type': 'direct'
                         })
-                
+
                 # 模式2: goToXxx 或 goTo('xxx')
                 method_matches = re.findall(r'@click=["\'][^"\']*go(?:To)?([A-Z][a-zA-Z]*)', block)
                 for target in method_matches:
@@ -2065,7 +2203,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                             'to': target_lower,
                             'type': 'method'
                         })
-                
+
                 # 模式3: navigateTo('xxx')
                 nav_matches = re.findall(r'navigateTo\(["\']([^"\']+)["\']\)', block)
                 for target in nav_matches:
@@ -2075,7 +2213,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                             'to': target,
                             'type': 'navigate'
                         })
-        
+
         # 3. 提取弹窗/模态框/交互组件
         modal_patterns = [
             (r'v-if=["\']show(\w+)["\']', 'show'),
@@ -2084,7 +2222,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             (r'(\w+Popup)\s*=\s*ref\(', 'popup'),
             (r'const\s+(show\w+)\s*=\s*ref\(', 'ref'),
         ]
-        
+
         modal_set = set()
         for pattern, ptype in modal_patterns:
             matches = re.findall(pattern, html_content)
@@ -2094,9 +2232,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 clean_name = clean_name.replace('Modal', '').replace('Dialog', '').replace('Popup', '')
                 if clean_name and len(clean_name) < 30 and clean_name.lower() not in ['loading', 'error', 'success']:
                     modal_set.add((modal, f'{clean_name}弹窗'))
-        
+
         modals = [{'name': m[0], 'label': m[1]} for m in modal_set]
-        
+
         # 4. 去重转换
         unique_transitions = {}
         for t in transitions:
@@ -2104,15 +2242,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             if key not in unique_transitions:
                 unique_transitions[key] = t
         transitions = list(unique_transitions.values())
-        
+
         # 5. 确保没有孤立页面 - 如果页面没有入边和出边，尝试推断
         connected_pages = set()
         for t in transitions:
             connected_pages.add(t['from'])
             connected_pages.add(t['to'])
-        
+
         isolated_pages = set(pages) - connected_pages
-        
+
         # 如果有 home 页面，将孤立页面连接到 home
         if 'home' in pages and isolated_pages:
             for page in isolated_pages:
@@ -2122,22 +2260,22 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         'to': page,
                         'type': 'inferred'
                     })
-        
+
         # 6. 生成 Mermaid 代码
         mermaid_lines = ['flowchart TD']
-        
+
         # 添加页面节点
         for page in sorted(pages):
             label = self.get_page_label(page)
             # 使用安全的节点ID (移除特殊字符)
             safe_id = re.sub(r'[^a-zA-Z0-9]', '_', page)
             mermaid_lines.append(f'    {safe_id}["{label}"]')
-        
+
         # 添加弹窗节点（圆角矩形）
         for modal in modals[:8]:  # 限制数量
             safe_id = re.sub(r'[^a-zA-Z0-9]', '_', modal['name'])
             mermaid_lines.append(f'    {safe_id}("{modal["label"]}")')
-        
+
         # 添加跳转连接
         added_transitions = set()
         for t in transitions:
@@ -2150,11 +2288,11 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 else:
                     mermaid_lines.append(f'    {safe_from} --> {safe_to}')
                 added_transitions.add(key)
-        
+
         # 添加样式类定义（必须在节点和边之后）
         mermaid_lines.append('    classDef pageNode fill:#e0e7ff,stroke:#6366f1,stroke-width:2px')
         mermaid_lines.append('    classDef modalNode fill:#fef3c7,stroke:#f59e0b,stroke-width:1px,stroke-dasharray:5 5')
-        
+
         # 应用样式（必须在 classDef 之后，节点名用逗号分隔）
         if pages:
             page_ids = ','.join([re.sub(r'[^a-zA-Z0-9]', '_', p) for p in pages])
@@ -2162,9 +2300,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         if modals:
             modal_ids = ','.join([re.sub(r'[^a-zA-Z0-9]', '_', m['name']) for m in modals[:8]])
             mermaid_lines.append(f'    class {modal_ids} modalNode')
-        
+
         mermaid_code = '\n'.join(mermaid_lines)
-        
+
         return {
             'pages': [{'name': p, 'label': self.get_page_label(p)} for p in sorted(pages)],
             'transitions': transitions,
@@ -2176,6 +2314,331 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 'modalCount': len(modals)
             }
         }
+
+    # ==================== 认证处理 ====================
+
+    def handle_auth_register(self):
+        """注册新用户"""
+        try:
+            data = self.read_json_body()
+            username = data.get('username', '').strip()
+            password = data.get('password', '')
+            display_name = data.get('displayName', '').strip() or username
+
+            if not username or not password:
+                self.send_error_response("用户名和密码不能为空")
+                return
+            if len(username) < 2 or len(username) > 30:
+                self.send_error_response("用户名长度 2-30 个字符")
+                return
+            if len(password) < 6:
+                self.send_error_response("密码至少 6 个字符")
+                return
+
+            user = db.create_user(username, password, display_name)
+            if not user:
+                self.send_error_response("用户名已被占用")
+                return
+
+            token = db.create_session(user['id'])
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.set_session_cookie(token)
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'success': True,
+                'user': {'id': user['id'], 'username': user['username'], 'displayName': user['display_name']}
+            }, ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_auth_login(self):
+        """用户登录"""
+        try:
+            data = self.read_json_body()
+            username = data.get('username', '').strip()
+            password = data.get('password', '')
+
+            user = db.get_user_by_username(username)
+            if not user or not db.verify_password(password, user['password_hash']):
+                self.send_error_response("用户名或密码错误")
+                return
+
+            token = db.create_session(user['id'])
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.set_session_cookie(token)
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                'success': True,
+                'user': {'id': user['id'], 'username': user['username'], 'displayName': user['display_name']}
+            }, ensure_ascii=False).encode('utf-8'))
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_auth_logout(self):
+        """退出登录"""
+        try:
+            cookie_header = self.headers.get('Cookie', '')
+            cookies = http.cookies.SimpleCookie()
+            cookies.load(cookie_header)
+            token_morsel = cookies.get('session_token')
+            if token_morsel:
+                db.delete_session(token_morsel.value)
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.clear_session_cookie()
+            self.end_headers()
+            self.wfile.write(json.dumps({'success': True}).encode('utf-8'))
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_auth_me(self):
+        """获取当前登录用户信息"""
+        user = self.get_current_user()
+        if not user:
+            self.send_json_response({'user': None})
+            return
+        teams = db.get_user_teams(user['id'])
+        self.send_json_response({
+            'user': {
+                'id': user['id'],
+                'username': user['username'],
+                'displayName': user['display_name']
+            },
+            'teams': [{'id': t['id'], 'name': t['name'], 'role': t['role'], 'inviteCode': t['invite_code']} for t in teams]
+        })
+
+    # ==================== 团队处理 ====================
+
+    def handle_get_teams(self):
+        """获取当前用户的团队列表"""
+        user = self.require_auth()
+        if not user:
+            return
+        teams = db.get_user_teams(user['id'])
+        self.send_json_response({
+            'teams': [{'id': t['id'], 'name': t['name'], 'role': t['role'], 'inviteCode': t['invite_code']} for t in teams]
+        })
+
+    def handle_create_team(self):
+        """创建团队"""
+        user = self.require_auth()
+        if not user:
+            return
+        try:
+            data = self.read_json_body()
+            name = data.get('name', '').strip()
+            if not name:
+                self.send_error_response("团队名称不能为空")
+                return
+            team = db.create_team(name, user['id'])
+            self.send_json_response({
+                'success': True,
+                'team': {'id': team['id'], 'name': team['name'], 'inviteCode': team['invite_code']}
+            })
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_join_team(self):
+        """通过邀请码加入团队"""
+        user = self.require_auth()
+        if not user:
+            return
+        try:
+            data = self.read_json_body()
+            invite_code = data.get('inviteCode', '').strip()
+            if not invite_code:
+                self.send_error_response("请输入邀请码")
+                return
+            team = db.join_team_by_code(invite_code, user['id'])
+            if not team:
+                self.send_error_response("邀请码无效")
+                return
+            self.send_json_response({
+                'success': True,
+                'team': {'id': team['id'], 'name': team['name'], 'inviteCode': team['invite_code']}
+            })
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_get_team_members(self, team_id):
+        """获取团队成员列表"""
+        user = self.require_auth()
+        if not user:
+            return
+        try:
+            team_id = int(team_id)
+            if not db.is_team_member(team_id, user['id']):
+                self.send_error_response("你不是该团队成员")
+                return
+            members = db.get_team_members(team_id)
+            self.send_json_response({'members': members})
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_leave_team(self, team_id):
+        """退出团队"""
+        user = self.require_auth()
+        if not user:
+            return
+        try:
+            team_id = int(team_id)
+            db.leave_team(team_id, user['id'])
+            self.send_json_response({'success': True})
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_remove_member(self, team_id):
+        """管理员移除团队成员"""
+        user = self.require_auth()
+        if not user:
+            return
+        try:
+            team_id = int(team_id)
+            data = self.read_json_body()
+            target_user_id = data.get('userId')
+
+            role = db.get_team_member_role(team_id, user['id'])
+            if role != 'admin':
+                self.send_error_response("只有管理员可以移除成员")
+                return
+            if target_user_id == user['id']:
+                self.send_error_response("不能移除自己")
+                return
+            db.remove_team_member(team_id, target_user_id)
+            self.send_json_response({'success': True})
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    # ==================== 项目分享处理 ====================
+
+    def handle_share_project(self, project_id):
+        """分享项目到团队"""
+        user = self.require_auth()
+        if not user:
+            return
+        try:
+            data = self.read_json_body()
+            team_id = data.get('teamId')
+            if not team_id:
+                self.send_error_response("缺少 teamId")
+                return
+            # 验证：是项目拥有者
+            owner_id = db.get_project_owner(project_id)
+            if owner_id != user['id']:
+                self.send_error_response("只有项目拥有者可以分享")
+                return
+            # 验证：是团队成员
+            if not db.is_team_member(team_id, user['id']):
+                self.send_error_response("你不是该团队成员")
+                return
+            db.share_project(project_id, team_id, user['id'])
+            self.send_json_response({'success': True})
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_unshare_project(self, project_id):
+        """取消分享"""
+        user = self.require_auth()
+        if not user:
+            return
+        try:
+            data = self.read_json_body()
+            team_id = data.get('teamId')
+            owner_id = db.get_project_owner(project_id)
+            if owner_id != user['id']:
+                self.send_error_response("只有项目拥有者可以取消分享")
+                return
+            db.unshare_project(project_id, team_id)
+            self.send_json_response({'success': True})
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_get_project_shared_teams(self, project_id):
+        """获取项目分享到的团队列表"""
+        user = self.require_auth()
+        if not user:
+            return
+        try:
+            teams = db.get_project_shared_teams(project_id)
+            self.send_json_response({'teams': teams})
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    # ==================== 项目列表（按用户/团队过滤）====================
+
+    def handle_get_my_projects(self, query):
+        """获取当前用户的个人项目"""
+        user = self.require_auth()
+        if not user:
+            return
+        all_projects = self.load_projects()
+        my_ids = set(db.get_user_project_ids(user['id']))
+        my_projects = [p for p in all_projects if p['id'] in my_ids]
+        self.send_json_response({'projects': my_projects})
+
+    def handle_get_team_projects(self, query):
+        """获取团队内的共享项目"""
+        user = self.require_auth()
+        if not user:
+            return
+        team_id = query.get('teamId', [''])[0]
+        if not team_id:
+            self.send_error_response("缺少 teamId")
+            return
+        try:
+            team_id = int(team_id)
+        except ValueError:
+            self.send_error_response("teamId 无效")
+            return
+        if not db.is_team_member(team_id, user['id']):
+            self.send_error_response("你不是该团队成员")
+            return
+        all_projects = self.load_projects()
+        team_ids = set(db.get_team_project_ids(team_id))
+        team_projects = [p for p in all_projects if p['id'] in team_ids]
+        # 附加拥有者信息
+        for p in team_projects:
+            owner_id = db.get_project_owner(p['id'])
+            if owner_id:
+                owner = db.get_user_by_id(owner_id)
+                p['ownerName'] = owner['display_name'] if owner else '未知'
+        self.send_json_response({'projects': team_projects})
+
+    # ==================== 项目文件访问控制 ====================
+
+    def handle_project_file_access(self, path):
+        """控制 /projects/<id>/ 下的文件访问"""
+        user = self.get_current_user()
+        # 从路径提取 project_id（/projects/{id}/...）
+        parts = path.split('/')
+        if len(parts) < 3:
+            super().do_GET()
+            return
+        project_id = urllib.parse.unquote(parts[2])
+
+        # 未登录 → 重定向到登录页
+        if not user:
+            self.send_response(302)
+            self.send_header('Location', '/src/login.html')
+            self.end_headers()
+            return
+
+        # 检查权限
+        if not db.can_user_access_project(project_id, user['id']):
+            self.send_response(403)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': '无权访问此项目'}).encode('utf-8'))
+            return
+
+        # 有权限，正常服务静态文件
+        super().do_GET()
 
     def send_json_response(self, data):
         """发送JSON响应"""
@@ -2199,7 +2662,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             if not project_id:
                 self.send_error_response("缺少project_id")
                 return
-            
+
             # 检查任务状态
             with tasks_lock:
                 if project_id in generating_tasks:
@@ -2210,14 +2673,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         'error': task_info.get('error', '')
                     })
                     return
-            
+
             # 检查是否已完成
             html_path = os.path.join(PROJECTS_DIR, project_id, 'index.html')
             if os.path.exists(html_path):
                 self.send_json_response({'status': STATUS_COMPLETED, 'progress': 100})
             else:
                 self.send_json_response({'status': 'not_found', 'progress': 0})
-                
+
         except Exception as e:
             print(f"[错误] 查询状态失败: {e}")
             self.send_error_response(str(e))
@@ -2228,26 +2691,26 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
-            
+
             project_id = data.get('projectId', '')
             project_name = data.get('projectName', '未命名项目')
             form_data = data.get('formData', {})
             image_files = data.get('imageFiles', {})  # {pageIndex: [base64...]}
-            
+
             if not project_id:
                 self.send_error_response("缺少projectId")
                 return
-            
+
             print(f"[占位] 创建项目: {project_name} ({project_id})")
-            
+
             # 创建项目文件夹
             project_folder = os.path.join(PROJECTS_DIR, project_id)
             os.makedirs(project_folder, exist_ok=True)
-            
+
             # 保存参考图片
             ref_images_folder = os.path.join(project_folder, 'reference')
             os.makedirs(ref_images_folder, exist_ok=True)
-            
+
             saved_image_names = []
             for page_index_str, images in image_files.items():
                 for i, img_base64 in enumerate(images):
@@ -2255,7 +2718,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     saved = save_base64_image(img_base64, ref_images_folder, filename)
                     if saved:
                         saved_image_names.append(saved)
-            
+
             # 构建record.json
             record = {
                 'global': form_data.get('global', {}),
@@ -2263,15 +2726,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 'status': 'pending_external',
                 'createdAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
-            
+
             record_path = os.path.join(project_folder, 'record.json')
             with open(record_path, 'w', encoding='utf-8') as f:
                 json.dump(record, f, ensure_ascii=False, indent=2)
-            
+
             # 获取当前选中的模型名称
             current_model = get_selected_model()
             current_model_name = current_model.get('name', '') if current_model else ''
-            
+
             # 更新项目列表
             projects = self.load_projects()
             new_project = {
@@ -2284,10 +2747,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             }
             projects.insert(0, new_project)
             self.save_projects(projects)
-            
+
+            # 记录项目归属
+            cur_user = self.get_current_user()
+            if cur_user:
+                db.set_project_owner(project_id, cur_user['id'])
+
             print(f"[完成] 占位项目已创建: {project_folder}")
             self.send_json_response({'success': True, 'project': new_project})
-            
+
         except Exception as e:
             print(f"[错误] 创建占位项目失败: {e}")
             import traceback
@@ -2735,7 +3203,7 @@ function copyLink(url, btn) {{
                 return
 
             api_base = 'https://api.github.com'
-            
+
             # 用带自动重试的 Session，解决连接池里的"僵尸连接"被 GitHub 关闭后引发的 ConnectionResetError
             from requests.adapters import HTTPAdapter
             from urllib3.util.retry import Retry
@@ -2830,7 +3298,7 @@ function copyLink(url, btn) {{
             spec = importlib.util.spec_from_file_location("export_project", ep_path)
             ep = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(ep)
-            
+
             export_dir = ep.export_project(project_id, mode=mode)
             print(f"[GitHub] 导出目录: {export_dir}")
 
@@ -2841,7 +3309,7 @@ function copyLink(url, btn) {{
                     content_b64 = base64.b64encode(f.read()).decode()
 
                 file_api_url = f"{api_base}/repos/{username}/{repo}/contents/{remote_path}"
-                
+
                 # Check if file exists to get SHA for update
                 existing = session.get(file_api_url, timeout=10)
                 payload = {
@@ -2870,7 +3338,7 @@ function copyLink(url, btn) {{
                         upload_file(local_path, remote_path)
             else:
                 raise Exception(f"导出目录不存在: {export_dir}")
-                
+
             print(f"[GitHub] 项目文件上传完成。")
 
             # ---- 6. 生成 Pages URL ----
