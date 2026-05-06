@@ -244,10 +244,13 @@
                         <p class="text-xs text-gray-400" id="userUsername">--</p>
                     </div>
                     <div class="py-1">
-                        <button onclick="openTeamManager()" class="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                        <button id="loginMenuBtn" onclick="redirectToLoginForTeam()" class="w-full text-left px-4 py-2.5 text-sm text-indigo-600 hover:bg-indigo-50 flex items-center gap-2">
+                            <i class="fas fa-users text-indigo-400 w-4"></i>登录团队版
+                        </button>
+                        <button id="teamManagerMenuBtn" onclick="openTeamManager()" class="hidden w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
                             <i class="fas fa-users text-gray-400 w-4"></i>团队管理
                         </button>
-                        <button onclick="handleLogout()" class="w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
+                        <button id="logoutMenuBtn" onclick="handleLogout()" class="hidden w-full text-left px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2">
                             <i class="fas fa-sign-out-alt text-red-400 w-4"></i>退出登录
                         </button>
                     </div>
@@ -903,6 +906,36 @@
                 <div id="shareTeamList" class="space-y-2 max-h-60 overflow-y-auto">
                     <div class="text-center text-sm text-gray-400 py-4">加载中...</div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通用应用内弹窗：替代浏览器 alert / confirm / prompt -->
+    <div id="appDialog" class="fixed inset-0 z-[100] hidden items-center justify-center">
+        <div id="appDialogOverlay" class="absolute inset-0 bg-gray-900/55 backdrop-blur-sm"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div class="px-6 pt-6 pb-4">
+                <div class="flex items-start gap-3">
+                    <div id="appDialogIcon" class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center flex-none">
+                        <i class="fas fa-info-circle"></i>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <h3 id="appDialogTitle" class="text-lg font-bold text-gray-900">提示</h3>
+                        <p id="appDialogMessage" class="text-sm text-gray-500 mt-2 leading-6 whitespace-pre-line"></p>
+                    </div>
+                </div>
+                <input id="appDialogInput" type="text"
+                    class="hidden mt-5 w-full px-3 py-2.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+            </div>
+            <div class="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+                <button id="appDialogCancel"
+                    class="px-4 py-2.5 border border-gray-200 text-gray-700 hover:bg-white rounded-lg text-sm font-medium transition">
+                    取消
+                </button>
+                <button id="appDialogConfirm"
+                    class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition">
+                    确定
+                </button>
             </div>
         </div>
     </div>

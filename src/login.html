@@ -103,10 +103,16 @@
     </div>
 
     <script>
+        function getNextUrl() {
+            const params = new URLSearchParams(window.location.search);
+            const next = params.get('next') || '/src/';
+            return next.startsWith('/') && !next.startsWith('//') ? next : '/src/';
+        }
+
         // 检查是否已登录
         fetch('/api/auth/me').then(r => r.json()).then(data => {
             if (data.user) {
-                window.location.href = '/src/';
+                window.location.href = getNextUrl();
             }
         });
 
@@ -155,7 +161,7 @@
                 });
                 const data = await res.json();
                 if (data.success) {
-                    window.location.href = '/src/';
+                    window.location.href = getNextUrl();
                 } else {
                     showError(data.error || '登录失败');
                 }
@@ -193,7 +199,7 @@
                 });
                 const data = await res.json();
                 if (data.success) {
-                    window.location.href = '/src/';
+                    window.location.href = getNextUrl();
                 } else {
                     showError(data.error || '注册失败');
                 }

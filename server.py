@@ -2341,6 +2341,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 return
 
             token = db.create_session(user['id'])
+            imported_count = self.sync_local_projects_to_user(user['id'], claim_all=True)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -2348,7 +2349,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({
                 'success': True,
-                'user': {'id': user['id'], 'username': user['username'], 'displayName': user['display_name']}
+                'user': {'id': user['id'], 'username': user['username'], 'displayName': user['display_name']},
+                'importedProjects': imported_count
             }, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             self.send_error_response(str(e))
@@ -2366,6 +2368,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 return
 
             token = db.create_session(user['id'])
+            imported_count = self.sync_local_projects_to_user(user['id'], claim_all=True)
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -2373,7 +2376,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({
                 'success': True,
-                'user': {'id': user['id'], 'username': user['username'], 'displayName': user['display_name']}
+                'user': {'id': user['id'], 'username': user['username'], 'displayName': user['display_name']},
+                'importedProjects': imported_count
             }, ensure_ascii=False).encode('utf-8'))
         except Exception as e:
             self.send_error_response(str(e))
@@ -2403,6 +2407,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         if not user:
             self.send_json_response({'user': None})
             return
+        self.sync_local_projects_to_user(user['id'], claim_all=False)
         teams = db.get_user_teams(user['id'])
         self.send_json_response({
             'user': {
@@ -2577,6 +2582,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         user = self.require_auth()
         if not user:
             return
+        self.sync_local_projects_to_user(user['id'], claim_all=False)
         all_projects = self.load_projects()
         my_ids = set(db.get_user_project_ids(user['id']))
         my_projects = [p for p in all_projects if p['id'] in my_ids]
@@ -2622,11 +2628,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             return
         project_id = urllib.parse.unquote(parts[2])
 
-        # 未登录 → 重定向到登录页
+        # 离线个人版默认不需要登录，允许直接访问本地项目文件
         if not user:
-            self.send_response(302)
-            self.send_header('Location', '/src/login.html')
-            self.end_headers()
+            super().do_GET()
+            return
+
+        owner_id = db.get_project_owner(project_id)
+        if owner_id is None:
+            db.set_project_owner(project_id, user['id'])
+            super().do_GET()
             return
 
         # 检查权限
@@ -2639,6 +2649,30 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
         # 有权限，正常服务静态文件
         super().do_GET()
+
+    def sync_local_projects_to_user(self, user_id, claim_all=False):
+        """将本地个人版项目同步到登录用户的个人项目列表。
+
+        claim_all=True 用于登录/注册后的首次导入，确保离线个人版项目进入当前账号。
+        claim_all=False 只接管未归属项目，避免普通刷新覆盖已有团队归属。
+        """
+        imported = 0
+        try:
+            projects = self.load_projects()
+            for project in projects:
+                project_id = project.get('id')
+                if not project_id:
+                    continue
+                owner_id = db.get_project_owner(project_id)
+                if claim_all or owner_id is None:
+                    if owner_id != user_id:
+                        db.set_project_owner(project_id, user_id)
+                        imported += 1
+            if imported:
+                print(f"[协作] 已同步 {imported} 个本地项目到用户 {user_id}")
+        except Exception as e:
+            print(f"[协作] 同步本地项目失败: {e}")
+        return imported
 
     def send_json_response(self, data):
         """发送JSON响应"""

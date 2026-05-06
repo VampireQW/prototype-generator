@@ -34,9 +34,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 检查登录状态
     await checkAuth();
     setupEventListeners();
-    loadProjects();
     loadModels();
     addPage(); // 默认添加一个页面
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('tab') === 'team' && currentUser) {
+        await switchProjectTab('team');
+    } else {
+        loadProjects();
+    }
 });
 
 // ==================== 事件监听 ====================
@@ -229,8 +235,14 @@ function renderProjectList() {
     }).join('');
 }
 
-function deleteProject(id, name) {
-    if (!confirm(`确定要将 "${name}" 移到回收站吗？`)) return;
+async function deleteProject(id, name) {
+    const confirmed = await showAppConfirm({
+        title: '移到回收站',
+        message: `确定要将「${name}」移到回收站吗？`,
+        confirmText: '移到回收站',
+        tone: 'danger'
+    });
+    if (!confirmed) return;
 
     fetch('/delete-project', {
         method: 'POST',
@@ -249,7 +261,13 @@ function deleteProject(id, name) {
 }
 
 async function copyProject(id, name) {
-    const newName = prompt('请输入新项目名称:', name + ' - 副本');
+    const newName = await showAppPrompt({
+        title: '复制项目',
+        message: '请输入新项目名称',
+        defaultValue: name + ' - 副本',
+        placeholder: '新项目名称',
+        confirmText: '复制'
+    });
     if (!newName || !newName.trim()) return;
 
     try {
@@ -1104,8 +1122,11 @@ async function generateWithAI() {
 
     if (!hasInput) {
         console.log('[验证] 没有输入，显示提示');
-        alert('请先输入内容'); // 临时使用alert确保能看到
-        showToast('请先输入内容', 'error');
+        await showAppAlert({
+            title: '还没有可生成的内容',
+            message: '请先填写页面名称、布局描述、功能说明，或上传参考图。',
+            tone: 'warning'
+        });
         return;
     }
 
@@ -1279,8 +1300,11 @@ async function copyPromptToClipboard() {
 
     if (!hasInput) {
         console.log('[复制Prompt验证] 没有输入，显示提示');
-        alert('请先输入内容'); // 临时使用alert确保能看到
-        showToast('请先输入内容', 'error');
+        await showAppAlert({
+            title: '还没有可复制的 Prompt',
+            message: '请先填写页面名称、布局描述、功能说明，或上传参考图。',
+            tone: 'warning'
+        });
         return;
     }
 
@@ -1386,6 +1410,112 @@ function showToast(msg, type = 'success') {
 
     toast.classList.remove('translate-y-20', 'opacity-0');
     setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);
+}
+
+// ==================== 应用内弹窗（替代浏览器默认弹窗） ====================
+function setDialogTone(tone = 'info') {
+    const iconBox = $('appDialogIcon');
+    const confirmBtn = $('appDialogConfirm');
+    if (!iconBox || !confirmBtn) return;
+
+    const tones = {
+        info: {
+            icon: 'fas fa-info-circle',
+            box: 'w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center flex-none',
+            button: 'px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition'
+        },
+        warning: {
+            icon: 'fas fa-exclamation-triangle',
+            box: 'w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center flex-none',
+            button: 'px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-medium transition'
+        },
+        danger: {
+            icon: 'fas fa-trash-alt',
+            box: 'w-10 h-10 rounded-xl bg-red-50 text-red-500 flex items-center justify-center flex-none',
+            button: 'px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium transition'
+        },
+        success: {
+            icon: 'fas fa-check-circle',
+            box: 'w-10 h-10 rounded-xl bg-green-50 text-green-600 flex items-center justify-center flex-none',
+            button: 'px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition'
+        }
+    };
+
+    const selected = tones[tone] || tones.info;
+    iconBox.className = selected.box;
+    iconBox.innerHTML = `<i class="${selected.icon}"></i>`;
+    confirmBtn.className = selected.button;
+}
+
+function showAppDialog(options = {}) {
+    const dialog = $('appDialog');
+    const titleEl = $('appDialogTitle');
+    const messageEl = $('appDialogMessage');
+    const inputEl = $('appDialogInput');
+    const cancelBtn = $('appDialogCancel');
+    const confirmBtn = $('appDialogConfirm');
+    const overlay = $('appDialogOverlay');
+
+    if (!dialog || !titleEl || !messageEl || !inputEl || !cancelBtn || !confirmBtn) {
+        showToast(options.message || options.title || '请确认操作', options.tone === 'danger' ? 'error' : 'info');
+        return Promise.resolve(options.type === 'confirm' ? false : null);
+    }
+
+    return new Promise(resolve => {
+        titleEl.textContent = options.title || '提示';
+        messageEl.textContent = options.message || '';
+        confirmBtn.textContent = options.confirmText || '确定';
+        cancelBtn.textContent = options.cancelText || '取消';
+        cancelBtn.classList.toggle('hidden', options.type === 'alert');
+        inputEl.classList.toggle('hidden', options.type !== 'prompt');
+        inputEl.value = options.defaultValue || '';
+        inputEl.placeholder = options.placeholder || '';
+        setDialogTone(options.tone || 'info');
+
+        const cleanup = result => {
+            dialog.classList.add('hidden');
+            dialog.classList.remove('flex');
+            confirmBtn.onclick = null;
+            cancelBtn.onclick = null;
+            overlay.onclick = null;
+            document.removeEventListener('keydown', onKeydown);
+            resolve(result);
+        };
+
+        const onKeydown = event => {
+            if (event.key === 'Escape') cleanup(options.type === 'alert' ? true : null);
+            if (event.key === 'Enter' && options.type === 'prompt') cleanup(inputEl.value);
+        };
+
+        confirmBtn.onclick = () => {
+            if (options.type === 'prompt') cleanup(inputEl.value);
+            else cleanup(true);
+        };
+        cancelBtn.onclick = () => cleanup(options.type === 'confirm' ? false : null);
+        overlay.onclick = () => cleanup(options.type === 'confirm' ? false : null);
+        document.addEventListener('keydown', onKeydown);
+
+        dialog.classList.remove('hidden');
+        dialog.classList.add('flex');
+        if (options.type === 'prompt') {
+            setTimeout(() => {
+                inputEl.focus();
+                inputEl.select();
+            }, 50);
+        }
+    });
+}
+
+function showAppAlert(options = {}) {
+    return showAppDialog({ ...options, type: 'alert' });
+}
+
+function showAppConfirm(options = {}) {
+    return showAppDialog({ ...options, type: 'confirm' });
+}
+
+function showAppPrompt(options = {}) {
+    return showAppDialog({ ...options, type: 'prompt' });
 }
 
 // ==================== 模型管理 ====================
@@ -1601,7 +1731,13 @@ async function saveModelForm() {
 
 async function deleteModel(id) {
     const m = modelsList.find(x => x.id === id);
-    if (!confirm(`确定要删除模型 "${m?.name || id}" 吗？`)) return;
+    const confirmed = await showAppConfirm({
+        title: '删除模型',
+        message: `确定要删除模型「${m?.name || id}」吗？`,
+        confirmText: '删除',
+        tone: 'danger'
+    });
+    if (!confirmed) return;
 
     try {
         const res = await fetch('/api/models/delete', {
@@ -1858,23 +1994,31 @@ async function checkAuth() {
         if (data.user) {
             currentUser = data.user;
             userTeams = data.teams || [];
-            updateUserUI();
+        } else {
+            currentUser = null;
+            userTeams = [];
         }
     } catch (e) {
         // 未登录或网络错误，静默处理
+        currentUser = null;
+        userTeams = [];
     }
+    updateUserUI();
 }
 
 function updateUserUI() {
-    if (!currentUser) return;
     const btn = $('userMenuBtn');
-    if (btn) {
+    if (currentUser && btn) {
         const initial = (currentUser.displayName || currentUser.username).charAt(0).toUpperCase();
         btn.textContent = initial;
+    } else if (btn) {
+        btn.innerHTML = '<i class="fas fa-user"></i>';
     }
-    if ($('userDisplayName')) $('userDisplayName').textContent = currentUser.displayName;
-    if ($('userUsername')) $('userUsername').textContent = '@' + currentUser.username;
-    // 填充团队选择器
+    if ($('userDisplayName')) $('userDisplayName').textContent = currentUser ? currentUser.displayName : '离线个人版';
+    if ($('userUsername')) $('userUsername').textContent = currentUser ? '@' + currentUser.username : '本地项目无需登录';
+    if ($('loginMenuBtn')) $('loginMenuBtn').classList.toggle('hidden', !!currentUser);
+    if ($('teamManagerMenuBtn')) $('teamManagerMenuBtn').classList.toggle('hidden', !currentUser);
+    if ($('logoutMenuBtn')) $('logoutMenuBtn').classList.toggle('hidden', !currentUser);
     updateTeamSelector();
 }
 
@@ -1902,10 +2046,33 @@ function toggleUserMenu() {
 
 async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
-    window.location.href = '/src/login.html';
+    window.location.href = '/src/';
 }
 
-function switchProjectTab(tab) {
+function redirectToLoginForTeam() {
+    window.location.href = '/src/login.html?next=' + encodeURIComponent('/src/?tab=team');
+}
+
+async function requireTeamLogin(actionText = '使用团队版') {
+    if (currentUser) return true;
+    const shouldLogin = await showAppConfirm({
+        title: '登录团队版',
+        message: `${actionText}需要先登录。\n登录后会自动把当前本地个人项目导入账号，并与离线个人版保持同步。`,
+        confirmText: '去登录',
+        cancelText: '继续离线使用',
+        tone: 'info'
+    });
+    if (shouldLogin) {
+        redirectToLoginForTeam();
+    }
+    return false;
+}
+
+async function switchProjectTab(tab) {
+    if (tab === 'team' && !(await requireTeamLogin('切换到团队版'))) {
+        return;
+    }
+
     currentTab = tab;
     const tabMy = $('tabMy');
     const tabTeam = $('tabTeam');
@@ -1943,7 +2110,8 @@ function loadTeamProjects() {
 
 // ==================== 团队管理 ====================
 
-function openTeamManager() {
+async function openTeamManager() {
+    if (!(await requireTeamLogin('管理团队'))) return;
     $('userDropdown').classList.add('hidden');
     $('teamManagerModal').classList.remove('hidden');
     $('teamManagerModal').classList.add('flex');
@@ -2078,7 +2246,13 @@ async function viewTeamMembers(teamId) {
 }
 
 async function leaveTeam(teamId, name) {
-    if (!confirm(`确定要退出团队「${name}」吗？`)) return;
+    const confirmed = await showAppConfirm({
+        title: '退出团队',
+        message: `确定要退出团队「${name}」吗？`,
+        confirmText: '退出团队',
+        tone: 'danger'
+    });
+    if (!confirmed) return;
     try {
         const res = await fetch(`/api/teams/${teamId}/leave`, { method: 'POST' });
         const data = await res.json();
@@ -2097,6 +2271,7 @@ async function leaveTeam(teamId, name) {
 // ==================== 项目分享 ====================
 
 async function openShareModal(projectId) {
+    if (!(await requireTeamLogin('分享项目到团队'))) return;
     $('shareProjectId').value = projectId;
     $('shareProjectModal').classList.remove('hidden');
     $('shareProjectModal').classList.add('flex');
