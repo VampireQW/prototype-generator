@@ -180,18 +180,44 @@ print("[INFO] 协作数据库已初始化")
 
 
 # ==================== Open Design 资产层 ====================
-MAX_DESIGN_SYSTEM_CHARS = 30000
-MAX_SKILL_CONTEXT_CHARS = 70000
-MAX_CRAFT_CONTEXT_CHARS = 24000
+MAX_DESIGN_SYSTEM_CHARS = 12000
+MAX_SKILL_CONTEXT_CHARS = 12000
+MAX_CRAFT_CONTEXT_CHARS = 4000
 MAX_PPT_IMAGES_PER_SLIDE = 5
 MAX_AI_IMAGES_PER_REQUEST = 16
 STALE_GENERATION_SECONDS = 15 * 60
-HEAVY_AI_PROMPT_CHARS = 50000
+HEAVY_AI_PROMPT_CHARS = 30000
 HEAVY_AI_IMAGE_COUNT = 8
 HEAVY_AI_TIMEOUT_SECONDS = 120
 
 DEFAULT_SKILL_ID = 'web-prototype'
 DEFAULT_CRAFT_SECTIONS = ['typography', 'color', 'anti-ai-slop']
+
+MINIMAL_CRAFT_RULES = """- 使用清晰的信息层级、真实业务文案和可扫描布局，不要输出模板感占位内容。
+- 字体控制在 6-8 个层级内；正文 15-18px，行高 1.5-1.6；按钮/标签文字保持可读。
+- 色彩需要有主次、背景、中性色和状态色；避免整页只用单一色系的浅深变化。
+- 页面必须响应式，移动端不能文字溢出或元素重叠。
+- 组件状态要完整：hover/focus/active/disabled/loading 等按场景补齐。"""
+
+MINIMAL_SKILL_RULES = {
+    'web-prototype': """- 生成可交互的 Web 原型页面，优先完成用户描述的页面结构、核心流程和关键状态。
+- 用真实示例数据呈现列表、表格、卡片、表单和空状态。
+- 不做营销式 landing，除非用户明确要求。""",
+    'dashboard': """- 面向高频业务操作，布局要紧凑、清晰、便于扫描。
+- 优先呈现筛选、指标、表格、图表、批量操作和状态反馈。
+- 避免大面积装饰和过度卡片化。""",
+    'mobile-app': """- 按移动端真实使用方式组织导航、列表、详情、表单和反馈。
+- 控件尺寸适合触控，底部导航、顶部栏、安全区和滚动区域要自然。
+- 避免桌面 Web 布局直接缩放到手机。""",
+    'saas-landing': """- 产物是 SaaS 产品页时，首屏直接表达产品/品牌和核心价值。
+- 内容包含功能、场景、社会证明、价格或行动入口等必要模块。
+- 视觉要有可信产品感，不堆砌空泛装饰。""",
+    'html-ppt': """- 生成单文件 HTML 演示稿，不是长网页。
+- 默认展示大缩略图概览；点击播放或缩略图进入全屏播放。
+- 播放模式每页占满 100vw x 100vh，支持键盘/鼠标/触摸翻页。
+- 只能通过 Esc 或右键退出播放模式，不显示明显关闭按钮。
+- 每个 PPT 页面对应独立 slide，保留页序、信息层级和配图归属。"""
+}
 
 DESIGN_SYSTEM_CN_NAMES = {
     'linear-app': 'Linear 设计系统',
@@ -416,42 +442,75 @@ def get_design_system_context(design_system_id, max_chars=None):
     return read_text_file(design_system_path(ds_id), max_chars or MAX_DESIGN_SYSTEM_CHARS)
 
 
+def is_default_design_system(design_system_id):
+    ds_id = safe_asset_id(design_system_id)
+    return not ds_id or ds_id in ('default', 'none')
+
+
+def get_minimal_skill_rules(skill_id):
+    sid = safe_asset_id(skill_id) or DEFAULT_SKILL_ID
+    return MINIMAL_SKILL_RULES.get(sid) or MINIMAL_SKILL_RULES[DEFAULT_SKILL_ID]
+
+
 def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', craft_sections=None):
-    """将 Open Design 的资产层注入现有生成任务。"""
+    """将 Open Design 的资产层按需注入现有生成任务。
+
+    默认风格下只注入必要摘要，避免普通原型生成携带大段 OpenDesign 上下文。
+    只有用户选择具体设计系统时，才注入对应 DESIGN.md。
+    """
+    sid = safe_asset_id(skill_id) or DEFAULT_SKILL_ID
+    default_design = is_default_design_system(design_system_id)
     large_ppt_import = (
-        skill_id == 'html-ppt'
+        sid == 'html-ppt'
         and (len(user_prompt or '') > 8000 or '来源文件：' in (user_prompt or ''))
     )
-    design_limit = 12000 if large_ppt_import else MAX_DESIGN_SYSTEM_CHARS
-    skill_limit = 14000 if large_ppt_import else MAX_SKILL_CONTEXT_CHARS
-    craft_limit = 8000 if large_ppt_import else MAX_CRAFT_CONTEXT_CHARS
+    design_limit = 8000 if large_ppt_import else MAX_DESIGN_SYSTEM_CHARS
+    skill_limit = 10000 if sid == 'html-ppt' else 6000
+    craft_limit = 2500 if large_ppt_import else MAX_CRAFT_CONTEXT_CHARS
 
     parts = [
-        "# Open Design 增强上下文",
-        "下面的设计系统、skill 和 craft 规则是本次生成的上位约束。请严格遵守，但不要在页面中解释这些规则。",
-        "优先级：用户明确需求 > Active DESIGN.md > Active Skill > Craft Rules > 用户表单里的主色/强调色/组件风格。若已选择 DESIGN.md，表单颜色只作为微调偏好，不得覆盖品牌核心色板、字体和组件语言。",
+        "# 生成上下文",
+        "下面是本次生成的必要约束。请严格遵守，但不要在页面中解释这些规则。",
+        "优先级：用户明确需求 > 选中的设计系统 > 产物类型规则 > 通用设计规则 > 用户表单里的主题色/辅助色/组件风格。",
     ]
 
     if large_ppt_import:
-        parts.append("本次是大体量 PPT 导入任务，已自动精简设计系统和 skill 上下文；请优先保留 PPT 原始信息层级、页序和关键视觉。")
+        parts.append("本次是大体量 PPT 导入任务，已自动精简上下文；请优先保留 PPT 原始信息层级、页序和关键视觉。")
 
-    design_system = get_design_system_context(design_system_id, design_limit)
-    if design_system:
-        parts.append(f"\n## Active DESIGN.md ({design_system_id})\n\n{design_system}")
+    if default_design:
+        parts.append("\n## 通用设计规则（精简）\n\n" + MINIMAL_CRAFT_RULES)
+    else:
+        design_system = get_design_system_context(design_system_id, design_limit)
+        if design_system:
+            parts.append(f"\n## Active DESIGN.md ({design_system_id})\n\n{design_system}")
+            parts.append("若 DESIGN.md 与用户表单颜色冲突，以 DESIGN.md 的品牌色、字体和组件语言为准。")
+        else:
+            parts.append("\n## 通用设计规则（精简）\n\n" + MINIMAL_CRAFT_RULES)
 
-    craft = get_craft_context(craft_sections, craft_limit)
-    if craft:
-        parts.append(f"\n## Universal Craft Rules\n\n{craft}")
+    if not default_design and sid != DEFAULT_SKILL_ID:
+        skill_context = get_skill_context(sid, skill_limit, include_references=False)
+        if skill_context:
+            parts.append(f"\n## Active Skill ({sid}, compact)\n\n{skill_context}")
+        else:
+            parts.append(f"\n## 产物类型规则（{sid}）\n\n{get_minimal_skill_rules(sid)}")
+    else:
+        parts.append(f"\n## 产物类型规则（{sid}，精简）\n\n{get_minimal_skill_rules(sid)}")
 
-    skill_context = get_skill_context(skill_id or DEFAULT_SKILL_ID, skill_limit, include_references=not large_ppt_import)
-    if skill_context:
-        parts.append(f"\n## Active Skill ({skill_id or DEFAULT_SKILL_ID})\n\n{skill_context}")
+    if sid == 'html-ppt' and default_design and not large_ppt_import:
+        skill_context = get_skill_context(sid, skill_limit, include_references=False)
+        if skill_context:
+            parts.append(f"\n## HTML PPT Skill 补充（compact）\n\n{skill_context}")
+
+    if not default_design and craft_sections:
+        craft = get_craft_context(craft_sections, craft_limit)
+        if craft:
+            parts.append(f"\n## Craft Rules（按需）\n\n{craft}")
 
     parts.append(f"\n# 用户原始需求\n\n{user_prompt}")
     parts.append(
         "\n# 最终输出约束\n"
-        "- 仍然输出一个完整、独立、可直接预览的 HTML 文件。\n"
-        "- 如果 skill 要求 deck/PPT，也输出单文件 HTML deck，保存为 index.html。\n"
+        "- 输出一个完整、独立、可直接预览的 HTML 文件。\n"
+        "- 如果产物类型要求 deck/PPT，也输出单文件 HTML deck，保存为 index.html。\n"
         "- 不要输出 Markdown 解释，不要输出多个文件名说明，只返回 HTML。"
     )
     return '\n\n'.join(parts)
