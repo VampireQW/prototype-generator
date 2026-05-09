@@ -6,6 +6,7 @@
 // ==================== 状态管理 ====================
 let pages = [];
 let pageFiles = {};
+let pagePptImages = {};
 let allProjects = [];
 let searchQuery = '';
 let currentRecordProject = null; // 当前查看的记录项目
@@ -20,6 +21,96 @@ let selectedTeamId = null;
 let modelsList = [];
 let currentModel = null;
 let selectedModelId = '';
+let designSystemsList = [];
+let skillsList = [];
+let pptInputMode = 'import'; // import | pages
+let activeReferenceDropZoneId = null;
+const MAX_REFERENCE_IMAGES_PER_PAGE = 5;
+const MAX_PPT_IMAGES_PER_SLIDE = 5;
+const MAX_AI_IMAGES_PER_REQUEST = 16;
+
+function isSupportedRasterDataUrl(dataUrl) {
+    try {
+        if (!dataUrl || !dataUrl.includes(',')) return false;
+        const base64 = dataUrl.split(',', 2)[1];
+        const binary = atob(base64.slice(0, 64));
+        const bytes = Array.from(binary, ch => ch.charCodeAt(0));
+        const textHead = binary.slice(0, 12);
+        const isPng = bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47;
+        const isJpeg = bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF;
+        const isGif = textHead.startsWith('GIF87a') || textHead.startsWith('GIF89a');
+        const isWebp = textHead.startsWith('RIFF') && textHead.slice(8, 12) === 'WEBP';
+        return isPng || isJpeg || isGif || isWebp;
+    } catch (e) {
+        return false;
+    }
+}
+
+const SKILL_INPUT_MODES = {
+    'web-prototype': {
+        unitLabel: '页面',
+        addLabel: '添加新页面',
+        pagePlaceholder: '页面名称（如：首页、用户列表）',
+        layoutLabel: '布局描述',
+        layoutPlaceholder: '描述页面的布局结构...\n如：顶部导航、左侧菜单、右侧内容区',
+        featuresLabel: '核心功能',
+        featuresPlaceholder: '- 表格排序筛选\n- 数据导出',
+        interactionLabel: '交互说明',
+        interactionPlaceholder: '点击按钮 → 弹出模态框',
+        recommendedDesignSystems: ['linear-app', 'vercel', 'shadcn', 'apple', 'notion']
+    },
+    dashboard: {
+        unitLabel: '页面',
+        addLabel: '添加新页面',
+        pagePlaceholder: '页面名称（如：经营看板、用户分析）',
+        layoutLabel: '布局描述',
+        layoutPlaceholder: '描述页面的布局结构...\n如：顶部导航、左侧菜单、右侧内容区',
+        featuresLabel: '核心功能',
+        featuresPlaceholder: '- 表格排序筛选\n- 数据导出',
+        interactionLabel: '交互说明',
+        interactionPlaceholder: '点击按钮 → 弹出模态框',
+        recommendedDesignSystems: ['linear-app', 'github', 'vercel', 'shadcn', 'figma']
+    },
+    'mobile-app': {
+        unitLabel: '页面',
+        addLabel: '添加新页面',
+        pagePlaceholder: '页面名称（如：首页、详情页、支付页）',
+        layoutLabel: '布局描述',
+        layoutPlaceholder: '描述页面的布局结构...\n如：顶部导航、左侧菜单、右侧内容区',
+        featuresLabel: '核心功能',
+        featuresPlaceholder: '- 表格排序筛选\n- 数据导出',
+        interactionLabel: '交互说明',
+        interactionPlaceholder: '点击按钮 → 弹出模态框',
+        recommendedDesignSystems: ['apple', 'material', 'xiaohongshu', 'notion', 'duolingo']
+    },
+    'saas-landing': {
+        unitLabel: '页面',
+        addLabel: '添加新页面',
+        pagePlaceholder: '页面名称（如：首页、产品介绍、定价页）',
+        layoutLabel: '布局描述',
+        layoutPlaceholder: '描述页面的布局结构...\n如：顶部导航、左侧菜单、右侧内容区',
+        featuresLabel: '核心功能',
+        featuresPlaceholder: '- 表格排序筛选\n- 数据导出',
+        interactionLabel: '交互说明',
+        interactionPlaceholder: '点击按钮 → 弹出模态框',
+        recommendedDesignSystems: ['stripe', 'linear-app', 'vercel', 'supabase', 'framer']
+    },
+    'html-ppt': {
+        unitLabel: '章节',
+        addLabel: '添加章节',
+        pagePlaceholder: 'PPT 标题（可选）',
+        layoutLabel: '布局/内容描述',
+        layoutPlaceholder: '写 PPT 主题、页数、受众、章节大纲、每页核心观点；也可以直接粘贴完整大纲',
+        featuresLabel: '',
+        featuresPlaceholder: '',
+        interactionLabel: '动画描述',
+        interactionPlaceholder: '描述主题风格、转场、动效、是否需要演讲者备注/逐字稿',
+        compactPpt: true,
+        recommendedDesignSystems: ['xiaohongshu', 'apple', 'stripe', 'linear-app', 'editorial']
+    }
+};
+
+const DESIGN_SYSTEM_RECOMMENDED_FALLBACK = ['linear-app', 'apple', 'vercel', 'notion', 'xiaohongshu', 'stripe', 'figma', 'shadcn', 'default'];
 
 // ==================== 增量更新相关 ====================
 let sourceProjectId = null;       // 来源项目ID（用于增量更新）
@@ -34,7 +125,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 检查登录状态
     await checkAuth();
     setupEventListeners();
-    loadModels();
+    await Promise.all([loadModels(), loadDesignSystems(), loadSkills()]);
     addPage(); // 默认添加一个页面
 
     const params = new URLSearchParams(window.location.search);
@@ -44,6 +135,56 @@ document.addEventListener('DOMContentLoaded', async () => {
         loadProjects();
     }
 });
+
+// ==================== 轻提示浮层 ====================
+let helpBubbleEl = null;
+let helpBubblePinned = false;
+
+function ensureHelpBubble() {
+    if (helpBubbleEl) return helpBubbleEl;
+    helpBubbleEl = document.createElement('div');
+    helpBubbleEl.id = 'helpBubble';
+    helpBubbleEl.className = 'fixed z-[9999] max-w-xs rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs leading-relaxed text-gray-700 shadow-xl hidden';
+    document.body.appendChild(helpBubbleEl);
+    return helpBubbleEl;
+}
+
+function showHelpBubble(anchor, text, pinned = false) {
+    const bubble = ensureHelpBubble();
+    bubble.textContent = text;
+    bubble.classList.remove('hidden');
+    helpBubblePinned = pinned;
+
+    const rect = anchor.getBoundingClientRect();
+    const top = Math.min(window.innerHeight - 80, rect.bottom + 8);
+    const left = Math.min(window.innerWidth - 300, Math.max(12, rect.left - 8));
+    bubble.style.top = `${top}px`;
+    bubble.style.left = `${left}px`;
+}
+
+function hideHelpBubble(force = false) {
+    if (!helpBubbleEl) return;
+    if (helpBubblePinned && !force) return;
+    helpBubbleEl.classList.add('hidden');
+    helpBubblePinned = false;
+}
+
+function bindHelpBubble(id, getText) {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener('mouseenter', () => showHelpBubble(el, getText(), false));
+    el.addEventListener('mouseleave', () => hideHelpBubble(false));
+    el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (helpBubbleEl && !helpBubbleEl.classList.contains('hidden') && helpBubblePinned) {
+            hideHelpBubble(true);
+        } else {
+            showHelpBubble(el, getText(), true);
+        }
+    });
+}
+
+document.addEventListener('click', () => hideHelpBubble(true));
 
 // ==================== 事件监听 ====================
 function setupEventListeners() {
@@ -58,6 +199,25 @@ function setupEventListeners() {
 
     // 复制Prompt
     $('copyPromptBtn').onclick = copyPromptToClipboard;
+
+    if ($('skillSelect')) {
+        $('skillSelect').onchange = () => {
+            updateInputModeForSkill();
+            renderDesignSystemSelect(true);
+        };
+    }
+    if ($('pptImportModeBtn')) {
+        $('pptImportModeBtn').onclick = () => setPptInputMode('import');
+    }
+    if ($('pptPagesModeBtn')) {
+        $('pptPagesModeBtn').onclick = () => setPptInputMode('pages');
+    }
+    if ($('designSystemSelect')) {
+        $('designSystemSelect').onchange = updateDesignSystemHint;
+    }
+    document.addEventListener('paste', handleGlobalReferencePaste);
+    bindHelpBubble('designSystemHelp', () => $('designSystemHelp')?.dataset.help || '');
+    bindHelpBubble('skillModeHelp', () => $('skillModeHelp')?.dataset.help || '');
 
     // 颜色选择器
     $('primaryColor').oninput = (e) => $('primaryColorValue').textContent = e.target.value;
@@ -98,10 +258,15 @@ function createNewProject() {
     $('secondaryColorValue').textContent = '#10B981';
     $('backgroundMode').value = 'light';
     $('componentStyle').value = 'Ant Design';
+    if ($('designSystemSelect')) $('designSystemSelect').value = '';
+    if ($('skillSelect')) $('skillSelect').value = 'web-prototype';
+    pptInputMode = 'import';
+    updatePptModeButtons();
 
     // 清空页面
     pages = [];
     pageFiles = {};
+    pagePptImages = {};
     $('pageCardsContainer').innerHTML = '';
     addPage();
 
@@ -527,6 +692,7 @@ async function regenerateFromRecord() {
     // 清空当前表单
     pages = [];
     pageFiles = {};
+    pagePptImages = {};
     $('pageCardsContainer').innerHTML = '';
 
     // 恢复全局设置
@@ -537,6 +703,8 @@ async function regenerateFromRecord() {
         $('secondaryColorValue').textContent = record.global.secondaryColor || '#10B981';
         $('backgroundMode').value = record.global.backgroundMode || 'light';
         $('componentStyle').value = record.global.componentStyle || 'Ant Design';
+        if ($('designSystemSelect')) $('designSystemSelect').value = record.global.designSystemId || record.designSystemId || '';
+        if ($('skillSelect')) $('skillSelect').value = record.global.skillId || record.skillId || 'web-prototype';
     }
 
     // 恢复页面
@@ -545,6 +713,7 @@ async function regenerateFromRecord() {
             const id = Date.now().toString() + Math.random().toString(36).substr(2, 5);
             pages.push(id);
             pageFiles[id] = [];
+            pagePptImages[id] = [];
 
             const index = pages.length;
             const html = createPageCardHtml(id, index);
@@ -575,21 +744,31 @@ async function regenerateFromRecord() {
                 }
             }
 
-            // 加载参考图片（从服务器）- 使用Promise确保等待完成
-            if (pageRecord.images && pageRecord.images.length > 0) {
-                const imageLoadPromises = pageRecord.images.map(imgName => {
+            const pptImageNames = pageRecord.pptImages || [];
+            const referenceImageNames = pageRecord.referenceImages || pageRecord.images || [];
+
+            // 加载 PPT 配图（从服务器）- 使用Promise确保等待完成
+            if (pptImageNames.length > 0) {
+                const pptImageLoadPromises = pptImageNames.map(item => {
                     return new Promise(async (resolve) => {
                         try {
+                            const imgName = typeof item === 'string' ? item : item.file;
                             const imgUrl = `/projects/${currentRecordProject.id}/reference/${imgName}`;
                             const response = await fetch(imgUrl);
                             const blob = await response.blob();
                             const reader = new FileReader();
                             reader.onload = (e) => {
-                                pageFiles[id].push({
-                                    name: imgName,
-                                    base64: e.target.result
-                                });
-                                renderPreviews(id);
+                                if (isSupportedRasterDataUrl(e.target.result)) {
+                                    pagePptImages[id].push({
+                                        name: imgName,
+                                        base64: e.target.result,
+                                        slideIndex: typeof item === 'object' ? item.slideIndex : index + 1,
+                                        slideTitle: typeof item === 'object' ? item.slideTitle : ''
+                                    });
+                                    renderPptImagePreviews(id);
+                                } else {
+                                    console.warn('跳过不支持的历史 PPT 配图:', imgName);
+                                }
                                 resolve();
                             };
                             reader.onerror = () => resolve(); // 失败也继续
@@ -600,13 +779,46 @@ async function regenerateFromRecord() {
                         }
                     });
                 });
-                // 等待该页面所有图片加载完成
+                await Promise.all(pptImageLoadPromises);
+            }
+
+            // 加载参考图片（从服务器）- 使用Promise确保等待完成
+            if (referenceImageNames.length > 0) {
+                const imageLoadPromises = referenceImageNames.map(imgName => {
+                    return new Promise(async (resolve) => {
+                        try {
+                            const imgUrl = `/projects/${currentRecordProject.id}/reference/${imgName}`;
+                            const response = await fetch(imgUrl);
+                            const blob = await response.blob();
+                            const reader = new FileReader();
+                            reader.onload = (e) => {
+                                if (isSupportedRasterDataUrl(e.target.result)) {
+                                    pageFiles[id].push({
+                                        name: imgName,
+                                        base64: e.target.result
+                                    });
+                                    renderPreviews(id);
+                                } else {
+                                    console.warn('跳过不支持的历史参考图:', imgName);
+                                }
+                                resolve();
+                            };
+                            reader.onerror = () => resolve();
+                            reader.readAsDataURL(blob);
+                        } catch (e) {
+                            console.error('加载参考图失败:', e);
+                            resolve();
+                        }
+                    });
+                });
                 await Promise.all(imageLoadPromises);
             }
         }
     } else {
         addPage();
     }
+
+    updateInputModeForSkill();
 
     // 图片已全部加载完成，保存原始快照
     originalFormData = collectFormData();
@@ -629,6 +841,7 @@ function addPage() {
     const id = Date.now().toString();
     pages.push(id);
     pageFiles[id] = [];
+    pagePptImages[id] = [];
 
     const index = pages.length;
     const html = createPageCardHtml(id, index);
@@ -640,14 +853,22 @@ function addPage() {
 
     $('pageCardsContainer').appendChild(div);
     setupPageListeners(id);
+    updateInputModeForSkill();
 }
 
 function createPageCardHtml(id, index) {
     return `
         <div class="border-b border-gray-200 px-6 py-4 bg-gray-50 flex justify-between items-center">
-            <div class="flex items-center gap-3 flex-1">
+            <div id="pageTitleWrap_${id}" class="flex items-center gap-3 flex-1">
                 <span class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-sm font-bold">${index}</span>
                 <input type="text" id="pageName_${id}" class="flex-1 bg-transparent border-none focus:ring-0 font-bold text-lg placeholder-gray-400" placeholder="页面名称（如：首页、用户列表）">
+            </div>
+            <div id="pptCardTitle_${id}" class="hidden flex items-center gap-3 flex-1">
+                <span class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center text-sm font-bold">${index}</span>
+                <div>
+                    <div class="font-bold text-lg text-gray-900">HTML PPT 输入</div>
+                    <div class="text-xs text-gray-400">导入 PPT 配图，填写布局/内容和动画要求</div>
+                </div>
             </div>
             <button onclick="removePage('${id}')" class="text-gray-400 hover:text-red-500 p-2" title="删除页面">
                 <i class="fas fa-trash-alt"></i>
@@ -655,17 +876,50 @@ function createPageCardHtml(id, index) {
         </div>
 
         <div class="p-6 space-y-4">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div id="pptImportField_${id}" class="hidden rounded-lg border border-indigo-100 bg-indigo-50/60 p-4">
+                <div class="flex flex-col md:flex-row md:items-center gap-3">
+                    <div class="flex-1">
+                        <div class="text-sm font-medium text-indigo-900">上传 PPTX 解析</div>
+                        <div class="text-xs text-indigo-600 mt-1">提取文字、页面顺序和原始配图；配图会按原始页参与生成，不作为参考图。</div>
+                    </div>
+                    <label class="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white border border-indigo-200 text-indigo-700 text-sm font-medium cursor-pointer hover:border-indigo-400">
+                        <i class="fas fa-file-powerpoint"></i>
+                        选择 PPTX
+                        <input type="file" id="pptFileInput_${id}" class="hidden" accept=".pptx,.ppt">
+                    </label>
+                </div>
+                <div id="pptParseStatus_${id}" class="mt-3 text-xs text-indigo-700"></div>
+                <div id="pptAssetPanel_${id}" class="hidden mt-3 rounded-xl bg-blue-50 border-2 border-blue-200 p-4">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <div>
+                            <div class="text-sm font-semibold text-blue-900 flex items-center gap-2">
+                                <i class="fas fa-layer-group"></i>
+                                PPT 原始配图
+                            </div>
+                            <div class="text-xs text-blue-600 mt-0.5">来自 PPTX，生成时会按原始页放回对应 slide</div>
+                        </div>
+                        <div id="pptAssetCount_${id}" class="text-xs font-medium text-blue-700"></div>
+                    </div>
+                    <div id="pptAssetPreview_${id}" class="grid grid-cols-6 gap-2"></div>
+                </div>
+            </div>
+            <div id="primaryFields_${id}" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <!-- 布局描述 -->
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">布局描述</label>
-                    <textarea id="layout_${id}" rows="4" class="w-full rounded-lg border-gray-200 border p-3 text-sm resize-none" placeholder="描述页面的布局结构...&#10;如：顶部导航、左侧菜单、右侧内容区"></textarea>
+                    <label for="layout_${id}" class="block text-sm font-medium text-gray-700 mb-1">布局描述</label>
+                    <textarea id="layout_${id}" rows="6" class="w-full rounded-lg border-gray-200 border p-3 text-sm resize-y min-h-[160px]" placeholder="描述页面的布局结构...&#10;如：顶部导航、左侧菜单、右侧内容区"></textarea>
                 </div>
 
                 <!-- 参考图上传 -->
-                <div>
-                    <div class="flex justify-between items-center mb-1">
-                        <label class="text-sm font-medium text-gray-700">参考图</label>
+                <div id="referenceBox_${id}">
+                    <div class="flex justify-between items-start gap-3 mb-3">
+                        <div>
+                            <label id="referenceLabel_${id}" class="text-sm font-medium text-gray-700">
+                                <i id="referenceIcon_${id}" class="fas fa-images hidden"></i>
+                                参考图
+                            </label>
+                            <div id="referenceHint_${id}" class="text-xs text-emerald-700 mt-0.5 hidden">可选：只用于补充视觉风格参考，不替代 PPT 原始配图</div>
+                        </div>
                         <div class="flex gap-1" id="similarityGroup_${id}">
                             <label class="similarity-btn active" data-value="layout">
                                 <input type="radio" name="similarity_${id}" value="layout" checked class="hidden">
@@ -681,27 +935,33 @@ function createPageCardHtml(id, index) {
                             </label>
                         </div>
                     </div>
-                    <div id="dropZone_${id}" tabindex="0" class="border-2 border-dashed border-gray-200 rounded-lg h-24 flex items-center justify-center text-center hover:border-indigo-500 hover:bg-indigo-50/50 transition-all cursor-pointer focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
-                        <div class="text-gray-400 text-sm">
-                            <i class="fas fa-image mr-2"></i>点击、拖拽或粘贴上传
+                    <div id="dropZone_${id}" tabindex="0" class="border-2 border-dashed border-gray-200 rounded-lg h-32 flex items-center justify-center text-center hover:border-indigo-500 hover:bg-indigo-50/50 transition-all cursor-pointer focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200">
+                        <div id="dropZoneText_${id}" class="text-gray-400 text-sm">
+                            <i class="fas fa-image mr-2"></i>点击、拖拽或 Ctrl+V 粘贴参考图
                         </div>
                         <input type="file" id="fileInput_${id}" class="hidden" accept="image/*" multiple>
                     </div>
-                    <div id="preview_${id}" class="grid grid-cols-5 gap-2 mt-2 hidden"></div>
+                    <div id="referencePreviewWrap_${id}" class="hidden mt-2">
+                        <div id="referencePreviewHeader_${id}" class="hidden items-center justify-between mb-2">
+                            <div class="text-xs font-medium text-emerald-900">已添加参考图</div>
+                            <div id="referenceCount_${id}" class="text-xs text-emerald-600"></div>
+                        </div>
+                        <div id="preview_${id}" class="grid grid-cols-5 gap-2"></div>
+                    </div>
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div id="standardFields_${id}" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <!-- 核心功能 -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">核心功能</label>
-                    <textarea id="features_${id}" rows="3" class="w-full rounded-lg border-gray-200 border p-3 text-sm resize-none" placeholder="- 表格排序筛选&#10;- 数据导出"></textarea>
+                <div id="featuresField_${id}">
+                    <label for="features_${id}" class="block text-sm font-medium text-gray-700 mb-1">核心功能</label>
+                    <textarea id="features_${id}" rows="4" class="w-full rounded-lg border-gray-200 border p-3 text-sm resize-y min-h-[120px]" placeholder="- 表格排序筛选&#10;- 数据导出"></textarea>
                 </div>
 
                 <!-- 交互说明 -->
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">交互说明</label>
-                    <textarea id="interaction_${id}" rows="3" class="w-full rounded-lg border-gray-200 border p-3 text-sm resize-none" placeholder="点击按钮 → 弹出模态框"></textarea>
+                <div id="interactionField_${id}">
+                    <label for="interaction_${id}" class="block text-sm font-medium text-gray-700 mb-1">交互说明</label>
+                    <textarea id="interaction_${id}" rows="4" class="w-full rounded-lg border-gray-200 border p-3 text-sm resize-y min-h-[120px]" placeholder="点击按钮 → 弹出模态框"></textarea>
                 </div>
             </div>
         </div>
@@ -718,6 +978,7 @@ function removePage(id) {
     el.remove();
     pages = pages.filter(p => p !== id);
     delete pageFiles[id];
+    delete pagePptImages[id];
 
     // 更新序号
     pages.forEach((pid, i) => {
@@ -729,24 +990,37 @@ function removePage(id) {
 function setupPageListeners(id) {
     const dropZone = $(`dropZone_${id}`);
     const fileInput = $(`fileInput_${id}`);
+    const pptFileInput = $(`pptFileInput_${id}`);
 
-    // 鼠标悬停时自动聚焦，使粘贴无需点击
-    dropZone.onmouseenter = () => dropZone.focus();
+    const activateReferenceDropZone = () => {
+        activeReferenceDropZoneId = id;
+        dropZone.focus();
+    };
 
-    dropZone.onclick = () => fileInput.click();
+    dropZone.onmouseenter = activateReferenceDropZone;
+    dropZone.onfocus = () => {
+        activeReferenceDropZoneId = id;
+    };
+
+    dropZone.onclick = () => {
+        activateReferenceDropZone();
+        fileInput.click();
+    };
 
     dropZone.ondragover = (e) => {
         e.preventDefault();
-        dropZone.classList.add('border-indigo-500', 'bg-indigo-50');
+        const isPpt = isHtmlPptMode();
+        dropZone.classList.add(isPpt ? 'border-emerald-500' : 'border-indigo-500', isPpt ? 'bg-emerald-50' : 'bg-indigo-50');
     };
 
     dropZone.ondragleave = () => {
-        dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
+        dropZone.classList.remove('border-emerald-500', 'bg-emerald-50', 'border-indigo-500', 'bg-indigo-50');
     };
 
     dropZone.ondrop = (e) => {
         e.preventDefault();
-        dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
+        dropZone.classList.remove('border-emerald-500', 'bg-emerald-50', 'border-indigo-500', 'bg-indigo-50');
+        activeReferenceDropZoneId = id;
         handleFiles(id, e.dataTransfer.files);
     };
 
@@ -755,24 +1029,17 @@ function setupPageListeners(id) {
         fileInput.value = '';
     };
 
-    // 支持粘贴剪切板中的图片
+    if (pptFileInput) {
+        pptFileInput.onchange = (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (file) parsePptxForPage(id, file);
+            pptFileInput.value = '';
+        };
+    }
+
+    // 支持参考图框获得焦点时粘贴剪切板图片
     dropZone.addEventListener('paste', (e) => {
-        e.preventDefault();
-        const items = e.clipboardData?.items;
-        if (!items) return;
-
-        const imageFiles = [];
-        for (const item of items) {
-            if (item.type.startsWith('image/')) {
-                const file = item.getAsFile();
-                if (file) imageFiles.push(file);
-            }
-        }
-
-        if (imageFiles.length > 0) {
-            handleFiles(id, imageFiles);
-            showToast(`已粘贴 ${imageFiles.length} 张图片`);
-        }
+        handleReferencePasteEvent(e, id);
     });
 
     // 参考图相似度选项切换
@@ -787,10 +1054,32 @@ function setupPageListeners(id) {
     }
 }
 
+function isHtmlPptMode() {
+    return ($('skillSelect') ? $('skillSelect').value : 'web-prototype') === 'html-ppt';
+}
+
 function handleFiles(id, files) {
-    Array.from(files).filter(f => f.type.startsWith('image/')).forEach(file => {
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    const currentCount = pageFiles[id]?.length || 0;
+    const remaining = MAX_REFERENCE_IMAGES_PER_PAGE - currentCount;
+
+    if (remaining <= 0) {
+        showToast(`每页最多添加 ${MAX_REFERENCE_IMAGES_PER_PAGE} 张参考图`, 'warning');
+        return;
+    }
+
+    const acceptedFiles = imageFiles.slice(0, remaining);
+    if (acceptedFiles.length < imageFiles.length) {
+        showToast(`已限制为每页最多 ${MAX_REFERENCE_IMAGES_PER_PAGE} 张参考图`, 'warning');
+    }
+
+    acceptedFiles.forEach(file => {
         const reader = new FileReader();
         reader.onload = (e) => {
+            if (!isSupportedRasterDataUrl(e.target.result)) {
+                showToast('已跳过不支持的图片格式，请使用 PNG/JPG/GIF/WebP', 'warning');
+                return;
+            }
             pageFiles[id].push({
                 name: file.name,
                 base64: e.target.result
@@ -801,20 +1090,95 @@ function handleFiles(id, files) {
     });
 }
 
-function renderPreviews(id) {
-    const container = $(`preview_${id}`);
-    const files = pageFiles[id];
+function getImageFilesFromClipboard(event) {
+    const items = event.clipboardData?.items;
+    if (!items) return [];
 
+    const imageFiles = [];
+    for (const item of items) {
+        if (item.type && item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) imageFiles.push(file);
+        }
+    }
+    return imageFiles;
+}
+
+function handleReferencePasteEvent(event, id) {
+    const imageFiles = getImageFilesFromClipboard(event);
+    if (imageFiles.length === 0) return false;
+
+    event.preventDefault();
+    handleFiles(id, imageFiles);
+    showToast(`已粘贴 ${imageFiles.length} 张参考图`);
+    return true;
+}
+
+function handleGlobalReferencePaste(event) {
+    const target = event.target;
+    const isTypingField = target && ['TEXTAREA', 'INPUT'].includes(target.tagName);
+    if (isTypingField) return;
+
+    const id = activeReferenceDropZoneId;
+    if (!id || !pages.includes(id)) return;
+    handleReferencePasteEvent(event, id);
+}
+
+function renderPreviews(id) {
+    const wrap = $(`referencePreviewWrap_${id}`);
+    const container = $(`preview_${id}`);
+    const count = $(`referenceCount_${id}`);
+    const header = $(`referencePreviewHeader_${id}`);
+    const files = pageFiles[id];
+    const isPpt = isHtmlPptMode();
+
+    if (!container || !wrap) return;
     if (files.length === 0) {
-        container.classList.add('hidden');
+        wrap.classList.add('hidden');
+        container.innerHTML = '';
+        if (count) count.textContent = '';
         return;
     }
 
-    container.classList.remove('hidden');
+    wrap.classList.remove('hidden');
+    wrap.className = isPpt
+        ? 'mt-3 rounded-lg bg-white border border-emerald-100 p-3'
+        : 'mt-2';
+    if (header) {
+        header.className = isPpt
+            ? 'flex items-center justify-between mb-2'
+            : 'hidden';
+    }
+    if (count) count.textContent = `${files.length} 张`;
     container.innerHTML = files.map((f, i) => `
-        <div class="relative aspect-square bg-gray-100 rounded overflow-hidden group">
+        <div class="relative aspect-square ${isPpt ? 'bg-emerald-50 border border-emerald-100' : 'bg-gray-100'} rounded overflow-hidden group">
             <img src="${f.base64}" class="w-full h-full object-cover cursor-zoom-in" onclick="previewImage('${f.base64}')">
             <button onclick="removeFile('${id}', ${i})" class="absolute top-1 right-1 w-5 h-5 bg-black/60 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+        </div>
+    `).join('');
+}
+
+function renderPptImagePreviews(id) {
+    const panel = $(`pptAssetPanel_${id}`);
+    const container = $(`pptAssetPreview_${id}`);
+    const count = $(`pptAssetCount_${id}`);
+    const files = pagePptImages[id] || [];
+
+    if (!panel || !container) return;
+    if (files.length === 0) {
+        panel.classList.add('hidden');
+        container.innerHTML = '';
+        if (count) count.textContent = '';
+        return;
+    }
+
+    panel.classList.remove('hidden');
+    if (count) count.textContent = `${files.length} 张`;
+    container.innerHTML = files.map((f, i) => `
+        <div class="relative aspect-video bg-indigo-50 rounded overflow-hidden border border-indigo-100 group" title="第 ${escapeHtml(f.slideIndex || '-')} 页配图">
+            <img src="${f.base64}" class="w-full h-full object-cover cursor-zoom-in" onclick="previewImage('${f.base64}')">
+            <span class="absolute left-1 top-1 px-1.5 py-0.5 rounded bg-black/60 text-white text-[10px]">P${escapeHtml(f.slideIndex || '')}</span>
+            <button onclick="removePptImage('${id}', ${i})" class="absolute top-1 right-1 w-5 h-5 bg-black/60 text-white rounded-full text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
         </div>
     `).join('');
 }
@@ -824,10 +1188,391 @@ function removeFile(id, index) {
     renderPreviews(id);
 }
 
+function removePptImage(id, index) {
+    if (!pagePptImages[id]) return;
+    pagePptImages[id].splice(index, 1);
+    renderPptImagePreviews(id);
+}
+
+function sanitizePageImages(id) {
+    const validPptImages = [];
+    (pagePptImages[id] || []).forEach(f => {
+        if (isSupportedRasterDataUrl(f.base64)) {
+            validPptImages.push(f);
+        } else {
+            console.warn('生成前跳过不支持的 PPT 配图:', f.name);
+        }
+    });
+    pagePptImages[id] = validPptImages;
+    renderPptImagePreviews(id);
+
+    const validReferenceImages = [];
+    (pageFiles[id] || []).forEach(f => {
+        if (isSupportedRasterDataUrl(f.base64)) {
+            validReferenceImages.push(f);
+        } else {
+            console.warn('生成前跳过不支持的参考图:', f.name);
+        }
+    });
+    pageFiles[id] = validReferenceImages;
+    renderPreviews(id);
+}
+
+function enforceRequestImageLimit() {
+    let remaining = MAX_AI_IMAGES_PER_REQUEST;
+    let dropped = 0;
+
+    pages.forEach(id => {
+        const pptImages = pagePptImages[id] || [];
+        if (pptImages.length > remaining) {
+            dropped += pptImages.length - remaining;
+            pagePptImages[id] = pptImages.slice(0, Math.max(remaining, 0));
+        }
+        remaining -= pagePptImages[id].length;
+        renderPptImagePreviews(id);
+    });
+
+    pages.forEach(id => {
+        const referenceImages = pageFiles[id] || [];
+        if (remaining <= 0) {
+            dropped += referenceImages.length;
+            pageFiles[id] = [];
+        } else if (referenceImages.length > remaining) {
+            dropped += referenceImages.length - remaining;
+            pageFiles[id] = referenceImages.slice(0, remaining);
+        }
+        remaining -= pageFiles[id].length;
+        renderPreviews(id);
+    });
+
+    if (dropped > 0) {
+        showToast(`图片超过模型网关上限，已优先保留前 ${MAX_AI_IMAGES_PER_REQUEST} 张 PPT 配图/参考图`, 'warning');
+    }
+}
+
 function previewImage(src) {
     $('fullSizeImage').src = src;
     $('imagePreviewModal').classList.remove('hidden');
     $('imagePreviewModal').classList.add('flex');
+}
+
+async function parsePptxForPage(id, file) {
+    const status = $(`pptParseStatus_${id}`);
+    if (status) status.textContent = '正在解析 PPTX...';
+
+    try {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch('/api/pptx/parse', {
+            method: 'POST',
+            body: form
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+            throw new Error(data.error || 'PPTX 解析失败');
+        }
+
+        const sourceImageCount = data.sourceImageCount ?? data.imageCount;
+        const attachedImageCount = data.imageCount || 0;
+        const maxImagesPerSlide = data.maxImagesPerSlide || MAX_PPT_IMAGES_PER_SLIDE;
+        const summaryLines = [
+            `来源文件：${data.filename}`,
+            `共 ${data.slideCount} 页，PPT 中图片 ${sourceImageCount} 张，已按每页最多 ${maxImagesPerSlide} 张选取 ${attachedImageCount} 张原始配图。`,
+            '',
+            ...data.slides.map(slide => {
+                const text = (slide.texts || []).join('\n');
+                return `第 ${slide.index} 页：${slide.title}\n${text}`;
+            })
+        ];
+
+        const layout = $(`layout_${id}`);
+        if (layout) {
+            layout.value = `请将以下 PPT 内容重构为更精致的 HTML 演示文稿，保留原始信息层级、页序和关键图片，并整体美化视觉设计。\n\n${summaryLines.join('\n\n')}`;
+        }
+
+        pagePptImages[id] = [];
+        (data.slides || []).forEach(slide => {
+            (slide.images || []).slice(0, maxImagesPerSlide).forEach((img, imgIndex) => {
+                pagePptImages[id].push({
+                    name: `slide${slide.index}_${img.name || imgIndex + 1}`,
+                    base64: img.base64,
+                    slideIndex: slide.index,
+                    slideTitle: slide.title || ''
+                });
+            });
+        });
+        renderPptImagePreviews(id);
+
+        if (status) status.textContent = `解析完成：${data.slideCount} 页，已选取 ${pagePptImages[id].length} 张 PPT 原始配图（每页最多 ${maxImagesPerSlide} 张）。`;
+        showToast('PPTX 已解析并填入内容');
+    } catch (e) {
+        if (status) status.textContent = e.message;
+        showToast('PPTX 解析失败: ' + e.message, 'error');
+    }
+}
+
+// ==================== Open Design 资产 ====================
+async function loadDesignSystems() {
+    try {
+        const res = await fetch('/api/design-systems?t=' + Date.now());
+        const data = await res.json();
+        designSystemsList = data.designSystems || [];
+        renderDesignSystemSelect();
+    } catch (e) {
+        console.error('加载设计系统失败:', e);
+    }
+}
+
+async function loadSkills() {
+    try {
+        const res = await fetch('/api/skills?t=' + Date.now());
+        const data = await res.json();
+        skillsList = data.skills || [];
+        renderSkillSelect();
+    } catch (e) {
+        console.error('加载Skills失败:', e);
+    }
+}
+
+function renderDesignSystemSelect() {
+    const select = $('designSystemSelect');
+    if (!select) return;
+    const current = select.value;
+
+    const skillId = $('skillSelect') ? $('skillSelect').value : 'web-prototype';
+    const mode = SKILL_INPUT_MODES[skillId] || SKILL_INPUT_MODES['web-prototype'];
+    const preferred = [...(mode.recommendedDesignSystems || []), ...DESIGN_SYSTEM_RECOMMENDED_FALLBACK];
+    const uniquePreferred = [...new Set(preferred)];
+    const byId = new Map(designSystemsList.map(ds => [ds.id, ds]));
+    const ordered = [
+        ...uniquePreferred.map(id => byId.get(id)).filter(Boolean),
+        ...designSystemsList.filter(ds => !uniquePreferred.includes(ds.id))
+    ];
+
+    select.innerHTML = '<option value="">默认风格</option>' + ordered.map(ds => {
+        const label = `${ds.displayName || ds.name || ds.id}${ds.categoryLabel ? ` · ${ds.categoryLabel}` : ''}`;
+        return `<option value="${ds.id}">${escapeHtml(label)}</option>`;
+    }).join('');
+    if (current && byId.has(current)) select.value = current;
+    updateDesignSystemHint();
+}
+
+function getDefaultSwatchColors() {
+    return [
+        $('primaryColor') ? $('primaryColor').value : '#004fff',
+        $('secondaryColor') ? $('secondaryColor').value : '#10b981',
+        $('backgroundMode') && $('backgroundMode').value === 'dark' ? '#111827' : '#f8fafc',
+        '#ffffff',
+        '#111827',
+        '#e5e7eb'
+    ];
+}
+
+function renderSkillSelect() {
+    const select = $('skillSelect');
+    if (!select) return;
+
+    const labels = {
+        'web-prototype': 'Web 原型',
+        'dashboard': '后台 Dashboard',
+        'mobile-app': '移动 App',
+        'saas-landing': 'SaaS Landing',
+        'html-ppt': 'HTML PPT'
+    };
+    const preferred = ['web-prototype', 'dashboard', 'mobile-app', 'saas-landing', 'html-ppt'];
+    const byId = new Map(skillsList.map(skill => [skill.id, skill]));
+    const ordered = [
+        ...preferred.map(id => byId.get(id)).filter(Boolean),
+        ...skillsList.filter(skill => !preferred.includes(skill.id) && skill.id !== 'pptx-html-fidelity-audit')
+    ];
+
+    select.innerHTML = ordered.map(skill => {
+        const label = labels[skill.id] || skill.name || skill.id;
+        return `<option value="${skill.id}">${escapeHtml(label)}</option>`;
+    }).join('');
+    if (!select.value) select.value = 'web-prototype';
+    updateInputModeForSkill();
+}
+
+function getSelectedDesignSystemName() {
+    const id = $('designSystemSelect') ? $('designSystemSelect').value : '';
+    if (!id) return '默认风格';
+    const ds = designSystemsList.find(item => item.id === id);
+    return ds ? (ds.displayName || ds.name || ds.id) : id;
+}
+
+function getSelectedSkillName() {
+    const id = $('skillSelect') ? $('skillSelect').value : 'web-prototype';
+    const skill = skillsList.find(item => item.id === id);
+    return skill ? (skill.name || skill.id) : id;
+}
+
+function escapeHtml(str) {
+    return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function updateDesignSystemHint() {
+    const hint = $('designSystemHint');
+    if (!hint) return;
+    const id = $('designSystemSelect') ? $('designSystemSelect').value : '';
+    if (!id) {
+        hint.dataset.help = '未选择时使用表单里的主色、强调色和组件风格作为主要视觉约束。';
+        renderDesignSystemSwatches({ colors: getDefaultSwatchColors() });
+        return;
+    }
+    hint.dataset.help = '已选择设计系统：品牌色彩、字体和组件语言优先；主色/强调色只作为微调偏好。';
+    const ds = designSystemsList.find(item => item.id === id) || null;
+    renderDesignSystemSwatches(ds);
+}
+
+function renderDesignSystemSwatches(ds) {
+    const container = $('designSystemSwatches');
+    if (!container) return;
+    const colors = (ds && Array.isArray(ds.colors)) ? ds.colors.slice(0, 6) : [];
+    if (!colors.length) {
+        container.innerHTML = '';
+        container.classList.add('hidden');
+        return;
+    }
+    container.classList.remove('hidden');
+    container.innerHTML = colors.map(color => `
+        <span class="inline-block h-5 w-5 rounded border border-black/10" title="${escapeHtml(color)}" style="background:${escapeHtml(color)}"></span>
+    `).join('');
+}
+
+function updateInputModeForSkill() {
+    const skillId = $('skillSelect') ? $('skillSelect').value : 'web-prototype';
+    const mode = SKILL_INPUT_MODES[skillId] || SKILL_INPUT_MODES['web-prototype'];
+    const isPpt = skillId === 'html-ppt';
+    const useCompactPpt = isPpt && pptInputMode === 'import';
+
+    if ($('pptModeControls')) $('pptModeControls').classList.toggle('hidden', !isPpt);
+    updatePptModeButtons();
+    if ($('skillModeHelp')) {
+        $('skillModeHelp').dataset.help = isPpt
+            ? 'HTML PPT 支持两种输入：导入 PPTX 美化，或逐页描述生成。'
+            : '当前产物类型使用统一的 Web 原型式输入：页面、布局、功能、交互和参考图。';
+    }
+    if ($('addPageBtn')) {
+        $('addPageBtn').innerHTML = `<i class="fas fa-plus"></i> ${mode.addLabel}`;
+        $('addPageBtn').classList.toggle('hidden', !!useCompactPpt);
+    }
+
+    if (useCompactPpt && pages.length > 1) {
+        pages.slice(1).forEach((id) => {
+            const el = $(`page-${id}`);
+            if (el) el.remove();
+            delete pageFiles[id];
+            delete pagePptImages[id];
+        });
+        pages = pages.slice(0, 1);
+    }
+    pages.forEach((id) => applyInputModeToPage(id, mode, { compactPpt: useCompactPpt, isPpt }));
+}
+
+function updatePptModeButtons() {
+    const importBtn = $('pptImportModeBtn');
+    const pagesBtn = $('pptPagesModeBtn');
+    if (!importBtn || !pagesBtn) return;
+    const importActive = pptInputMode === 'import';
+    importBtn.className = importActive
+        ? 'px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white border border-indigo-600'
+        : 'px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-600 border border-gray-200 hover:border-indigo-300';
+    pagesBtn.className = !importActive
+        ? 'px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white border border-indigo-600'
+        : 'px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-600 border border-gray-200 hover:border-indigo-300';
+}
+
+function setPptInputMode(mode) {
+    pptInputMode = mode === 'pages' ? 'pages' : 'import';
+    updateInputModeForSkill();
+}
+
+function applyInputModeToPage(id, mode, options = {}) {
+    const compactPpt = !!options.compactPpt;
+    const isPpt = !!options.isPpt;
+    const titleInput = $(`pageName_${id}`);
+    const layout = $(`layout_${id}`);
+    const features = $(`features_${id}`);
+    const interaction = $(`interaction_${id}`);
+    const titleWrap = $(`pageTitleWrap_${id}`);
+    const pptTitle = $(`pptCardTitle_${id}`);
+    const pptImportField = $(`pptImportField_${id}`);
+    const primaryFields = $(`primaryFields_${id}`);
+    const standardFields = $(`standardFields_${id}`);
+    const featuresField = $(`featuresField_${id}`);
+    const interactionField = $(`interactionField_${id}`);
+    const similarityGroup = $(`similarityGroup_${id}`);
+    const referenceBox = $(`referenceBox_${id}`);
+    const referenceLabel = $(`referenceLabel_${id}`);
+    const referenceIcon = $(`referenceIcon_${id}`);
+    const referenceHint = $(`referenceHint_${id}`);
+    const dropZone = $(`dropZone_${id}`);
+    const dropZoneText = $(`dropZoneText_${id}`);
+    if (titleInput) titleInput.placeholder = mode.pagePlaceholder;
+    if (titleWrap) titleWrap.classList.toggle('hidden', compactPpt);
+    if (pptTitle) pptTitle.classList.toggle('hidden', !compactPpt);
+    if (pptImportField) pptImportField.classList.toggle('hidden', !(isPpt && pptInputMode === 'import'));
+    if (similarityGroup) similarityGroup.classList.toggle('hidden', isPpt);
+    if (referenceHint) referenceHint.classList.toggle('hidden', !isPpt);
+    if (referenceBox) {
+        referenceBox.className = isPpt
+            ? 'rounded-xl border-2 border-emerald-200 bg-emerald-50 p-4'
+            : '';
+    }
+    if (referenceLabel) {
+        referenceLabel.className = isPpt
+            ? 'text-sm font-semibold text-emerald-900 flex items-center gap-2'
+            : 'text-sm font-medium text-gray-700';
+    }
+    if (referenceIcon) referenceIcon.classList.toggle('hidden', !isPpt);
+    if (dropZone) {
+        dropZone.className = isPpt
+            ? 'border-2 border-dashed border-emerald-300 bg-white rounded-lg h-32 flex items-center justify-center text-center hover:border-emerald-500 hover:bg-emerald-50 transition-all cursor-pointer focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200'
+            : 'border-2 border-dashed border-gray-200 rounded-lg h-32 flex items-center justify-center text-center hover:border-indigo-500 hover:bg-indigo-50/50 transition-all cursor-pointer focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200';
+    }
+    if (dropZoneText) {
+        dropZoneText.className = isPpt ? 'text-emerald-700 text-sm' : 'text-gray-400 text-sm';
+        dropZoneText.innerHTML = isPpt
+            ? '<i class="fas fa-plus-circle mr-2"></i>点击、拖拽或 Ctrl+V 粘贴参考图<div class="text-xs text-emerald-500 mt-1">上传后会显示在下方绿色预览区</div>'
+            : '<i class="fas fa-image mr-2"></i>点击、拖拽或粘贴上传';
+    }
+    if (primaryFields) {
+        primaryFields.className = compactPpt
+            ? 'grid grid-cols-1 gap-4'
+            : 'grid grid-cols-1 md:grid-cols-2 gap-4';
+    }
+    if (standardFields) standardFields.classList.toggle('hidden', compactPpt);
+    if (featuresField) featuresField.classList.toggle('hidden', isPpt);
+    if (compactPpt && primaryFields && interactionField && !primaryFields.contains(interactionField)) {
+        primaryFields.appendChild(interactionField);
+    }
+    if (!compactPpt && standardFields && interactionField && !standardFields.contains(interactionField)) {
+        standardFields.appendChild(interactionField);
+    }
+    if (layout) {
+        layout.placeholder = mode.layoutPlaceholder;
+        const label = document.querySelector(`label[for="layout_${id}"]`);
+        if (label) label.textContent = mode.layoutLabel;
+        layout.rows = compactPpt ? 12 : (isPpt ? 8 : 6);
+    }
+    if (features) {
+        features.placeholder = mode.featuresPlaceholder;
+        const label = document.querySelector(`label[for="features_${id}"]`);
+        if (label) label.textContent = mode.featuresLabel;
+    }
+    if (interaction) {
+        interaction.placeholder = mode.interactionPlaceholder;
+        const label = document.querySelector(`label[for="interaction_${id}"]`);
+        if (label) label.textContent = mode.interactionLabel;
+        interaction.rows = compactPpt ? 8 : 4;
+    }
+    renderPreviews(id);
 }
 
 // ==================== AI 生成 ====================
@@ -836,11 +1581,19 @@ function generatePrompt() {
         primaryColor: $('primaryColor').value,
         secondaryColor: $('secondaryColor').value,
         backgroundMode: $('backgroundMode').value,
-        componentStyle: $('componentStyle').value
+        componentStyle: $('componentStyle').value,
+        designSystemId: $('designSystemSelect') ? $('designSystemSelect').value : '',
+        designSystemName: getSelectedDesignSystemName(),
+        skillId: $('skillSelect') ? $('skillSelect').value : 'web-prototype',
+        skillName: getSelectedSkillName()
     };
+    const mode = SKILL_INPUT_MODES[global.skillId] || SKILL_INPUT_MODES['web-prototype'];
+    const isPpt = global.skillId === 'html-ppt';
+    const compactPpt = isPpt && pptInputMode === 'import';
+    const productNoun = isPpt ? 'HTML 演示文稿' : 'HTML 原型页面';
 
     let prompt = `你是专业的前端工程师和UI/UX设计师。
-请生成一个高保真的HTML原型页面。
+请生成一个高保真的${productNoun}。
 
 # 技术栈
 - Tailwind CSS (CDN)
@@ -854,34 +1607,67 @@ function generatePrompt() {
 - 强调色: ${global.secondaryColor}
 - 背景模式: ${global.backgroundMode === 'light' ? '浅色' : '深色'}
 - 组件风格: ${global.componentStyle}
+- 设计系统: ${global.designSystemName}
+- 产物类型: ${global.skillName}
+- 约束优先级: 用户明确需求 > 设计系统 > 产物类型工作流 > craft 规则 > 主色/强调色/组件风格
+- 如果选择了具体设计系统，主色和强调色只作为微调偏好，不要覆盖该设计系统的核心品牌色、字体和组件语言
 - 圆角: 0.5rem
 - 阴影: 使用柔和现代的阴影
 
-# 页面需求
+${isPpt ? `# HTML PPT 播放模式要求（必须实现）
+- 生成单文件 HTML deck，不是长网页。
+- 必须包含两个模式：概览模式（默认）和播放模式。
+- 概览模式是默认首屏：用大缩略图网格展示所有 slide，每个缩略图按 16:9 比例渲染该页小图/摘要，缩略图必须足够大到能看清标题、主要文字和配图；桌面端建议每行 2-3 张，移动端每行 1 张，不要做成很小的卡片。
+- 概览模式需要有明显的“播放”按钮；点击播放从第 1 页进入播放模式，点击任意缩略图则从对应页进入播放模式。
+- 播放模式中每一页幻灯片必须独占整屏：\`width:100vw; height:100vh;\`，默认只显示当前页。
+- 支持键盘翻页：ArrowRight / ArrowDown / PageDown / Space 进入下一页；ArrowLeft / ArrowUp / PageUp 返回上一页；Home 到首页；End 到末页。
+- 支持鼠标点击或触摸点击进入下一页。
+- 播放模式不要显示明显的关闭/返回按钮；只能通过按 Esc 或鼠标右键点击退出播放并返回概览模式。
+- 播放模式中右键点击需要阻止浏览器默认菜单，并返回概览模式。
+- 提供页码/进度提示和清晰的当前页状态；概览模式中也要显示总页数。
+- 不能依赖浏览器滚动浏览全部页面；播放模式翻页逻辑必须由 JS 控制。
+- 每个原始 PPT 页面对应一个独立 slide，保持原始页序、信息层级和该页配图归属。
+` : ''}
+# ${isPpt ? (compactPpt ? 'PPT 导入美化需求' : 'PPT 逐页生成需求') : '页面需求'}
 `;
 
     pages.forEach((id, index) => {
-        const name = $(`pageName_${id}`).value || `页面${index + 1}`;
+        const name = $(`pageName_${id}`).value || `${mode.unitLabel}${index + 1}`;
         const layout = $(`layout_${id}`).value;
         const features = $(`features_${id}`).value;
         const interaction = $(`interaction_${id}`).value;
         const similarity = (document.querySelector(`input[name="similarity_${id}"]:checked`) || {}).value || 'layout';
-        const hasImages = pageFiles[id].length > 0;
+        const pptImages = pagePptImages[id] || [];
+        const referenceImages = pageFiles[id] || [];
+        const hasImages = referenceImages.length > 0;
 
         prompt += `
-## 页面${index + 1}: ${name}
+## ${mode.unitLabel}${index + 1}: ${name}
 `;
-        if (layout) prompt += `**布局**: ${layout}\n`;
-        if (features) prompt += `**功能**: ${features}\n`;
-        if (interaction) prompt += `**交互**: ${interaction}\n`;
+        if (layout) prompt += `**${mode.layoutLabel}**: ${layout}\n`;
+        if (features && !compactPpt) prompt += `**${mode.featuresLabel}**: ${features}\n`;
+        if (interaction) prompt += `**${mode.interactionLabel}**: ${interaction}\n`;
+        if (isPpt && pptImages.length > 0) {
+            const grouped = {};
+            pptImages.forEach(img => {
+                const key = img.slideIndex || index + 1;
+                if (!grouped[key]) grouped[key] = 0;
+                grouped[key] += 1;
+            });
+            prompt += `**PPT 原始配图**: 已附加 ${pptImages.length} 张配图。它们不是参考图，必须放回对应原始页。配图页归属：${Object.entries(grouped).map(([slide, count]) => `第${slide}页 ${count}张`).join('；')}。\n`;
+        }
         if (hasImages) {
-            prompt += `**参考图**: 已附加${pageFiles[id].length}张参考图。`;
-            if (similarity === 'pixel') {
-                prompt += `请尽可能像素级还原。\n`;
-            } else if (similarity === 'style') {
-                prompt += `请参考其视觉风格。\n`;
+            prompt += `**参考图**: 已附加${referenceImages.length}张额外参考图。`;
+            if (isPpt) {
+                prompt += `仅用于辅助整体视觉风格判断，不替代 PPT 原始配图，也不要按参考图相似度还原。\n`;
             } else {
-                prompt += `请参考其布局结构。\n`;
+                if (similarity === 'pixel') {
+                    prompt += `请尽可能像素级还原。\n`;
+                } else if (similarity === 'style') {
+                    prompt += `请参考其视觉风格。\n`;
+                } else {
+                    prompt += `请参考其布局结构。\n`;
+                }
             }
         }
     });
@@ -916,7 +1702,11 @@ function collectFormData() {
         primaryColor: $('primaryColor').value,
         secondaryColor: $('secondaryColor').value,
         backgroundMode: $('backgroundMode').value,
-        componentStyle: $('componentStyle').value
+        componentStyle: $('componentStyle').value,
+        designSystemId: $('designSystemSelect') ? $('designSystemSelect').value : '',
+        designSystemName: getSelectedDesignSystemName(),
+        skillId: $('skillSelect') ? $('skillSelect').value : 'web-prototype',
+        skillName: getSelectedSkillName()
     };
 
     const pagesData = pages.map((id, index) => ({
@@ -925,10 +1715,33 @@ function collectFormData() {
         features: $(`features_${id}`).value,
         interaction: $(`interaction_${id}`).value,
         similarity: (document.querySelector(`input[name="similarity_${id}"]:checked`) || {}).value || 'layout',
-        imageCount: pageFiles[id].length
+        imageCount: (pagePptImages[id]?.length || 0) + pageFiles[id].length,
+        pptImageCount: pagePptImages[id]?.length || 0,
+        referenceImageCount: pageFiles[id].length,
+        pptImages: (pagePptImages[id] || []).map(img => ({
+            name: img.name,
+            slideIndex: img.slideIndex || index + 1,
+            slideTitle: img.slideTitle || ''
+        }))
     }));
 
     return { global, pages: pagesData };
+}
+
+function getProjectNameFromForm() {
+    const explicitName = pages.map(id => $(`pageName_${id}`)?.value).filter(Boolean).join(' + ');
+    if (explicitName) return explicitName;
+
+    const skillId = $('skillSelect') ? $('skillSelect').value : 'web-prototype';
+    if (skillId === 'html-ppt') {
+        const firstLayout = pages.map(id => $(`layout_${id}`)?.value?.trim()).find(Boolean);
+        if (firstLayout) {
+            return firstLayout.split('\n')[0].slice(0, 24) || 'HTML PPT';
+        }
+        return 'HTML PPT';
+    }
+
+    return '未命名项目';
 }
 
 // ==================== 增量更新功能 ====================
@@ -949,7 +1762,11 @@ function computeAllImageHashes() {
     const hashes = {};
     pages.forEach((id, index) => {
         const images = pageFiles[id] || [];
-        const imageData = images.map(f => f.base64.substring(0, 100)).join('|');
+        const pptImages = pagePptImages[id] || [];
+        const imageData = [
+            ...pptImages.map(f => f.base64.substring(0, 100)),
+            ...images.map(f => f.base64.substring(0, 100))
+        ].join('|');
         hashes[index] = simpleHash(imageData);
     });
     return hashes;
@@ -969,24 +1786,27 @@ function hasAnyInput() {
 
     // 检查是否有布局描述
     const hasLayout = pages.some(id => {
-        const layout = $(`pageLayout_${id}`);
+        const layout = $(`layout_${id}`);
         return layout && layout.value && layout.value.trim() !== '';
     });
 
     // 检查是否有功能点描述
     const hasFeatures = pages.some(id => {
-        const features = $(`pageFeatures_${id}`);
+        const features = $(`features_${id}`);
         return features && features.value && features.value.trim() !== '';
     });
 
     // 检查是否有交互方式描述
     const hasInteraction = pages.some(id => {
-        const interaction = $(`pageInteraction_${id}`);
+        const interaction = $(`interaction_${id}`);
         return interaction && interaction.value && interaction.value.trim() !== '';
     });
 
     // 检查是否有参考图片
-    const hasImages = pages.some(id => pageFiles[id] && pageFiles[id].length > 0);
+    const hasImages = pages.some(id =>
+        (pageFiles[id] && pageFiles[id].length > 0) ||
+        (pagePptImages[id] && pagePptImages[id].length > 0)
+    );
 
     // 检查全局配置是否被修改过（这些有默认值，检查是否与默认值不同）
     const globalChanged = (
@@ -1124,11 +1944,14 @@ async function generateWithAI() {
         console.log('[验证] 没有输入，显示提示');
         await showAppAlert({
             title: '还没有可生成的内容',
-            message: '请先填写页面名称、布局描述、功能说明，或上传参考图。',
+            message: '请先填写页面名称、布局描述、功能说明，或上传参考图/导入 PPT。',
             tone: 'warning'
         });
         return;
     }
+
+    pages.forEach(id => sanitizePageImages(id));
+    enforceRequestImageLimit();
 
     // 收集当前表单数据
     const formData = collectFormData();
@@ -1170,14 +1993,27 @@ async function generateWithAI() {
     console.log('=== Prompt ===');
     console.log(prompt);
 
-    // 收集所有图片
+    // 收集所有图片：PPT 配图在前，额外参考图在后，保证 prompt 里的页归属顺序可对应。
     const allImages = [];
     pages.forEach(id => {
-        pageFiles[id].forEach(f => allImages.push(f.base64));
+        (pagePptImages[id] || []).forEach(f => {
+            if (allImages.length < MAX_AI_IMAGES_PER_REQUEST) {
+                allImages.push(f.base64);
+            }
+        });
+        (pageFiles[id] || []).forEach(f => {
+            if (allImages.length < MAX_AI_IMAGES_PER_REQUEST) {
+                allImages.push(f.base64);
+            }
+        });
     });
+    const totalImages = pages.reduce((sum, id) => sum + (pagePptImages[id]?.length || 0) + (pageFiles[id]?.length || 0), 0);
+    if (totalImages > MAX_AI_IMAGES_PER_REQUEST) {
+        showToast(`图片超过模型网关上限，本次仅发送前 ${MAX_AI_IMAGES_PER_REQUEST} 张`, 'warning');
+    }
 
     // 项目名称
-    const projectName = pages.map(id => $(`pageName_${id}`).value).filter(Boolean).join(' + ') || '未命名项目';
+    const projectName = getProjectNameFromForm();
 
     try {
         // 构建请求数据
@@ -1185,7 +2021,9 @@ async function generateWithAI() {
             prompt: prompt,
             images: allImages,
             projectName: projectName,
-            formData: formData
+            formData: formData,
+            designSystemId: formData.global.designSystemId,
+            skillId: formData.global.skillId
         };
 
         // 如果使用增量更新，添加额外信息
@@ -1302,7 +2140,7 @@ async function copyPromptToClipboard() {
         console.log('[复制Prompt验证] 没有输入，显示提示');
         await showAppAlert({
             title: '还没有可复制的 Prompt',
-            message: '请先填写页面名称、布局描述、功能说明，或上传参考图。',
+            message: '请先填写页面名称、布局描述、功能说明，或上传参考图/导入 PPT。',
             tone: 'warning'
         });
         return;
@@ -1310,7 +2148,7 @@ async function copyPromptToClipboard() {
 
     const prompt = generatePrompt();
     const formData = collectFormData();
-    const projectName = pages.map(id => $(`pageName_${id}`).value).filter(Boolean).join(' + ') || '未命名项目';
+    const projectName = getProjectNameFromForm();
 
     // 先生成项目ID（文件夹名），这样可以包含在prompt中
     const projectId = generateProjectIdFromName(projectName);
@@ -1327,15 +2165,20 @@ ${prompt}
 
     // 添加参考图片信息
     const hasImages = pages.some(id => pageFiles[id] && pageFiles[id].length > 0);
-    if (hasImages) {
-        fullPrompt += `\n## 参考图片\n`;
+    const hasPptImages = pages.some(id => pagePptImages[id] && pagePptImages[id].length > 0);
+    if (hasImages || hasPptImages) {
+        fullPrompt += `\n## 图片资源\n`;
         pages.forEach((id, index) => {
+            const pptImages = pagePptImages[id] || [];
             const images = pageFiles[id] || [];
+            if (pptImages.length > 0) {
+                fullPrompt += `页面${index + 1}: ${pptImages.length}张 PPT 原始配图\n`;
+            }
             if (images.length > 0) {
                 fullPrompt += `页面${index + 1}: ${images.length}张参考图\n`;
             }
         });
-        fullPrompt += `\n注意：参考图已保存在项目文件夹 \`${projectId}\` 中\n`;
+        fullPrompt += `\n注意：图片已保存在项目文件夹 \`${projectId}\` 中\n`;
     }
 
     fullPrompt += `\n## 输出要求\n生成完整的HTML文件，保存到项目文件夹 \`${projectId}\` 的 index.html。`;
@@ -1343,8 +2186,9 @@ ${prompt}
     // 收集图片数据（按页面索引组织）
     const imageFiles = {};
     pages.forEach((id, index) => {
-        if (pageFiles[id] && pageFiles[id].length > 0) {
-            imageFiles[index] = pageFiles[id].map(f => f.base64);
+        const images = [...(pagePptImages[id] || []), ...(pageFiles[id] || [])];
+        if (images.length > 0) {
+            imageFiles[index] = images.map(f => f.base64);
         }
     });
 
@@ -1404,9 +2248,15 @@ function generateProjectIdFromName(name) {
 function showToast(msg, type = 'success') {
     const toast = $('toast');
     $('toastMessage').textContent = msg;
-    $('toastIcon').className = type === 'error'
-        ? 'fas fa-exclamation-circle text-red-400'
-        : 'fas fa-check-circle text-green-400';
+    if (type === 'error') {
+        $('toastIcon').className = 'fas fa-exclamation-circle text-red-400';
+    } else if (type === 'warning') {
+        $('toastIcon').className = 'fas fa-exclamation-triangle text-amber-400';
+    } else if (type === 'info') {
+        $('toastIcon').className = 'fas fa-info-circle text-blue-400';
+    } else {
+        $('toastIcon').className = 'fas fa-check-circle text-green-400';
+    }
 
     toast.classList.remove('translate-y-20', 'opacity-0');
     setTimeout(() => toast.classList.add('translate-y-20', 'opacity-0'), 3000);

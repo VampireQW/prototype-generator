@@ -27,6 +27,8 @@ import threading
 import time
 import sys
 import http.cookies
+import zipfile
+import xml.etree.ElementTree as ET
 
 import db  # 团队协作数据库
 
@@ -153,11 +155,14 @@ UPLOAD_DIR = 'uploads'
 DATA_DIR = 'data'
 PROJECTS_DIR = 'projects'
 DELETED_DIR = 'deleted'
+DESIGN_SYSTEMS_DIR = 'design-systems'
+SKILLS_DIR = 'skills'
+CRAFT_DIR = 'craft'
 PROJECTS_FILE = os.path.join(DATA_DIR, 'projects.json')
 DELETED_PROJECTS_FILE = os.path.join(DATA_DIR, 'deleted_projects.json')
 
 # 创建必要的目录
-for dir_path in [UPLOAD_DIR, DATA_DIR, PROJECTS_DIR, DELETED_DIR]:
+for dir_path in [UPLOAD_DIR, DATA_DIR, PROJECTS_DIR, DELETED_DIR, DESIGN_SYSTEMS_DIR, SKILLS_DIR, CRAFT_DIR]:
     if not os.path.exists(dir_path):
         os.makedirs(dir_path)
 
@@ -172,6 +177,296 @@ if not os.path.exists(DELETED_PROJECTS_FILE):
 # 初始化协作数据库
 db.init_db()
 print("[INFO] 协作数据库已初始化")
+
+
+# ==================== Open Design 资产层 ====================
+MAX_DESIGN_SYSTEM_CHARS = 30000
+MAX_SKILL_CONTEXT_CHARS = 70000
+MAX_CRAFT_CONTEXT_CHARS = 24000
+MAX_PPT_IMAGES_PER_SLIDE = 5
+MAX_AI_IMAGES_PER_REQUEST = 16
+STALE_GENERATION_SECONDS = 15 * 60
+HEAVY_AI_PROMPT_CHARS = 50000
+HEAVY_AI_IMAGE_COUNT = 8
+HEAVY_AI_TIMEOUT_SECONDS = 120
+
+DEFAULT_SKILL_ID = 'web-prototype'
+DEFAULT_CRAFT_SECTIONS = ['typography', 'color', 'anti-ai-slop']
+
+DESIGN_SYSTEM_CN_NAMES = {
+    'linear-app': 'Linear 设计系统',
+    'apple': 'Apple 设计系统',
+    'vercel': 'Vercel 设计系统',
+    'notion': 'Notion 设计系统',
+    'xiaohongshu': '小红书设计系统',
+    'stripe': 'Stripe 设计系统',
+    'figma': 'Figma 设计系统',
+    'shadcn': 'shadcn/ui 设计系统',
+    'github': 'GitHub 设计系统',
+    'supabase': 'Supabase 设计系统',
+    'openai': 'OpenAI 设计系统',
+    'default': '默认设计系统',
+}
+
+DESIGN_SYSTEM_CATEGORY_CN = {
+    'Productivity & SaaS': '生产力 / SaaS',
+    'Media & Consumer': '媒体 / 消费产品',
+    'Developer Tools': '开发者工具',
+    'Finance & Crypto': '金融 / 加密',
+    'E-commerce': '电商',
+    'Social & Community': '社交 / 社区',
+    'Automotive': '汽车',
+    'Gaming & Entertainment': '游戏 / 娱乐',
+    'AI & Infrastructure': 'AI / 基础设施',
+}
+
+
+def safe_asset_id(value):
+    """限制资产 ID，避免路径穿越。"""
+    value = (value or '').strip()
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9_-]*$', value):
+        return ''
+    return value
+
+
+def read_text_file(path, limit=None):
+    """读取文本文件；limit 用来控制注入 prompt 的上下文大小。"""
+    if not os.path.exists(path) or not os.path.isfile(path):
+        return ''
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        text = f.read()
+    if limit and len(text) > limit:
+        return text[:limit] + "\n\n[内容过长，已截断到关键前段]"
+    return text
+
+
+def first_markdown_heading(text, fallback):
+    match = re.search(r'^#\s+(.+)$', text or '', re.MULTILINE)
+    return match.group(1).strip() if match else fallback
+
+
+def design_system_display_name(asset_id, heading):
+    if asset_id in DESIGN_SYSTEM_CN_NAMES:
+        return DESIGN_SYSTEM_CN_NAMES[asset_id]
+    name = (heading or asset_id).strip()
+    prefix = 'Design System Inspired by '
+    if name.startswith(prefix):
+        return f"{name[len(prefix):].strip()} 设计系统"
+    if name.lower() == asset_id.lower():
+        return f"{asset_id.replace('-', ' ').title()} 设计系统"
+    return name
+
+
+def extract_design_system_colors(text, max_count=6):
+    """从 DESIGN.md 中抽取可预览的主配色。"""
+    colors = []
+    seen = set()
+    for match in re.finditer(r'#[0-9a-fA-F]{6}\b', text or ''):
+        color = match.group(0).lower()
+        if color in seen:
+            continue
+        seen.add(color)
+        colors.append(color)
+        if len(colors) >= max_count:
+            break
+    return colors
+
+
+def extract_frontmatter(text):
+    if not text.startswith('---'):
+        return ''
+    match = re.match(r'^---\s*\n(.*?)\n---\s*', text, re.DOTALL)
+    return match.group(1) if match else ''
+
+
+def extract_yaml_scalar(frontmatter, key, default=''):
+    match = re.search(rf'^{re.escape(key)}:\s*(.+)$', frontmatter or '', re.MULTILINE)
+    if not match:
+        return default
+    value = match.group(1).strip().strip('"').strip("'")
+    return value if value not in ('|', '>') else default
+
+
+def extract_yaml_block(frontmatter, key, default=''):
+    lines = (frontmatter or '').splitlines()
+    for i, line in enumerate(lines):
+        if re.match(rf'^{re.escape(key)}:\s*[|>]?\s*$', line):
+            block = []
+            for next_line in lines[i + 1:]:
+                if next_line and not next_line.startswith((' ', '\t', '-')):
+                    break
+                block.append(next_line.strip())
+            return '\n'.join([x for x in block if x]).strip() or default
+    return extract_yaml_scalar(frontmatter, key, default)
+
+
+def design_system_path(design_system_id):
+    ds_id = safe_asset_id(design_system_id)
+    if not ds_id:
+        return ''
+    return os.path.join(DESIGN_SYSTEMS_DIR, ds_id, 'DESIGN.md')
+
+
+def skill_path(skill_id):
+    sid = safe_asset_id(skill_id)
+    if not sid:
+        return ''
+    return os.path.join(SKILLS_DIR, sid, 'SKILL.md')
+
+
+def list_design_system_assets():
+    items = []
+    if not os.path.exists(DESIGN_SYSTEMS_DIR):
+        return items
+    for name in sorted(os.listdir(DESIGN_SYSTEMS_DIR)):
+        path = os.path.join(DESIGN_SYSTEMS_DIR, name, 'DESIGN.md')
+        if not os.path.isfile(path):
+            continue
+        text = read_text_file(path, 12000)
+        category = ''
+        category_match = re.search(r'^>\s*Category:\s*(.+)$', text, re.MULTILINE)
+        if category_match:
+            category = category_match.group(1).strip()
+        items.append({
+            'id': name,
+            'name': first_markdown_heading(text, name),
+            'displayName': design_system_display_name(name, first_markdown_heading(text, name)),
+            'category': category,
+            'categoryLabel': DESIGN_SYSTEM_CATEGORY_CN.get(category, category),
+            'colors': extract_design_system_colors(text)
+        })
+    return items
+
+
+def list_skill_assets():
+    items = []
+    if not os.path.exists(SKILLS_DIR):
+        return items
+    for name in sorted(os.listdir(SKILLS_DIR)):
+        path = os.path.join(SKILLS_DIR, name, 'SKILL.md')
+        if not os.path.isfile(path):
+            continue
+        text = read_text_file(path, 12000)
+        frontmatter = extract_frontmatter(text)
+        mode_match = re.search(r'^\s*mode:\s*([a-zA-Z0-9_-]+)\s*$', frontmatter, re.MULTILINE)
+        items.append({
+            'id': name,
+            'name': extract_yaml_scalar(frontmatter, 'name', name),
+            'description': extract_yaml_block(frontmatter, 'description', ''),
+            'mode': mode_match.group(1) if mode_match else 'prototype'
+        })
+    return items
+
+
+def get_skill_context(skill_id, max_chars=None, include_references=True):
+    sid = safe_asset_id(skill_id) or DEFAULT_SKILL_ID
+    root = os.path.join(SKILLS_DIR, sid)
+    skill_md = os.path.join(root, 'SKILL.md')
+    if not os.path.isfile(skill_md):
+        return ''
+
+    context_limit = max_chars or MAX_SKILL_CONTEXT_CHARS
+    parts = [read_text_file(skill_md, min(26000, context_limit))]
+
+    # 常见 skill 的关键参考资料。API 模型没有文件工具，所以需要把轻量种子注入 prompt。
+    if include_references:
+        for rel in [
+            os.path.join('assets', 'template.html'),
+            os.path.join('references', 'layouts.md'),
+            os.path.join('references', 'checklist.md'),
+            os.path.join('references', 'themes.md'),
+            os.path.join('references', 'full-decks.md'),
+            os.path.join('references', 'animations.md'),
+            os.path.join('references', 'presenter-mode.md'),
+        ]:
+            ref_path = os.path.join(root, rel)
+            if os.path.isfile(ref_path):
+                ref_text = read_text_file(ref_path, 12000)
+                if ref_text:
+                    parts.append(f"\n\n## Skill reference: {rel}\n\n{ref_text}")
+
+    context = '\n'.join([p for p in parts if p]).strip()
+    if len(context) > context_limit:
+        context = context[:context_limit] + "\n\n[Skill 上下文过长，已截断]"
+    return context
+
+
+def get_craft_context(section_ids=None, max_chars=None):
+    section_ids = section_ids or DEFAULT_CRAFT_SECTIONS
+    parts = []
+    remaining = max_chars or MAX_CRAFT_CONTEXT_CHARS
+    for section in section_ids:
+        sid = safe_asset_id(section)
+        if not sid:
+            continue
+        path = os.path.join(CRAFT_DIR, f'{sid}.md')
+        text = read_text_file(path, remaining)
+        if text:
+            parts.append(f"## Craft: {sid}\n\n{text}")
+            remaining -= len(text)
+            if remaining <= 0:
+                break
+    return '\n\n'.join(parts)
+
+
+def get_design_system_context(design_system_id, max_chars=None):
+    ds_id = safe_asset_id(design_system_id)
+    if not ds_id or ds_id in ('default', 'none'):
+        return ''
+    return read_text_file(design_system_path(ds_id), max_chars or MAX_DESIGN_SYSTEM_CHARS)
+
+
+def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', craft_sections=None):
+    """将 Open Design 的资产层注入现有生成任务。"""
+    large_ppt_import = (
+        skill_id == 'html-ppt'
+        and (len(user_prompt or '') > 8000 or '来源文件：' in (user_prompt or ''))
+    )
+    design_limit = 12000 if large_ppt_import else MAX_DESIGN_SYSTEM_CHARS
+    skill_limit = 14000 if large_ppt_import else MAX_SKILL_CONTEXT_CHARS
+    craft_limit = 8000 if large_ppt_import else MAX_CRAFT_CONTEXT_CHARS
+
+    parts = [
+        "# Open Design 增强上下文",
+        "下面的设计系统、skill 和 craft 规则是本次生成的上位约束。请严格遵守，但不要在页面中解释这些规则。",
+        "优先级：用户明确需求 > Active DESIGN.md > Active Skill > Craft Rules > 用户表单里的主色/强调色/组件风格。若已选择 DESIGN.md，表单颜色只作为微调偏好，不得覆盖品牌核心色板、字体和组件语言。",
+    ]
+
+    if large_ppt_import:
+        parts.append("本次是大体量 PPT 导入任务，已自动精简设计系统和 skill 上下文；请优先保留 PPT 原始信息层级、页序和关键视觉。")
+
+    design_system = get_design_system_context(design_system_id, design_limit)
+    if design_system:
+        parts.append(f"\n## Active DESIGN.md ({design_system_id})\n\n{design_system}")
+
+    craft = get_craft_context(craft_sections, craft_limit)
+    if craft:
+        parts.append(f"\n## Universal Craft Rules\n\n{craft}")
+
+    skill_context = get_skill_context(skill_id or DEFAULT_SKILL_ID, skill_limit, include_references=not large_ppt_import)
+    if skill_context:
+        parts.append(f"\n## Active Skill ({skill_id or DEFAULT_SKILL_ID})\n\n{skill_context}")
+
+    parts.append(f"\n# 用户原始需求\n\n{user_prompt}")
+    parts.append(
+        "\n# 最终输出约束\n"
+        "- 仍然输出一个完整、独立、可直接预览的 HTML 文件。\n"
+        "- 如果 skill 要求 deck/PPT，也输出单文件 HTML deck，保存为 index.html。\n"
+        "- 不要输出 Markdown 解释，不要输出多个文件名说明，只返回 HTML。"
+    )
+    return '\n\n'.join(parts)
+
+
+def get_github_runtime_config():
+    """GitHub token 只从环境变量读取，避免把密钥写进 config.json。"""
+    config = load_config()
+    gh = config.get('github', {})
+    token = os.environ.get('PROTOTYPE_GITHUB_TOKEN') or os.environ.get('GITHUB_TOKEN') or ''
+    return {
+        'token': token,
+        'username': gh.get('username', ''),
+        'repo': gh.get('repo', 'my-prototypes')
+    }
 
 
 def chinese_to_pinyin(text):
@@ -283,18 +578,21 @@ def save_base64_image(base64_data, save_folder, filename):
         # 移除data:image/xxx;base64,前缀
         if ',' in base64_data:
             header, data = base64_data.split(',', 1)
-            # 从header推断扩展名
-            if 'png' in header:
-                ext = '.png'
-            elif 'gif' in header:
-                ext = '.gif'
-            elif 'webp' in header:
-                ext = '.webp'
-            else:
-                ext = '.jpg'
         else:
             data = base64_data
-            ext = '.jpg'
+
+        raw = base64.b64decode(data)
+        mime = detect_supported_image_mime(raw)
+        if not mime:
+            print(f"[Base64图片跳过] {filename}: 不支持的图片格式")
+            return None
+
+        ext = {
+            'image/png': '.png',
+            'image/jpeg': '.jpg',
+            'image/gif': '.gif',
+            'image/webp': '.webp',
+        }.get(mime, '.jpg')
 
         # 确保文件名有正确扩展名
         if not any(filename.endswith(e) for e in ['.jpg', '.png', '.gif', '.webp']):
@@ -302,12 +600,255 @@ def save_base64_image(base64_data, save_folder, filename):
 
         save_path = os.path.join(save_folder, filename)
         with open(save_path, 'wb') as f:
-            f.write(base64.b64decode(data))
+            f.write(raw)
 
         return filename
     except Exception as e:
         print(f"[Base64图片保存失败] {filename}: {e}")
         return None
+
+
+def detect_supported_image_mime(raw):
+    """只允许主流 raster 图片进入模型，过滤 SVG/XML 等网关不支持的内容。"""
+    if not raw:
+        return ''
+    if raw.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'image/png'
+    if raw.startswith(b'\xff\xd8\xff'):
+        return 'image/jpeg'
+    if raw.startswith(b'GIF87a') or raw.startswith(b'GIF89a'):
+        return 'image/gif'
+    if raw.startswith(b'RIFF') and len(raw) > 12 and raw[8:12] == b'WEBP':
+        return 'image/webp'
+    return ''
+
+
+def normalize_supported_image_data_url(image_data):
+    """校验 data URL 的真实字节格式，并修正 mime，避免 .png 文件里实际是 XML。"""
+    try:
+        if not image_data:
+            return ''
+        data = image_data
+        if ',' in image_data:
+            data = image_data.split(',', 1)[1]
+        raw = base64.b64decode(data)
+        mime = detect_supported_image_mime(raw)
+        if not mime:
+            return ''
+        return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+    except Exception:
+        return ''
+
+
+def parse_pptx_bytes(file_data):
+    """用标准库解析 PPTX 的文字和图片引用，供 HTML PPT 美化模式使用。"""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pptx') as tmp:
+            tmp.write(file_data)
+            tmp_path = tmp.name
+
+        slides = []
+        with zipfile.ZipFile(tmp_path, 'r') as zf:
+            slide_names = [
+                name for name in zf.namelist()
+                if re.match(r'ppt/slides/slide\d+\.xml$', name)
+            ]
+            slide_names.sort(key=lambda n: int(re.search(r'slide(\d+)\.xml$', n).group(1)))
+
+            media_cache = {}
+            for slide_index, slide_name in enumerate(slide_names, start=1):
+                root = ET.fromstring(zf.read(slide_name))
+                texts = []
+                for node in root.iter():
+                    if node.tag.endswith('}t') and node.text:
+                        text = node.text.strip()
+                        if text:
+                            texts.append(text)
+
+                rels_name = f"ppt/slides/_rels/slide{slide_index}.xml.rels"
+                image_targets = []
+                if rels_name in zf.namelist():
+                    rel_root = ET.fromstring(zf.read(rels_name))
+                    for rel in rel_root:
+                        rel_type = rel.attrib.get('Type', '')
+                        target = rel.attrib.get('Target', '')
+                        if 'image' not in rel_type or not target:
+                            continue
+                        media_path = target.replace('../', 'ppt/')
+                        if media_path.startswith('/'):
+                            media_path = media_path.lstrip('/')
+                        if media_path in zf.namelist():
+                            image_targets.append(media_path)
+
+                images = []
+                for media_path in image_targets[:MAX_PPT_IMAGES_PER_SLIDE]:
+                    if media_path in media_cache:
+                        images.append(media_cache[media_path])
+                        continue
+                    raw = zf.read(media_path)
+                    if len(raw) > 2_500_000:
+                        continue
+                    mime = detect_supported_image_mime(raw)
+                    if not mime:
+                        print(f"[PPTX解析] 跳过不支持的图片格式: {media_path}")
+                        continue
+                    item = {
+                        'name': os.path.basename(media_path),
+                        'base64': f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+                    }
+                    media_cache[media_path] = item
+                    images.append(item)
+
+                slides.append({
+                    'index': slide_index,
+                    'title': texts[0] if texts else f'第 {slide_index} 页',
+                    'texts': texts,
+                    'images': images,
+                    'imageCount': len(images),
+                    'sourceImageCount': len(image_targets),
+                })
+
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+        return {
+            'slides': slides,
+            'slideCount': len(slides),
+            'imageCount': sum(len(slide.get('images', [])) for slide in slides),
+            'sourceImageCount': sum(slide.get('sourceImageCount', 0) for slide in slides),
+            'maxImagesPerSlide': MAX_PPT_IMAGES_PER_SLIDE
+        }
+    except zipfile.BadZipFile:
+        raise ValueError('无法解析该文件。当前仅支持 .pptx，请先将 .ppt 另存为 .pptx 后再上传。')
+
+
+def extract_ai_error_message(result, max_chars=1500):
+    """从非标准 AI 响应里提取可读错误，避免只暴露 KeyError: choices。"""
+    if isinstance(result, dict):
+        error = result.get('error')
+        if isinstance(error, dict):
+            parts = []
+            for key in ('message', 'code', 'type', 'param'):
+                value = error.get(key)
+                if value:
+                    parts.append(f"{key}: {value}")
+            if parts:
+                return '; '.join(parts)[:max_chars]
+        if error:
+            return str(error)[:max_chars]
+
+        for key in ('message', 'msg', 'detail', 'error_description'):
+            if result.get(key):
+                return str(result[key])[:max_chars]
+
+        return json.dumps(result, ensure_ascii=False)[:max_chars]
+
+    return str(result)[:max_chars]
+
+
+def parse_project_timestamp(value):
+    try:
+        return datetime.datetime.strptime(value or '', '%Y-%m-%d %H:%M:%S')
+    except Exception:
+        return None
+
+
+def mark_project_failed(project_id, error_message):
+    """统一把生成中项目置为失败，避免列表和 record.json 状态漂移。"""
+    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    projects_path = PROJECTS_FILE
+    if os.path.exists(projects_path):
+        try:
+            with open(projects_path, 'r', encoding='utf-8') as f:
+                projects = json.load(f)
+            for p in projects:
+                if p.get('id') == project_id:
+                    p['status'] = STATUS_FAILED
+                    break
+            with open(projects_path, 'w', encoding='utf-8') as f:
+                json.dump(projects, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[状态] 更新项目失败状态失败: {e}")
+
+    record_path = os.path.join(PROJECTS_DIR, project_id, 'record.json')
+    if os.path.exists(record_path):
+        try:
+            with open(record_path, 'r', encoding='utf-8') as f:
+                record = json.load(f)
+            record['status'] = STATUS_FAILED
+            record['error'] = error_message
+            record['failedAt'] = now
+            with open(record_path, 'w', encoding='utf-8') as f:
+                json.dump(record, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[状态] 更新 record 失败状态失败: {e}")
+
+
+def assign_saved_images_to_pages(pages_data, saved_image_names):
+    """将扁平图片列表按页面元数据分回 PPT 配图和参考图，并生成给 AI 的路径说明。"""
+    page_records = []
+    manifest_lines = []
+    img_index = 0
+
+    for page_idx, page in enumerate(pages_data, start=1):
+        page_record = {
+            'name': page.get('name', ''),
+            'layout': page.get('layout', ''),
+            'features': page.get('features', ''),
+            'interaction': page.get('interaction', ''),
+            'similarity': page.get('similarity', 'layout'),
+            'images': [],
+            'referenceImages': [],
+            'pptImages': []
+        }
+
+        ppt_meta = page.get('pptImages') or []
+        ppt_count = int(page.get('pptImageCount') or 0)
+        reference_count = int(page.get('referenceImageCount') or max(int(page.get('imageCount') or 0) - ppt_count, 0))
+
+        if ppt_count:
+            manifest_lines.append(f"页面 {page_idx} 的 PPT 原始配图（必须放回对应原始页，不是参考图）:")
+        for i in range(ppt_count):
+            if img_index >= len(saved_image_names):
+                break
+            filename = saved_image_names[img_index]
+            meta = ppt_meta[i] if i < len(ppt_meta) and isinstance(ppt_meta[i], dict) else {}
+            slide_index = meta.get('slideIndex') or page_idx
+            slide_title = meta.get('slideTitle') or ''
+            item = {
+                'file': filename,
+                'slideIndex': slide_index,
+                'slideTitle': slide_title
+            }
+            page_record['pptImages'].append(item)
+            page_record['images'].append(filename)
+            manifest_lines.append(f"- 第 {slide_index} 页配图: reference/{filename}" + (f"（{slide_title}）" if slide_title else ""))
+            img_index += 1
+
+        if reference_count:
+            manifest_lines.append(f"页面 {page_idx} 的额外参考图（只用于辅助视觉风格判断）:")
+        for _ in range(reference_count):
+            if img_index >= len(saved_image_names):
+                break
+            filename = saved_image_names[img_index]
+            page_record['referenceImages'].append(filename)
+            page_record['images'].append(filename)
+            manifest_lines.append(f"- 参考图: reference/{filename}")
+            img_index += 1
+
+        page_records.append(page_record)
+
+    manifest = ''
+    if manifest_lines:
+        manifest = (
+            "\n\n# 图片资源路径与用途\n"
+            "所有图片已保存到项目文件夹的 `reference/` 目录。生成 HTML 时请使用这些相对路径作为 `<img src=\"reference/...\">`。\n"
+            "PPT 原始配图必须放回对应原始页；额外参考图只作为风格/质感参考，不要当成 PPT 内容图片。\n"
+            + "\n".join(manifest_lines)
+        )
+    return page_records, manifest
 
 
 def download_html_images(html_content, save_folder):
@@ -426,6 +967,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_generation_status(query)
         elif path == '/api/models':
             self.handle_get_models()
+        elif path == '/api/design-systems':
+            self.handle_get_design_systems()
+        elif path.startswith('/api/design-systems/'):
+            design_system_id = urllib.parse.unquote(path.split('/api/design-systems/', 1)[1])
+            self.handle_get_design_system(design_system_id)
+        elif path == '/api/skills':
+            self.handle_get_skills()
+        elif path.startswith('/api/skills/'):
+            skill_id = urllib.parse.unquote(path.split('/api/skills/', 1)[1])
+            self.handle_get_skill(skill_id)
         elif path == '/api/server-info':
             self.handle_server_info()
         elif path == '/api/github/config':
@@ -493,6 +1044,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_prd_save()
         elif self.path == '/api/inspector/apply':
             self.handle_inspector_apply()
+        elif self.path == '/api/pptx/parse':
+            self.handle_pptx_parse()
         elif self.path == '/api/models/select':
             self.handle_model_select()
         elif self.path == '/api/models/save':
@@ -578,6 +1131,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             images = data.get('images', [])  # base64 images
             project_name = data.get('projectName', '未命名项目')
             form_data = data.get('formData', {})  # 用户输入的表单数据
+            global_data = form_data.get('global', {}) if isinstance(form_data, dict) else {}
+            design_system_id = data.get('designSystemId') or global_data.get('designSystemId') or ''
+            skill_id = data.get('skillId') or global_data.get('skillId') or DEFAULT_SKILL_ID
 
             # 增量更新参数
             is_incremental = data.get('incremental', False)
@@ -653,29 +1209,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             record = {
                 'global': form_data.get('global', {}),
                 'pages': [],
+                'designSystemId': design_system_id,
+                'skillId': skill_id,
                 'createdAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'sourceProjectId': source_project_id if is_incremental else None
             }
 
-            # 为每个页面分配图片文件名
             pages_data = form_data.get('pages', [])
-            img_index = 0
-            for page in pages_data:
-                page_record = {
-                    'name': page.get('name', ''),
-                    'layout': page.get('layout', ''),
-                    'features': page.get('features', ''),
-                    'interaction': page.get('interaction', ''),
-                    'similarity': page.get('similarity', 'layout'),
-                    'images': []
-                }
-                # 分配图片
-                img_count = page.get('imageCount', 0)
-                for _ in range(img_count):
-                    if img_index < len(saved_image_names):
-                        page_record['images'].append(saved_image_names[img_index])
-                        img_index += 1
-                record['pages'].append(page_record)
+            page_records, image_manifest = assign_saved_images_to_pages(pages_data, saved_image_names)
+            record['pages'] = page_records
 
             # 保存record.json
             record_path = os.path.join(project_folder, 'record.json')
@@ -689,12 +1231,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             if is_incremental and source_html_content and reused_pages > 0:
                 # 部分页面可复用，但仍需要调用AI（因为有变化的页面）
                 # 在prompt中提示AI参考原有内容
-                enhanced_prompt = prompt + f"\n\n# 重要提示\n这是一个增量更新任务。原项目中有{reused_pages}个页面内容未变化。请保持整体风格一致，重点关注变化的部分。"
+                enhanced_prompt = prompt + image_manifest + f"\n\n# 重要提示\n这是一个增量更新任务。原项目中有{reused_pages}个页面内容未变化。请保持整体风格一致，重点关注变化的部分。"
                 print(f"[增量] 使用增强prompt调用AI")
-                html_content = self.call_ai_model(enhanced_prompt, images)
+                composed_prompt = compose_generation_prompt(enhanced_prompt, design_system_id, skill_id)
+                html_content = self.call_ai_model(composed_prompt, images)
             else:
                 # 正常调用AI
-                html_content = self.call_ai_model(prompt, images)
+                composed_prompt = compose_generation_prompt(prompt + image_manifest, design_system_id, skill_id)
+                html_content = self.call_ai_model(composed_prompt, images)
 
             if not html_content:
                 self.send_error_response("AI未返回有效内容")
@@ -732,7 +1276,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             # 保存 prompt (用于调试)
             prompt_path = os.path.join(project_folder, 'prompt.txt')
             with open(prompt_path, 'w', encoding='utf-8') as f:
-                f.write(prompt)
+                f.write(composed_prompt)
 
             # 获取当前选中的模型名称
             current_model = get_selected_model()
@@ -788,6 +1332,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             images = data.get('images', [])
             project_name = data.get('projectName', '未命名项目')
             form_data = data.get('formData', {})
+            global_data = form_data.get('global', {}) if isinstance(form_data, dict) else {}
+            design_system_id = data.get('designSystemId') or global_data.get('designSystemId') or ''
+            skill_id = data.get('skillId') or global_data.get('skillId') or DEFAULT_SKILL_ID
             is_incremental = data.get('incremental', False)
             source_project_id = data.get('sourceProjectId', None)
             changes = data.get('changes', None)
@@ -816,28 +1363,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             record = {
                 'global': form_data.get('global', {}),
                 'pages': [],
+                'designSystemId': design_system_id,
+                'skillId': skill_id,
                 'status': STATUS_GENERATING,
                 'createdAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'sourceProjectId': source_project_id if is_incremental else None
             }
 
             pages_data = form_data.get('pages', [])
-            img_index = 0
-            for page in pages_data:
-                page_record = {
-                    'name': page.get('name', ''),
-                    'layout': page.get('layout', ''),
-                    'features': page.get('features', ''),
-                    'interaction': page.get('interaction', ''),
-                    'similarity': page.get('similarity', 'layout'),
-                    'images': []
-                }
-                img_count = page.get('imageCount', 0)
-                for _ in range(img_count):
-                    if img_index < len(saved_image_names):
-                        page_record['images'].append(saved_image_names[img_index])
-                        img_index += 1
-                record['pages'].append(page_record)
+            page_records, image_manifest = assign_saved_images_to_pages(pages_data, saved_image_names)
+            record['pages'] = page_records
 
             record_path = os.path.join(project_folder, 'record.json')
             with open(record_path, 'w', encoding='utf-8') as f:
@@ -846,7 +1381,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             # 保存 prompt
             prompt_path = os.path.join(project_folder, 'prompt.txt')
             with open(prompt_path, 'w', encoding='utf-8') as f:
-                f.write(prompt)
+                f.write(compose_generation_prompt(prompt + image_manifest, design_system_id, skill_id))
 
             # 获取当前选中的模型名称
             current_model = get_selected_model()
@@ -862,7 +1397,11 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 'url': f'/projects/{project_id}/index.html',
                 'date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
-            projects.insert(0, new_project)
+            existing_idx = next((i for i, p in enumerate(projects) if p.get('id') == project_id), None)
+            if existing_idx is not None:
+                projects[existing_idx] = new_project
+            else:
+                projects.insert(0, new_project)
             self.save_projects(projects)
 
             # 记录项目归属
@@ -875,7 +1414,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 generating_tasks[project_id] = {
                     'status': STATUS_GENERATING,
                     'progress': 0,
-                    'error': ''
+                    'error': '',
+                    'startedAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 }
 
             # 启动后台线程
@@ -914,9 +1454,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     enhanced_prompt = prompt
                     if is_incremental and source_html_content and reused_pages > 0:
                         enhanced_prompt += f"\n\n# 重要提示\n这是一个增量更新任务。原项目中有{reused_pages}个页面内容未变化。请保持整体风格一致。"
+                    composed_prompt = compose_generation_prompt(enhanced_prompt + image_manifest, design_system_id, skill_id)
 
                     # 使用类似 call_ai_model 的逻辑
-                    html_content = self._call_ai_for_async(enhanced_prompt, images)
+                    html_content = self._call_ai_for_async(composed_prompt, images)
 
                     with tasks_lock:
                         generating_tasks[project_id]['progress'] = 80
@@ -967,13 +1508,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         generating_tasks[project_id]['status'] = STATUS_FAILED
                         generating_tasks[project_id]['error'] = str(e)
 
-                    # 更新项目列表状态
-                    projects = self.load_projects()
-                    for p in projects:
-                        if p['id'] == project_id:
-                            p['status'] = STATUS_FAILED
-                            break
-                    self.save_projects(projects)
+                    mark_project_failed(project_id, str(e))
 
             # 启动线程
             thread = threading.Thread(target=generate_in_background, daemon=True)
@@ -1074,8 +1609,25 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 "text": prompt
             })
 
-            # 添加图片
+            # 添加图片。历史记录里可能有扩展名是 png、实际内容却是 XML/SVG 的文件，这里统一过滤。
+            valid_images = []
+            skipped_images = 0
             for img_base64 in images:
+                normalized = normalize_supported_image_data_url(img_base64)
+                if normalized:
+                    valid_images.append(normalized)
+                else:
+                    skipped_images += 1
+
+            if skipped_images:
+                print(f"[AI] 已跳过 {skipped_images} 张不支持的参考图")
+
+            if len(valid_images) > MAX_AI_IMAGES_PER_REQUEST:
+                skipped_extra = len(valid_images) - MAX_AI_IMAGES_PER_REQUEST
+                valid_images = valid_images[:MAX_AI_IMAGES_PER_REQUEST]
+                print(f"[AI] 参考图超过网关上限，已仅发送前 {MAX_AI_IMAGES_PER_REQUEST} 张，跳过 {skipped_extra} 张")
+
+            for img_base64 in valid_images:
                 user_content.append({
                     "type": "image_url",
                     "image_url": {"url": img_base64}
@@ -1112,10 +1664,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             }
 
             timeout = AI_OPTIONS.get('timeout', 300)
+            heavy_request = len(prompt) > HEAVY_AI_PROMPT_CHARS or len(valid_images) > HEAVY_AI_IMAGE_COUNT
+            if heavy_request:
+                timeout = min(timeout, HEAVY_AI_TIMEOUT_SECONDS)
+                print(f"[AI] 检测到重型请求：prompt={len(prompt)}字符, images={len(valid_images)}，超时收紧到 {timeout}s，仅尝试1次")
             print(f"[AI] 正在调用大模型... (超时: {timeout}s)")
 
             result = None
-            max_retries = 3
+            max_retries = 1 if heavy_request else 3
             last_error = None
 
             for attempt in range(max_retries):
@@ -1145,6 +1701,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     response.raise_for_status() # 检查 HTTP 错误
                     result = response.json()
                     break # 成功则跳出循环
+                except requests.HTTPError as e:
+                    status_code = e.response.status_code if e.response is not None else 'unknown'
+                    body = e.response.text if e.response is not None else ''
+                    body = body[:1500]
+                    message = f"AI接口HTTP {status_code}: {body}"
+                    print(f"[AI] 调用失败 (第 {attempt+1}/{max_retries} 次): {message}")
+                    last_error = Exception(message)
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(1)
                 except Exception as e:
                     print(f"[AI] 调用失败 (第 {attempt+1}/{max_retries} 次): {e}")
                     last_error = e
@@ -1152,16 +1718,26 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         import time
                         time.sleep(1)
 
-            # 如果 requests 全部失败，尝试使用 curl 命令行兜底
+            # 如果 requests 全部失败，尝试使用 curl 命令行兜底。重型请求不兜底，避免后台长时间假死。
             if not result:
+                if heavy_request:
+                    raise last_error or Exception("AI重型请求超时或失败")
                 print("[AI] 尝试使用 curl 命令行兜底...")
                 result = self.call_ai_model_via_curl(url, headers, payload, timeout)
 
             if not result:
                 raise last_error
 
-            content = result['choices'][0]['message']['content']
-            finish_reason = result['choices'][0].get('finish_reason', '')
+            choices = result.get('choices') if isinstance(result, dict) else None
+            if not choices:
+                error_message = extract_ai_error_message(result)
+                print(f"[AI错误] 返回缺少 choices: {error_message}")
+                raise Exception(f"AI返回异常：{error_message}")
+
+            content = choices[0].get('message', {}).get('content', '')
+            finish_reason = choices[0].get('finish_reason', '')
+            if not content:
+                raise Exception("AI返回异常：choices 中没有可用内容")
 
             print(f"[AI] 响应长度: {len(content)} 字符, finish_reason: {finish_reason}")
 
@@ -1220,7 +1796,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 return None
 
             # 解析结果
-            return json.loads(process.stdout)
+            try:
+                return json.loads(process.stdout)
+            except json.JSONDecodeError:
+                print(f"[curl错误] 响应不是JSON: {process.stdout[:1500]}")
+                return {
+                    'error': {
+                        'message': process.stdout[:1500] or process.stderr[:1500] or 'curl 返回空响应'
+                    }
+                }
 
         except Exception as e:
             print(f"[curl异常] {e}")
@@ -1662,8 +2246,17 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
     def save_projects(self, projects):
         """保存项目列表"""
+        deduped = []
+        seen = set()
+        for project in projects:
+            project_id = project.get('id') if isinstance(project, dict) else None
+            if project_id and project_id in seen:
+                continue
+            if project_id:
+                seen.add(project_id)
+            deduped.append(project)
         with open(PROJECTS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(projects, f, ensure_ascii=False, indent=2)
+            json.dump(deduped, f, ensure_ascii=False, indent=2)
 
     def load_deleted_projects(self):
         """加载已删除项目列表"""
@@ -1984,6 +2577,125 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             projects_abs_path = os.path.abspath(PROJECTS_DIR)
             self.send_json_response({
                 'projectsDir': projects_abs_path
+            })
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_pptx_parse(self):
+        """解析上传的 PPTX，提取文字、图片和基础页面顺序。"""
+        try:
+            content_type = self.headers.get('Content-Type', '')
+            if not content_type.startswith('multipart/form-data'):
+                self.send_error_response("请上传 multipart/form-data 格式的 PPTX 文件")
+                return
+
+            boundary_match = re.search(r'boundary=([^;]+)', content_type)
+            if not boundary_match:
+                self.send_error_response("缺少 multipart boundary")
+                return
+
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length)
+            boundary = boundary_match.group(1).encode()
+            parts = body.split(b'--' + boundary)
+
+            filename = ''
+            file_data = None
+            for part in parts:
+                if not part or part in (b'--\r\n', b'--'):
+                    continue
+                if part.startswith(b'\r\n'):
+                    part = part[2:]
+                if part.endswith(b'\r\n'):
+                    part = part[:-2]
+
+                header_end = part.find(b'\r\n\r\n')
+                if header_end == -1:
+                    continue
+
+                headers = part[:header_end].decode('utf-8', errors='ignore')
+                payload = part[header_end + 4:]
+                filename_match = re.search(r'filename="([^"]+)"', headers)
+                if filename_match:
+                    filename = os.path.basename(filename_match.group(1))
+                    file_data = payload
+                    break
+
+            if not file_data:
+                self.send_error_response("没有收到 PPT 文件")
+                return
+
+            if not filename.lower().endswith('.pptx'):
+                self.send_error_response("当前仅支持 .pptx。请先将 .ppt 另存为 .pptx 后上传。")
+                return
+
+            parsed = parse_pptx_bytes(file_data)
+            parsed['success'] = True
+            parsed['filename'] = filename
+            self.send_json_response(parsed)
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_get_design_systems(self):
+        """返回可选的 Open Design 设计系统列表"""
+        try:
+            self.send_json_response({
+                'success': True,
+                'designSystems': list_design_system_assets()
+            })
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_get_design_system(self, design_system_id):
+        """返回单个 DESIGN.md 内容"""
+        try:
+            ds_id = safe_asset_id(design_system_id)
+            if not ds_id:
+                self.send_error_response("无效的 design system ID")
+                return
+            path = design_system_path(ds_id)
+            body = read_text_file(path)
+            if not body:
+                self.send_error_response("Design system 不存在")
+                return
+            self.send_json_response({
+                'success': True,
+                'id': ds_id,
+                'name': first_markdown_heading(body, ds_id),
+                'body': body
+            })
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_get_skills(self):
+        """返回可选的 Open Design skills 列表"""
+        try:
+            self.send_json_response({
+                'success': True,
+                'skills': list_skill_assets()
+            })
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_get_skill(self, skill_id):
+        """返回单个 skill 的 SKILL.md 内容"""
+        try:
+            sid = safe_asset_id(skill_id)
+            if not sid:
+                self.send_error_response("无效的 skill ID")
+                return
+            path = skill_path(sid)
+            body = read_text_file(path)
+            if not body:
+                self.send_error_response("Skill 不存在")
+                return
+            frontmatter = extract_frontmatter(body)
+            self.send_json_response({
+                'success': True,
+                'id': sid,
+                'name': extract_yaml_scalar(frontmatter, 'name', sid),
+                'description': extract_yaml_block(frontmatter, 'description', ''),
+                'body': body
             })
         except Exception as e:
             self.send_error_response(str(e))
@@ -2677,7 +3389,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def send_json_response(self, data):
         """发送JSON响应"""
         self.send_response(200)
-        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
@@ -2685,7 +3397,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def send_error_response(self, message):
         """发送错误响应"""
         self.send_response(500)
-        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.end_headers()
         self.wfile.write(json.dumps({'error': message}, ensure_ascii=False).encode('utf-8'))
 
@@ -2701,6 +3413,21 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             with tasks_lock:
                 if project_id in generating_tasks:
                     task_info = generating_tasks[project_id]
+                    if task_info.get('status') == STATUS_GENERATING:
+                        started_at = parse_project_timestamp(task_info.get('startedAt'))
+                        record_path = os.path.join(PROJECTS_DIR, project_id, 'record.json')
+                        if not started_at and os.path.exists(record_path):
+                            try:
+                                with open(record_path, 'r', encoding='utf-8') as f:
+                                    record = json.load(f)
+                                started_at = parse_project_timestamp(record.get('createdAt'))
+                            except Exception:
+                                started_at = None
+                        if started_at and (datetime.datetime.now() - started_at).total_seconds() > STALE_GENERATION_SECONDS:
+                            error = f"生成超时：超过 {STALE_GENERATION_SECONDS // 60} 分钟仍未完成，已自动标记失败。建议减少参考图/切换更稳定模型后重试。"
+                            task_info['status'] = STATUS_FAILED
+                            task_info['error'] = error
+                            mark_project_failed(project_id, error)
                     self.send_json_response({
                         'status': task_info['status'],
                         'progress': task_info.get('progress', 0),
@@ -2713,7 +3440,25 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             if os.path.exists(html_path):
                 self.send_json_response({'status': STATUS_COMPLETED, 'progress': 100})
             else:
-                self.send_json_response({'status': 'not_found', 'progress': 0})
+                record_path = os.path.join(PROJECTS_DIR, project_id, 'record.json')
+                if os.path.exists(record_path):
+                    with open(record_path, 'r', encoding='utf-8') as f:
+                        record = json.load(f)
+                    status = record.get('status') or STATUS_GENERATING
+                    if status == STATUS_GENERATING:
+                        created_at = parse_project_timestamp(record.get('createdAt'))
+                        if created_at and (datetime.datetime.now() - created_at).total_seconds() > STALE_GENERATION_SECONDS:
+                            error = f"生成超时：超过 {STALE_GENERATION_SECONDS // 60} 分钟仍未完成，已自动标记失败。建议减少参考图/切换更稳定模型后重试。"
+                            mark_project_failed(project_id, error)
+                            self.send_json_response({'status': STATUS_FAILED, 'progress': 20, 'error': error})
+                            return
+                    self.send_json_response({
+                        'status': status,
+                        'progress': 20 if status == STATUS_GENERATING else 0,
+                        'error': record.get('error', '')
+                    })
+                else:
+                    self.send_json_response({'status': 'not_found', 'progress': 0})
 
         except Exception as e:
             print(f"[错误] 查询状态失败: {e}")
@@ -2979,8 +3724,7 @@ function copyLink(url, btn) {{
                 self.send_error_response("缺少 projectId")
                 return
 
-            config = load_config()
-            gh = config.get('github', {})
+            gh = get_github_runtime_config()
             token = gh.get('token', '')
             username = gh.get('username', '')
             repo = gh.get('repo', 'my-prototypes')
@@ -3119,7 +3863,7 @@ function copyLink(url, btn) {{
         """读取 GitHub 配置（Token 打码）"""
         try:
             config = load_config()
-            gh = config.get('github', {'token': '', 'username': '', 'repo': 'my-prototypes'})
+            gh = get_github_runtime_config()
             token = gh.get('token', '')
             # 打码显示
             masked_token = (token[:6] + '****' + token[-4:]) if len(token) > 10 else ('****' if token else '')
@@ -3128,7 +3872,8 @@ function copyLink(url, btn) {{
                 'username': gh.get('username', ''),
                 'repo': gh.get('repo', 'my-prototypes'),
                 'tokenMasked': masked_token,
-                'hasToken': bool(token)
+                'hasToken': bool(token),
+                'tokenSource': 'env' if token else ''
             })
         except Exception as e:
             self.send_error_response(str(e))
@@ -3146,19 +3891,20 @@ function copyLink(url, btn) {{
             if 'github' not in config:
                 config['github'] = {}
 
-            # 只更新非空字段（Token 若用户没改则保持旧值）
+            # Token 不再写入 config.json，避免密钥落盘；仅在当前进程中临时可用。
             if data.get('token'):
-                config['github']['token'] = data['token']
+                os.environ['PROTOTYPE_GITHUB_TOKEN'] = data['token']
             if 'username' in data:
                 config['github']['username'] = data['username']
             if 'repo' in data:
                 config['github']['repo'] = data['repo'] or 'my-prototypes'
+            config['github'].pop('token', None)
 
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=4)
 
             print(f"[GitHub] 配置已保存: {config['github']['username']}/{config['github']['repo']}")
-            self.send_json_response({'success': True, 'message': '配置已保存'})
+            self.send_json_response({'success': True, 'message': '配置已保存，Token 仅保存在当前进程环境变量中'})
 
         except Exception as e:
             self.send_error_response(str(e))
@@ -3172,9 +3918,7 @@ function copyLink(url, btn) {{
 
             token = data.get('token', '')
             if not token:
-                # 从配置读取
-                config = load_config()
-                token = config.get('github', {}).get('token', '')
+                token = get_github_runtime_config().get('token', '')
 
             if not token:
                 self.send_error_response("请先填写 Personal Access Token")
@@ -3221,8 +3965,7 @@ function copyLink(url, btn) {{
                 self.send_error_response("缺少 projectId")
                 return
 
-            config = load_config()
-            gh = config.get('github', {})
+            gh = get_github_runtime_config()
             token = gh.get('token', '')
             username = gh.get('username', '')
             repo = gh.get('repo', 'my-prototypes')

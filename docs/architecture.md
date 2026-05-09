@@ -10,6 +10,8 @@
   - 静态文件服务
   - AI 大模型调用代理
   - 项目/文件管理 (CRUD)
+  - 设计系统、skills、craft 资产读取与 Prompt 组装
+  - PPTX 解析、原始配图提取与 HTML PPT 生成辅助
   - PRD/Inspector API 支持
   - HTML 解析与流程图生成
   - **网络层增强**：集成智能代理探测与 `curl` 命令行兜底机制，确保在 SSL 握手失败等极端网络环境下仍能稳定调用 AI 接口。
@@ -49,6 +51,35 @@ Viewer (Parent)                         Prototype (iframe)
 
 ---
 
+### 设计资产注入
+
+生成 Prompt 不再只依赖首页表单，而是由后端统一组合多层设计上下文：
+
+```
+用户输入
+  ↓
+design-systems/{id}/DESIGN.md
+  ↓
+skills/{productType}/SKILL.md
+  ↓
+craft/*.md
+  ↓
+主题色 / 辅助色等表单偏好
+```
+
+优先级为用户明确输入最高，其次是设计系统、产物 skill、craft 通用规范，最后才是表单颜色偏好。这样可以让同一产物类型稳定复用 OpenDesign 风格资产，同时保留用户对具体页面的控制。
+
+### HTML PPT 生成链路
+
+导入 PPT 美化模式会先调用 `/api/pptx/parse` 解析 `.pptx`：
+
+1. 服务端用标准库读取 PPTX 压缩包结构，提取 slide 顺序、文字和媒体引用。
+2. 图片按真实二进制签名过滤，只保留浏览器和多模态模型可处理的图片类型。
+3. 每页最多保留 5 张 PPT 原始配图，前端允许删除超额或不需要的图片。
+4. 生成时后端把 PPT 配图和额外参考图区分写入 `record.json`，并在 Prompt 中要求配图回到对应页面。
+
+HTML PPT 产物应是单文件演示稿：默认概览模式，播放时每页占满 `100vw x 100vh`，通过键盘/鼠标翻页，并用 `Esc` 或右键退出播放。
+
 ## 3. 文件结构
 
 详细的文件用途说明：
@@ -59,18 +90,22 @@ Viewer (Parent)                         Prototype (iframe)
 ├── config.json            # AI 配置、端口设置
 ├── projects.json          # 项目索引（自动同步）
 ├── data/                  # 运行时数据
-├── 
+├──
 ├── src/                   # 前端系统源码
 │   ├── viewer.html        # 全能预览器（预览/编辑/研发/微调）
 │   ├── index.html         # 系统首页（新建项目）
 │   └── style.css          # 全局样式
-├── 
+├──
+├── design-systems/        # 设计系统资产（DESIGN.md）
+├── skills/                # 产物类型生成 skills
+├── craft/                 # 通用设计工艺规范
+├──
 ├── projects/              # 用户项目存储
 │   └── {项目ID}/
 │       ├── index.html     # 原型 HTML 文件
 │       ├── prd/           # PRD 文档目录 (.md)
 │       └── images/        # 资源文件
-├── 
+├──
 ├── docs/                  # 开发文档
 └── scripts (bat/py)       # 辅助工具脚本
 ```

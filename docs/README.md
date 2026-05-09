@@ -8,6 +8,8 @@
 
 本项目是一个结合了 AI 大模型的 Web 原型生成工具。它不仅能让 AI 生成代码，还提供了完整的**预览、编辑、PRD 撰写、研发交付**全流程支持。
 
+当前版本新增 **HTML PPT 生成** 和 **设计系统资产层**：HTML PPT 可通过导入 PPTX 美化或逐页描述生成；设计系统、skills 和 craft 资产参考 OpenDesign 的组织方式，为不同产物类型注入更稳定的设计约束。
+
 ## 快速入门
 
 ### 启动项目
@@ -15,6 +17,8 @@
 
 ### 核心功能
 *   **AI 生成**：输入描述，生成 HTML 原型。
+*   **HTML PPT**：支持 PPTX 解析、原始配图回填、参考图辅助、概览小图和全屏播放。
+*   **设计系统**：支持中文化设计系统选择、色卡预览，并按产物类型联动生成 skill。
 *   **预览器**：支持 PC/Mobile 视图切换，实时预览。
 *   **PRD 撰写**：内置 Markdown 编辑器，实时编写文档。
 *   **微调模式**：所见即所得的元素选择与 AI 修改。
@@ -42,6 +46,9 @@
 ├── db.py                  # 团队协作数据库层
 ├── migrate.py             # 旧项目归属迁移脚本
 ├── docs/                  # 开发文档（本目录）
+├── design-systems/        # 设计系统 DESIGN.md 资产
+├── skills/                # 原型、Dashboard、Mobile、SaaS、HTML PPT 等生成 skills
+├── craft/                 # 通用设计工艺与反 AI 味规范
 ├── projects/              # 项目数据存储
 ├── src/                   # 前端源码 (index.html / login.html / viewer.html)
 └── templates/             # 模板文件

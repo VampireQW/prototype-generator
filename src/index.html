@@ -355,22 +355,25 @@
                     <h3 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
                         <i class="fas fa-palette text-indigo-500"></i> 全局设置
                     </h3>
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">主色调</label>
-                            <div class="flex items-center gap-2">
-                                <input type="color" id="primaryColor" value="#004fff"
-                                    class="h-9 w-12 rounded border cursor-pointer">
-                                <span id="primaryColorValue" class="text-sm font-mono">#004fff</span>
-                            </div>
+                            <label class="text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                                产物类型
+                                <span id="skillModeHelp" class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-100 text-gray-400 text-[10px] cursor-help" data-help="不同产物会使用不同的生成工作流。HTML PPT 支持导入 PPTX 美化和逐页描述生成。">?</span>
+                            </label>
+                            <select id="skillSelect" class="w-full rounded-lg border-gray-200 border p-2 text-sm">
+                                <option value="web-prototype">Web 原型</option>
+                            </select>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">强调色</label>
-                            <div class="flex items-center gap-2">
-                                <input type="color" id="secondaryColor" value="#10B981"
-                                    class="h-9 w-12 rounded border cursor-pointer">
-                                <span id="secondaryColorValue" class="text-sm font-mono">#10B981</span>
-                            </div>
+                            <label class="text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
+                                设计系统
+                                <span id="designSystemHelp" class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-100 text-gray-400 text-[10px] cursor-help" data-help="选择后会优先遵守该品牌的色彩、字体和组件语言；主色和强调色只作为微调偏好。">?</span>
+                            </label>
+                            <select id="designSystemSelect" class="w-full rounded-lg border-gray-200 border p-2 text-sm">
+                                <option value="">默认风格</option>
+                            </select>
+                            <div id="designSystemSwatches" class="mt-2 flex h-5 items-center gap-1"></div>
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700 mb-1">背景模式</label>
@@ -387,6 +390,30 @@
                                 <option value="Tailwind UI">Tailwind UI</option>
                             </select>
                         </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">主题色</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" id="primaryColor" value="#004fff"
+                                    class="h-9 w-12 rounded border cursor-pointer">
+                                <span id="primaryColorValue" class="text-sm font-mono">#004fff</span>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">辅助色</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" id="secondaryColor" value="#10B981"
+                                    class="h-9 w-12 rounded border cursor-pointer">
+                                <span id="secondaryColorValue" class="text-sm font-mono">#10B981</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="pptModeControls" class="hidden mt-4 flex flex-wrap gap-2">
+                        <button type="button" id="pptImportModeBtn" class="px-3 py-2 rounded-lg text-sm font-medium bg-indigo-600 text-white border border-indigo-600">
+                            导入 PPT 美化
+                        </button>
+                        <button type="button" id="pptPagesModeBtn" class="px-3 py-2 rounded-lg text-sm font-medium bg-white text-gray-600 border border-gray-200 hover:border-indigo-300">
+                            逐页描述生成
+                        </button>
                     </div>
                 </section>
 
@@ -947,7 +974,7 @@
         <span id="toastMessage">操作成功</span>
     </div>
 
-    <script src="script.js?v=20260407"></script>
+    <script src="script.js?v=20260509-global-order"></script>
 </body>
 
 </html>

@@ -130,7 +130,53 @@
 - Query: `?projectId=xxx`
 - Returns: `{ pages, transitions, modals, mermaid }`
 
-## 5. 微调模式
+## 5. 设计系统与 Skills
+
+### 获取设计系统列表
+`GET /api/design-systems`
+- Returns: `{ designSystems: [{ id, name, category, colors, summary }] }`
+- 说明：返回 `design-systems/` 下的中文化设计系统资产，前端用于下拉选择和色卡预览。
+
+### 获取单个设计系统详情
+`GET /api/design-systems/{id}`
+- Returns: `{ designSystem: {...} }`
+- 说明：返回对应 `DESIGN.md` 内容，生成 Prompt 时由后端注入。
+
+### 获取产物 Skills 列表
+`GET /api/skills`
+- Returns: `{ skills: [{ id, name, description }] }`
+- 说明：返回 `skills/` 下的产物工作流资产，用于按产物类型联动生成约束。
+
+### 获取单个 Skill 详情
+`GET /api/skills/{id}`
+- Returns: `{ skill: {...} }`
+
+## 6. PPTX 解析
+
+### 解析 PPTX
+`POST /api/pptx/parse`
+- Content-Type: `multipart/form-data`
+- Form 字段：`file`
+- Returns:
+  ```json
+  {
+    "success": true,
+    "slides": [
+      {
+        "slideIndex": 1,
+        "title": "页面标题",
+        "text": "页面文字",
+        "images": [
+          { "name": "slide1_image1.png", "mime": "image/png", "base64": "..." }
+        ]
+      }
+    ],
+    "maxImagesPerSlide": 5
+  }
+  ```
+- 说明：当前仅支持 `.pptx`。服务端会提取文字、页序和可用图片；PPT 原始配图会作为页面配图参与生成，不作为普通参考图。
+
+## 7. 微调模式
 
 ### 应用 AI 修改
 `POST /api/inspector/apply`
