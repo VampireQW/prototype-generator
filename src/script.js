@@ -1393,6 +1393,13 @@ function getDesignSystemLabel(ds) {
     return `${ds.displayName || ds.name || ds.id}${ds.categoryLabel ? ` · ${ds.categoryLabel}` : ''}`;
 }
 
+function getDesignSystemUiLabel(ds) {
+    return getDesignSystemLabel(ds)
+        .replace(/\s*设计系统/g, '')
+        .replace(/\s*Design System\s*/gi, '')
+        .trim() || '默认风格';
+}
+
 function renderMiniSwatches(colors, sizeClass = 'h-4 w-4') {
     return (colors || []).slice(0, 6).map(color => `
         <span class="inline-block ${sizeClass} rounded border border-black/10" title="${escapeHtml(color)}" style="background:${escapeHtml(color)}"></span>
@@ -1419,7 +1426,7 @@ function renderDesignSystemMenu(ordered) {
         return `
             <button type="button" class="design-system-option w-full rounded-lg px-3 py-2 text-left flex items-center justify-between gap-3 ${isActive ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-50'}" data-id="${escapeHtml(ds.id || '')}">
                 <span class="min-w-0">
-                    <span class="block text-sm font-medium truncate">${escapeHtml(getDesignSystemLabel(ds))}</span>
+                    <span class="block text-sm font-medium truncate">${escapeHtml(getDesignSystemUiLabel(ds))}</span>
                     ${ds.categoryLabel ? `<span class="block text-xs text-gray-400 truncate">${escapeHtml(ds.categoryLabel)}</span>` : ''}
                 </span>
                 <span class="flex flex-shrink-0 items-center gap-1">${renderMiniSwatches(colors, 'h-4 w-4')}</span>
@@ -1540,10 +1547,7 @@ function renderDesignSystemSwatches(ds) {
 
 function updateDesignSystemPickerButton(ds) {
     const label = $('designSystemPickerLabel');
-    const swatches = $('designSystemPickerSwatches');
-    const colors = ds ? (ds.colors || []) : getDefaultSwatchColors();
-    if (label) label.textContent = getDesignSystemLabel(ds);
-    if (swatches) swatches.innerHTML = renderMiniSwatches(colors, 'h-4 w-4');
+    if (label) label.textContent = getDesignSystemUiLabel(ds);
 }
 
 function updateInputModeForSkill() {
