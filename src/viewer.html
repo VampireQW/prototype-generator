@@ -321,46 +321,122 @@
                 0 15px 30px -8px rgba(0, 0, 0, 0.3);
         }
 
-        /* 右侧按钮 - 电源键（凸出写实） */
-        .device-frame::before {
-            content: '';
+        /* ==================== 真机实体按键 ==================== */
+        /* 通用按键样式 - 模拟钛金属质感，需突出外圈 box-shadow(3.5px) */
+        .device-btn {
             position: absolute;
-            right: -4px;
-            top: 200px;
-            width: 4px;
-            height: 72px;
-            background: linear-gradient(to right, #2a2a2e, #1a1a1e, #2a2a2e);
-            border-radius: 0 3px 3px 0;
-            box-shadow:
-                1px 0 1px rgba(255, 255, 255, 0.08),
-                2px 0 3px rgba(0, 0, 0, 0.4),
-                inset -1px 0 1px rgba(255, 255, 255, 0.06),
-                inset 0 1px 1px rgba(255, 255, 255, 0.04),
-                inset 0 -1px 1px rgba(0, 0, 0, 0.2);
+            pointer-events: none;
+            z-index: 5;
         }
 
-        /* 左侧按钮 - 静音+音量上+音量下（凸出写实） */
-        .device-frame::after {
+        /* 右侧 - 侧边键（电源/Siri） */
+        .device-btn-power {
+            right: -5px;
+            top: 230px;
+            width: 5px;
+            height: 104px;
+            background: linear-gradient(
+                to right,
+                #1a1a1e 0%,
+                #2e2e34 20%,
+                #45454b 45%,
+                #3a3a40 65%,
+                #1d1d21 90%,
+                #0e0e12 100%
+            );
+            border-radius: 0 2px 2px 0;
+            box-shadow:
+                inset 0 1px 0.5px rgba(255, 255, 255, 0.22),
+                inset 0 -1px 0.5px rgba(0, 0, 0, 0.55),
+                inset -1px 0 1px rgba(0, 0, 0, 0.4),
+                1px 1px 2px rgba(0, 0, 0, 0.5),
+                2px 0 4px -1px rgba(0, 0, 0, 0.4);
+        }
+
+        /* 侧边键上下的细小装配线 */
+        .device-btn-power::before,
+        .device-btn-power::after {
             content: '';
             position: absolute;
-            left: -4px;
-            top: 148px;
-            width: 4px;
-            height: 28px;
-            background: linear-gradient(to left, #2a2a2e, #1a1a1e, #2a2a2e);
-            border-radius: 3px 0 0 3px;
+            right: 0;
+            left: 0;
+            height: 1px;
+            background: rgba(0, 0, 0, 0.5);
+            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+        .device-btn-power::before { top: 5px; }
+        .device-btn-power::after { bottom: 5px; }
+
+        /* 左侧 - 操作按钮（Action Button） */
+        .device-btn-action {
+            left: -5px;
+            top: 150px;
+            width: 5px;
+            height: 30px;
+            background: linear-gradient(
+                to left,
+                #1a1a1e 0%,
+                #2e2e34 20%,
+                #45454b 45%,
+                #3a3a40 65%,
+                #1d1d21 90%,
+                #0e0e12 100%
+            );
+            border-radius: 2px 0 0 2px;
             box-shadow:
-                -1px 0 1px rgba(255, 255, 255, 0.08),
-                -2px 0 3px rgba(0, 0, 0, 0.4),
-                inset 1px 0 1px rgba(255, 255, 255, 0.06),
-                inset 0 1px 1px rgba(255, 255, 255, 0.04),
-                inset 0 -1px 1px rgba(0, 0, 0, 0.2),
-                0 42px 0 0 #222226,
-                -1px 42px 1px rgba(255, 255, 255, 0.08),
-                -2px 42px 3px rgba(0, 0, 0, 0.4),
-                0 82px 0 0 #222226,
-                -1px 82px 1px rgba(255, 255, 255, 0.08),
-                -2px 82px 3px rgba(0, 0, 0, 0.4);
+                inset 0 1px 0.5px rgba(255, 255, 255, 0.22),
+                inset 0 -1px 0.5px rgba(0, 0, 0, 0.55),
+                inset 1px 0 1px rgba(0, 0, 0, 0.4),
+                -1px 1px 2px rgba(0, 0, 0, 0.5),
+                -2px 0 4px -1px rgba(0, 0, 0, 0.4);
+        }
+
+        /* 左侧 - 音量+ */
+        .device-btn-volup {
+            left: -5px;
+            top: 210px;
+            width: 5px;
+            height: 62px;
+            background: linear-gradient(
+                to left,
+                #1a1a1e 0%,
+                #2e2e34 20%,
+                #45454b 45%,
+                #3a3a40 65%,
+                #1d1d21 90%,
+                #0e0e12 100%
+            );
+            border-radius: 2px 0 0 2px;
+            box-shadow:
+                inset 0 1px 0.5px rgba(255, 255, 255, 0.22),
+                inset 0 -1px 0.5px rgba(0, 0, 0, 0.55),
+                inset 1px 0 1px rgba(0, 0, 0, 0.4),
+                -1px 1px 2px rgba(0, 0, 0, 0.5),
+                -2px 0 4px -1px rgba(0, 0, 0, 0.4);
+        }
+
+        /* 左侧 - 音量- */
+        .device-btn-voldown {
+            left: -5px;
+            top: 286px;
+            width: 5px;
+            height: 62px;
+            background: linear-gradient(
+                to left,
+                #1a1a1e 0%,
+                #2e2e34 20%,
+                #45454b 45%,
+                #3a3a40 65%,
+                #1d1d21 90%,
+                #0e0e12 100%
+            );
+            border-radius: 2px 0 0 2px;
+            box-shadow:
+                inset 0 1px 0.5px rgba(255, 255, 255, 0.22),
+                inset 0 -1px 0.5px rgba(0, 0, 0, 0.55),
+                inset 1px 0 1px rgba(0, 0, 0, 0.4),
+                -1px 1px 2px rgba(0, 0, 0, 0.5),
+                -2px 0 4px -1px rgba(0, 0, 0, 0.4);
         }
 
         .device-screen {
@@ -1320,6 +1396,11 @@
                         </div>
                         <div class="device-home-bar"></div>
                     </div>
+                    <!-- 实体按键（放在 .device-screen 后面，避免破坏 JS 的 querySelector('div')） -->
+                    <div class="device-btn device-btn-action"></div>
+                    <div class="device-btn device-btn-volup"></div>
+                    <div class="device-btn device-btn-voldown"></div>
+                    <div class="device-btn device-btn-power"></div>
                 </div>
                 <!-- 微调模式覆盖层 -->
                 <div id="inspectorOverlay" class="hidden">
@@ -1825,8 +1906,8 @@
                     container.style.padding = '';
                     container.classList.remove('web-mode');
                 }
-                // 恢复 device-screen 的原始样式
-                const deviceScreen = deviceFrame.querySelector('div');
+                // 恢复 device-screen 的原始样式（按 class 精确查找，避免误伤侧边按键等其他 div）
+                const deviceScreen = deviceFrame.querySelector('.device-screen') || deviceFrame.querySelector('div');
                 if (deviceScreen && !deviceScreen.classList.contains('device-screen')) {
                     deviceScreen.className = 'device-screen';
                     deviceScreen.style.cssText = '';
