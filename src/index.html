@@ -370,9 +370,19 @@
                                 设计系统
                                 <span id="designSystemHelp" class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-100 text-gray-400 text-[10px] cursor-help" data-help="选择后会优先遵守该品牌的色彩、字体和组件语言；主色和强调色只作为微调偏好。">?</span>
                             </label>
-                            <select id="designSystemSelect" class="w-full rounded-lg border-gray-200 border p-2 text-sm">
+                            <select id="designSystemSelect" class="hidden">
                                 <option value="">默认风格</option>
                             </select>
+                            <div id="designSystemPicker" class="relative">
+                                <button id="designSystemPickerBtn" type="button" class="w-full rounded-lg border border-gray-200 bg-white p-2 text-sm flex items-center justify-between gap-2 hover:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+                                    <span id="designSystemPickerLabel" class="truncate text-left">默认风格</span>
+                                    <span class="flex items-center gap-2 flex-shrink-0">
+                                        <span id="designSystemPickerSwatches" class="flex items-center gap-1"></span>
+                                        <i class="fas fa-chevron-down text-xs text-gray-400"></i>
+                                    </span>
+                                </button>
+                                <div id="designSystemMenu" class="hidden absolute left-0 top-full z-50 mt-2 w-80 max-h-80 overflow-y-auto rounded-xl border border-gray-200 bg-white p-1 shadow-xl"></div>
+                            </div>
                             <div id="designSystemSwatches" class="mt-2 flex h-5 items-center gap-1"></div>
                         </div>
                         <div>
@@ -974,7 +984,7 @@
         <span id="toastMessage">操作成功</span>
     </div>
 
-    <script src="script.js?v=20260509-global-order"></script>
+    <script src="script.js?v=20260509-design-swatches"></script>
 </body>
 
 </html>

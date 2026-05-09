@@ -215,13 +215,34 @@ function setupEventListeners() {
     if ($('designSystemSelect')) {
         $('designSystemSelect').onchange = updateDesignSystemHint;
     }
+    if ($('designSystemPickerBtn')) {
+        $('designSystemPickerBtn').onclick = (e) => {
+            e.stopPropagation();
+            toggleDesignSystemMenu();
+        };
+    }
+    if ($('designSystemMenu')) {
+        $('designSystemMenu').onclick = (e) => e.stopPropagation();
+    }
+    document.addEventListener('click', closeDesignSystemMenu);
     document.addEventListener('paste', handleGlobalReferencePaste);
     bindHelpBubble('designSystemHelp', () => $('designSystemHelp')?.dataset.help || '');
     bindHelpBubble('skillModeHelp', () => $('skillModeHelp')?.dataset.help || '');
 
     // 颜色选择器
-    $('primaryColor').oninput = (e) => $('primaryColorValue').textContent = e.target.value;
-    $('secondaryColor').oninput = (e) => $('secondaryColorValue').textContent = e.target.value;
+    $('primaryColor').oninput = (e) => {
+        $('primaryColorValue').textContent = e.target.value;
+        if (!$('designSystemSelect')?.value) updateDesignSystemHint();
+    };
+    $('secondaryColor').oninput = (e) => {
+        $('secondaryColorValue').textContent = e.target.value;
+        if (!$('designSystemSelect')?.value) updateDesignSystemHint();
+    };
+    if ($('backgroundMode')) {
+        $('backgroundMode').onchange = () => {
+            if (!$('designSystemSelect')?.value) updateDesignSystemHint();
+        };
+    }
 
     // 搜索
     $('projectSearch').oninput = (e) => {
@@ -261,7 +282,9 @@ function createNewProject() {
     if ($('designSystemSelect')) $('designSystemSelect').value = '';
     if ($('skillSelect')) $('skillSelect').value = 'web-prototype';
     pptInputMode = 'import';
+    renderDesignSystemSelect();
     updatePptModeButtons();
+    updateInputModeForSkill();
 
     // 清空页面
     pages = [];
@@ -705,6 +728,8 @@ async function regenerateFromRecord() {
         $('componentStyle').value = record.global.componentStyle || 'Ant Design';
         if ($('designSystemSelect')) $('designSystemSelect').value = record.global.designSystemId || record.designSystemId || '';
         if ($('skillSelect')) $('skillSelect').value = record.global.skillId || record.skillId || 'web-prototype';
+        renderDesignSystemSelect();
+        updateDesignSystemHint();
     }
 
     // 恢复页面
@@ -1339,22 +1364,91 @@ function renderDesignSystemSelect() {
     if (!select) return;
     const current = select.value;
 
+    const ordered = getOrderedDesignSystems();
+    const byId = new Map(designSystemsList.map(ds => [ds.id, ds]));
+    select.innerHTML = '<option value="">默认风格</option>' + ordered.map(ds => {
+        const label = getDesignSystemLabel(ds);
+        return `<option value="${ds.id}">${escapeHtml(label)}</option>`;
+    }).join('');
+    if (current && byId.has(current)) select.value = current;
+    renderDesignSystemMenu(ordered);
+    updateDesignSystemHint();
+}
+
+function getOrderedDesignSystems() {
     const skillId = $('skillSelect') ? $('skillSelect').value : 'web-prototype';
     const mode = SKILL_INPUT_MODES[skillId] || SKILL_INPUT_MODES['web-prototype'];
     const preferred = [...(mode.recommendedDesignSystems || []), ...DESIGN_SYSTEM_RECOMMENDED_FALLBACK];
     const uniquePreferred = [...new Set(preferred)];
     const byId = new Map(designSystemsList.map(ds => [ds.id, ds]));
-    const ordered = [
+    return [
         ...uniquePreferred.map(id => byId.get(id)).filter(Boolean),
         ...designSystemsList.filter(ds => !uniquePreferred.includes(ds.id))
     ];
+}
 
-    select.innerHTML = '<option value="">默认风格</option>' + ordered.map(ds => {
-        const label = `${ds.displayName || ds.name || ds.id}${ds.categoryLabel ? ` · ${ds.categoryLabel}` : ''}`;
-        return `<option value="${ds.id}">${escapeHtml(label)}</option>`;
+function getDesignSystemLabel(ds) {
+    if (!ds) return '默认风格';
+    if (ds.label) return ds.label;
+    return `${ds.displayName || ds.name || ds.id}${ds.categoryLabel ? ` · ${ds.categoryLabel}` : ''}`;
+}
+
+function renderMiniSwatches(colors, sizeClass = 'h-4 w-4') {
+    return (colors || []).slice(0, 6).map(color => `
+        <span class="inline-block ${sizeClass} rounded border border-black/10" title="${escapeHtml(color)}" style="background:${escapeHtml(color)}"></span>
+    `).join('');
+}
+
+function renderDesignSystemMenu(ordered) {
+    const menu = $('designSystemMenu');
+    if (!menu) return;
+    const selectedId = $('designSystemSelect') ? $('designSystemSelect').value : '';
+    const defaultColors = getDefaultSwatchColors();
+    const rows = [
+        {
+            id: '',
+            label: '默认风格',
+            categoryLabel: '使用当前主题色',
+            colors: defaultColors
+        },
+        ...ordered
+    ];
+    menu.innerHTML = rows.map(ds => {
+        const isActive = (ds.id || '') === selectedId;
+        const colors = Array.isArray(ds.colors) && ds.colors.length ? ds.colors : defaultColors;
+        return `
+            <button type="button" class="design-system-option w-full rounded-lg px-3 py-2 text-left flex items-center justify-between gap-3 ${isActive ? 'bg-indigo-50 text-indigo-700' : 'text-gray-700 hover:bg-gray-50'}" data-id="${escapeHtml(ds.id || '')}">
+                <span class="min-w-0">
+                    <span class="block text-sm font-medium truncate">${escapeHtml(getDesignSystemLabel(ds))}</span>
+                    ${ds.categoryLabel ? `<span class="block text-xs text-gray-400 truncate">${escapeHtml(ds.categoryLabel)}</span>` : ''}
+                </span>
+                <span class="flex flex-shrink-0 items-center gap-1">${renderMiniSwatches(colors, 'h-4 w-4')}</span>
+            </button>
+        `;
     }).join('');
-    if (current && byId.has(current)) select.value = current;
+    menu.querySelectorAll('.design-system-option').forEach(btn => {
+        btn.addEventListener('click', () => selectDesignSystem(btn.dataset.id || ''));
+    });
+}
+
+function toggleDesignSystemMenu() {
+    const menu = $('designSystemMenu');
+    if (!menu) return;
+    menu.classList.toggle('hidden');
+}
+
+function closeDesignSystemMenu() {
+    const menu = $('designSystemMenu');
+    if (menu) menu.classList.add('hidden');
+}
+
+function selectDesignSystem(id) {
+    const select = $('designSystemSelect');
+    if (!select) return;
+    select.value = id;
     updateDesignSystemHint();
+    renderDesignSystemMenu(getOrderedDesignSystems());
+    closeDesignSystemMenu();
 }
 
 function getDefaultSwatchColors() {
@@ -1417,17 +1511,18 @@ function escapeHtml(str) {
 }
 
 function updateDesignSystemHint() {
-    const hint = $('designSystemHint');
-    if (!hint) return;
+    const hint = $('designSystemHelp');
     const id = $('designSystemSelect') ? $('designSystemSelect').value : '';
     if (!id) {
-        hint.dataset.help = '未选择时使用表单里的主色、强调色和组件风格作为主要视觉约束。';
+        if (hint) hint.dataset.help = '未选择时使用表单里的主题色、辅助色和组件风格作为主要视觉约束。';
         renderDesignSystemSwatches({ colors: getDefaultSwatchColors() });
+        updateDesignSystemPickerButton(null);
         return;
     }
-    hint.dataset.help = '已选择设计系统：品牌色彩、字体和组件语言优先；主色/强调色只作为微调偏好。';
+    if (hint) hint.dataset.help = '已选择设计系统：品牌色彩、字体和组件语言优先；主题色/辅助色只作为微调偏好。';
     const ds = designSystemsList.find(item => item.id === id) || null;
     renderDesignSystemSwatches(ds);
+    updateDesignSystemPickerButton(ds);
 }
 
 function renderDesignSystemSwatches(ds) {
@@ -1440,9 +1535,15 @@ function renderDesignSystemSwatches(ds) {
         return;
     }
     container.classList.remove('hidden');
-    container.innerHTML = colors.map(color => `
-        <span class="inline-block h-5 w-5 rounded border border-black/10" title="${escapeHtml(color)}" style="background:${escapeHtml(color)}"></span>
-    `).join('');
+    container.innerHTML = renderMiniSwatches(colors, 'h-5 w-5');
+}
+
+function updateDesignSystemPickerButton(ds) {
+    const label = $('designSystemPickerLabel');
+    const swatches = $('designSystemPickerSwatches');
+    const colors = ds ? (ds.colors || []) : getDefaultSwatchColors();
+    if (label) label.textContent = getDesignSystemLabel(ds);
+    if (swatches) swatches.innerHTML = renderMiniSwatches(colors, 'h-4 w-4');
 }
 
 function updateInputModeForSkill() {
