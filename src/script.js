@@ -1134,12 +1134,15 @@ function handleReferencePasteEvent(event, id) {
     if (imageFiles.length === 0) return false;
 
     event.preventDefault();
+    event.stopPropagation();
     handleFiles(id, imageFiles);
     showToast(`已粘贴 ${imageFiles.length} 张参考图`);
     return true;
 }
 
 function handleGlobalReferencePaste(event) {
+    if (event.defaultPrevented) return;
+
     const target = event.target;
     const isTypingField = target && ['TEXTAREA', 'INPUT'].includes(target.tagName);
     if (isTypingField) return;
