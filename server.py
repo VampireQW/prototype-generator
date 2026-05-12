@@ -189,6 +189,8 @@ STALE_GENERATION_SECONDS = 15 * 60
 HEAVY_AI_PROMPT_CHARS = 30000
 HEAVY_AI_IMAGE_COUNT = 8
 HEAVY_AI_TIMEOUT_SECONDS = 120
+DEFAULT_MAX_OUTPUT_TOKENS = 100000
+GEMINI_MAX_OUTPUT_TOKENS = 65536
 
 DEFAULT_SKILL_ID = 'web-prototype'
 DEFAULT_CRAFT_SECTIONS = ['typography', 'color', 'anti-ai-slop']
@@ -514,6 +516,28 @@ def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', cra
         "- 不要输出 Markdown 解释，不要输出多个文件名说明，只返回 HTML。"
     )
     return '\n\n'.join(parts)
+
+
+def get_model_max_tokens(model_name):
+    """返回当前模型可接受的 max_tokens，避免兼容网关因上限不同直接 400。"""
+    configured = AI_OPTIONS.get('max_tokens', DEFAULT_MAX_OUTPUT_TOKENS)
+    try:
+        configured = int(configured)
+    except (TypeError, ValueError):
+        configured = DEFAULT_MAX_OUTPUT_TOKENS
+
+    model_key = (model_name or '').lower()
+    caps = []
+    if 'gemini' in model_key:
+        caps.append(GEMINI_MAX_OUTPUT_TOKENS)
+
+    if caps:
+        capped = min(configured, *caps)
+        if capped != configured:
+            print(f"[AI] max_tokens 从 {configured} 自动调整为 {capped}，以适配模型 {model_name}")
+        return capped
+
+    return configured
 
 
 def get_github_runtime_config():
@@ -845,11 +869,12 @@ def mark_project_failed(project_id, error_message):
             print(f"[状态] 更新 record 失败状态失败: {e}")
 
 
-def assign_saved_images_to_pages(pages_data, saved_image_names):
+def assign_saved_images_to_pages(pages_data, saved_image_names, skill_id=None):
     """将扁平图片列表按页面元数据分回 PPT 配图和参考图，并生成给 AI 的路径说明。"""
     page_records = []
     manifest_lines = []
     img_index = 0
+    is_ppt = skill_id == 'html-ppt'
 
     for page_idx, page in enumerate(pages_data, start=1):
         page_record = {
@@ -887,7 +912,27 @@ def assign_saved_images_to_pages(pages_data, saved_image_names):
             img_index += 1
 
         if reference_count:
-            manifest_lines.append(f"页面 {page_idx} 的额外参考图（只用于辅助视觉风格判断）:")
+            similarity = page_record.get('similarity', 'layout')
+            if is_ppt:
+                manifest_lines.append(f"页面 {page_idx} 的额外参考图（只用于辅助视觉风格判断）:")
+            elif similarity == 'pixel':
+                manifest_lines.append(
+                    f"页面 {page_idx} 的参考图模式：像素级还原。"
+                    "必须严格还原参考图的页面类型、布局、比例、颜色、字体层级、组件样式、内容密度、图标/图片位置和可读文字；"
+                    "不得主动改动参考图中的主要结构、视觉风格、模块顺序和关键文案。用户文字需求只用于补充缺失信息，不要改成无关主题。"
+                )
+            elif similarity == 'style':
+                manifest_lines.append(
+                    f"页面 {page_idx} 的参考图模式：仅参考风格。"
+                    "只提取色彩、字体气质、圆角/阴影、图标语言、留白、质感和整体视觉调性；"
+                    "不要照抄参考图的布局结构、模块顺序或具体内容，页面结构以用户文字需求为准。"
+                )
+            else:
+                manifest_lines.append(
+                    f"页面 {page_idx} 的参考图模式：仅参考布局。"
+                    "只提取页面类型、区域划分、模块层级、组件关系、排列方向、信息密度和交互入口位置；"
+                    "不要照抄参考图的配色、品牌视觉、字体风格或装饰质感，视觉风格以用户选择的设计系统/表单设置为准。"
+                )
         for _ in range(reference_count):
             if img_index >= len(saved_image_names):
                 break
@@ -901,10 +946,15 @@ def assign_saved_images_to_pages(pages_data, saved_image_names):
 
     manifest = ''
     if manifest_lines:
+        reference_rule = (
+            "PPT 原始配图必须放回对应原始页；额外参考图只作为风格/质感参考，不要当成 PPT 内容图片。\n"
+            if is_ppt else
+            "非 PPT 参考图是页面生成的重要依据，但必须严格按每页的参考图模式执行：仅参考布局、仅参考风格、像素级还原三者互斥。请先识别参考图，再按指定模式取舍；不要忽略参考图，也不要替换成无关业务页面。\n"
+        )
         manifest = (
             "\n\n# 图片资源路径与用途\n"
             "所有图片已保存到项目文件夹的 `reference/` 目录。生成 HTML 时请使用这些相对路径作为 `<img src=\"reference/...\">`。\n"
-            "PPT 原始配图必须放回对应原始页；额外参考图只作为风格/质感参考，不要当成 PPT 内容图片。\n"
+            + reference_rule
             + "\n".join(manifest_lines)
         )
     return page_records, manifest
@@ -1275,7 +1325,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             }
 
             pages_data = form_data.get('pages', [])
-            page_records, image_manifest = assign_saved_images_to_pages(pages_data, saved_image_names)
+            page_records, image_manifest = assign_saved_images_to_pages(pages_data, saved_image_names, skill_id)
             record['pages'] = page_records
 
             # 保存record.json
@@ -1430,7 +1480,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             }
 
             pages_data = form_data.get('pages', [])
-            page_records, image_manifest = assign_saved_images_to_pages(pages_data, saved_image_names)
+            page_records, image_manifest = assign_saved_images_to_pages(pages_data, saved_image_names, skill_id)
             record['pages'] = page_records
 
             record_path = os.path.join(project_folder, 'record.json')
@@ -1661,13 +1711,6 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
     def call_ai_model(self, prompt, images):
         """调用AI大模型 (使用 requests 库)"""
         try:
-            # 构建消息
-            user_content = []
-            user_content.append({
-                "type": "text",
-                "text": prompt
-            })
-
             # 添加图片。历史记录里可能有扩展名是 png、实际内容却是 XML/SVG 的文件，这里统一过滤。
             valid_images = []
             skipped_images = 0
@@ -1685,12 +1728,28 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 skipped_extra = len(valid_images) - MAX_AI_IMAGES_PER_REQUEST
                 valid_images = valid_images[:MAX_AI_IMAGES_PER_REQUEST]
                 print(f"[AI] 参考图超过网关上限，已仅发送前 {MAX_AI_IMAGES_PER_REQUEST} 张，跳过 {skipped_extra} 张")
+            print(f"[AI] 有效参考图: {len(valid_images)}/{len(images)}")
 
+            image_content = []
             for img_base64 in valid_images:
-                user_content.append({
+                image_content.append({
                     "type": "image_url",
                     "image_url": {"url": img_base64}
                 })
+            text_content = [{
+                "type": "text",
+                "text": prompt
+            }]
+
+            # 豆包/火山兼容接口的视觉示例通常把 image_url 放在 text 前；
+            # 其他模型保留原来的 text-first 顺序。
+            selected_model = get_selected_model()
+            model_name = selected_model.get('model', API_CONFIG.get('model', 'gpt-4'))
+            model_name_lower = model_name.lower()
+            if 'doubao' in model_name_lower or 'seed' in model_name_lower:
+                user_content = image_content + text_content
+            else:
+                user_content = text_content + image_content
 
             # 从配置读取 system prompt
             system_prompt = AI_OPTIONS.get('system_prompt',
@@ -1702,8 +1761,6 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             ]
 
             # 动态获取当前选中模型配置
-            selected_model = get_selected_model()
-            model_name = selected_model.get('model', API_CONFIG.get('model', 'gpt-4'))
             base_url = selected_model.get('base_url', API_CONFIG.get('base_url', ''))
             api_key = selected_model.get('api_key', API_CONFIG.get('api_key', ''))
             print(f"[AI] 使用模型: {selected_model.get('name', model_name)} ({model_name})")
@@ -1712,7 +1769,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             payload = {
                 "model": model_name,
                 "messages": messages,
-                "max_tokens": AI_OPTIONS.get('max_tokens', 100000),
+                "max_tokens": get_model_max_tokens(model_name),
                 "temperature": AI_OPTIONS.get('temperature', 0.7)
             }
 
