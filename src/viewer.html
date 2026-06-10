@@ -314,11 +314,23 @@
             padding: 10px;
             box-shadow:
                 inset 0 0 0 1.5px rgba(255, 255, 255, 0.08),
-                0 0 0 1px #1a1a20,
-                0 0 0 2.5px #3a3a42,
-                0 0 0 3.5px #1a1a20,
                 0 30px 70px -10px rgba(0, 0, 0, 0.5),
                 0 15px 30px -8px rgba(0, 0, 0, 0.3);
+        }
+
+        /* 外壳金属边框（黑-灰-黑三层）- 用独立伪元素，
+           z-index 高于按键，能压住按键根部让其看起来从外壳内伸出 */
+        .device-frame::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border-radius: 56px;
+            pointer-events: none;
+            z-index: 10;
+            box-shadow:
+                0 0 0 1px #1a1a20,
+                0 0 0 2.5px #3a3a42,
+                0 0 0 3.5px #1a1a20;
         }
 
         /* ==================== 真机实体按键 ==================== */
@@ -331,9 +343,9 @@
 
         /* 右侧 - 侧边键（电源/Siri） */
         .device-btn-power {
-            right: -5px;
+            right: -7px;
             top: 230px;
-            width: 5px;
+            width: 7px;
             height: 104px;
             background: linear-gradient(
                 to right,
@@ -369,9 +381,9 @@
 
         /* 左侧 - 操作按钮（Action Button） */
         .device-btn-action {
-            left: -5px;
+            left: -7px;
             top: 150px;
-            width: 5px;
+            width: 7px;
             height: 30px;
             background: linear-gradient(
                 to left,
@@ -393,9 +405,9 @@
 
         /* 左侧 - 音量+ */
         .device-btn-volup {
-            left: -5px;
+            left: -7px;
             top: 210px;
-            width: 5px;
+            width: 7px;
             height: 62px;
             background: linear-gradient(
                 to left,
@@ -417,9 +429,9 @@
 
         /* 左侧 - 音量- */
         .device-btn-voldown {
-            left: -5px;
+            left: -7px;
             top: 286px;
-            width: 5px;
+            width: 7px;
             height: 62px;
             background: linear-gradient(
                 to left,

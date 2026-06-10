@@ -339,9 +339,9 @@
                     class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-2 rounded-lg text-sm font-medium shadow-md hover:shadow-lg transition-all flex items-center gap-2">
                     <i class="fas fa-magic"></i> AI 生成原型
                 </button>
-                <button id="copyPromptBtn"
-                    class="bg-gradient-to-r from-green-600 to-teal-600 hover:from-green-700 hover:to-teal-700 text-white px-6 py-2 rounded-lg text-sm font-medium shadow-md hover:shadow-lg transition-all flex items-center gap-2">
-                    <i class="fas fa-copy"></i> 复制 Prompt
+                <button id="externalAiBtn"
+                    class="bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 px-6 py-2 rounded-lg text-sm font-medium shadow-sm hover:shadow-md transition-all flex items-center gap-2">
+                    <i class="fas fa-arrow-up-right-from-square"></i> 外部 AI 生成
                 </button>
             </div>
         </header>
@@ -940,6 +940,45 @@
                 <div id="shareTeamList" class="space-y-2 max-h-60 overflow-y-auto">
                     <div class="text-center text-sm text-gray-400 py-4">加载中...</div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 外部 AI 生成弹窗 -->
+    <div id="externalAiModal" class="fixed inset-0 z-50 hidden items-center justify-center">
+        <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="closeExternalAiModal()"></div>
+        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl mx-4 overflow-hidden">
+            <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+                <div>
+                    <h3 class="font-bold text-lg text-gray-900 flex items-center gap-2">
+                        <i class="fas fa-arrow-up-right-from-square text-indigo-500"></i> 外部 AI 生成
+                    </h3>
+                    <p class="text-sm text-gray-500 mt-1">把结构化需求交给 Cursor、Codex、Claude Code 等工具继续生成和精修。</p>
+                </div>
+                <button onclick="closeExternalAiModal()" class="text-gray-400 hover:text-gray-600 p-2"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <button onclick="runExternalAiMode('package')"
+                    class="text-left rounded-xl border-2 border-indigo-200 bg-indigo-50/70 p-5 hover:border-indigo-400 hover:bg-indigo-50 transition group">
+                    <div class="flex items-center justify-between gap-3">
+                        <div class="w-11 h-11 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
+                            <i class="fas fa-folder-tree"></i>
+                        </div>
+                        <span class="text-xs font-semibold text-indigo-600 bg-white border border-indigo-100 rounded-full px-2 py-1">推荐</span>
+                    </div>
+                    <div class="mt-4 font-bold text-gray-900">AI IDE 项目包（多页面）</div>
+                    <p class="mt-2 text-sm text-gray-600 leading-6">生成 AGENTS、TASK、DESIGN、pages 和图片 manifest，适合多页面、多参考图、需要持续精修的原型。</p>
+                    <div class="mt-4 text-sm font-medium text-indigo-700 group-hover:text-indigo-800">生成项目包并复制启动指令</div>
+                </button>
+                <button onclick="runExternalAiMode('prompt')"
+                    class="text-left rounded-xl border border-gray-200 bg-white p-5 hover:border-emerald-300 hover:bg-emerald-50/40 transition group">
+                    <div class="w-11 h-11 rounded-xl bg-emerald-600 text-white flex items-center justify-center">
+                        <i class="fas fa-copy"></i>
+                    </div>
+                    <div class="mt-4 font-bold text-gray-900">仅复制完整prompt（1-2页面）</div>
+                    <p class="mt-2 text-sm text-gray-600 leading-6">把全部需求拼成一段完整 Prompt，并创建待外部生成项目，适合少页面、快速粘贴到聊天式 AI。</p>
+                    <div class="mt-4 text-sm font-medium text-emerald-700 group-hover:text-emerald-800">创建占位项目并复制 Prompt</div>
+                </button>
             </div>
         </div>
     </div>

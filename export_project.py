@@ -167,6 +167,9 @@ def generate_standalone_html(project_name, pages, prd_data, transitions, modals,
         .scrollbar-thin::-webkit-scrollbar {{ width: 6px; }}
         .scrollbar-thin::-webkit-scrollbar-track {{ background: transparent; }}
         .scrollbar-thin::-webkit-scrollbar-thumb {{ background: #cbd5e1; border-radius: 3px; }}
+        .dev-sidebar {{ transition: width 0.3s ease; position: relative; flex: none; }}
+        .dev-sidebar.collapsed {{ width: 48px; }}
+        .dev-sidebar.expanded {{ width: 256px; }}
         .prd-sidebar {{ transition: width 0.3s ease; position: relative; }}
         .prd-sidebar.collapsed {{ width: 48px; }}
         .prd-sidebar.expanded {{ width: 420px; }}
@@ -210,17 +213,27 @@ def generate_standalone_html(project_name, pages, prd_data, transitions, modals,
     </header>
 
     <div class="flex-1 flex overflow-hidden">
-        <aside class="w-64 bg-white border-r border-gray-200 flex flex-col">
-            <div class="p-4 border-b border-gray-100">
-                <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">页面导航</h3>
+        <aside id="devSidebar" class="dev-sidebar expanded bg-white border-r border-gray-200 flex flex-col">
+            <button id="devSidebarToggle"
+                class="absolute right-0 top-1/2 -translate-y-1/2 w-6 h-20 bg-indigo-600 hover:bg-indigo-700 text-white rounded-r-lg flex items-center justify-center cursor-pointer z-20 shadow-lg"
+                style="transform: translateX(100%) translateY(-50%);">
+                <i class="fas fa-chevron-left text-xs"></i>
+            </button>
+            <div id="devSidebarCollapsedLabel" class="flex-1 items-center justify-center cursor-pointer hover:bg-gray-50 hidden">
+                <span class="text-gray-500 text-sm font-medium" style="writing-mode: vertical-lr; transform: rotate(180deg);">页面</span>
             </div>
-            <div id="flowchartEntry" class="p-3 border-b border-gray-100 cursor-pointer hover:bg-indigo-50 transition-colors">
-                <div class="flex items-center gap-3 text-indigo-600">
-                    <i class="fas fa-project-diagram"></i>
-                    <span class="font-medium">页面流程图</span>
+            <div id="devSidebarContent" class="flex flex-col overflow-hidden" style="width: 256px; height: 100%;">
+                <div class="p-4 border-b border-gray-100">
+                    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">页面导航</h3>
                 </div>
+                <div id="flowchartEntry" class="p-3 border-b border-gray-100 cursor-pointer hover:bg-indigo-50 transition-colors">
+                    <div class="flex items-center gap-3 text-indigo-600">
+                        <i class="fas fa-project-diagram"></i>
+                        <span class="font-medium">页面流程图</span>
+                    </div>
+                </div>
+                <div id="pageList" class="flex-1 overflow-y-auto scrollbar-thin"></div>
             </div>
-            <div id="pageList" class="flex-1 overflow-y-auto scrollbar-thin"></div>
         </aside>
 
         <main class="flex-1 flex flex-col min-w-0 overflow-hidden bg-gray-200">
@@ -275,6 +288,7 @@ def generate_standalone_html(project_name, pages, prd_data, transitions, modals,
         // ========== 状态 ==========
         let currentPage = PAGES.length > 0 ? PAGES[0].name : 'home';
         let prdExpanded = true;
+        let devSidebarExpanded = true;
 
         const $ = id => document.getElementById(id);
         const previewFrame = $('previewFrame');
@@ -291,6 +305,8 @@ def generate_standalone_html(project_name, pages, prd_data, transitions, modals,
             
             $('prdToggle').onclick = togglePrdSidebar;
             $('prdCollapsedLabel').onclick = togglePrdSidebar;
+            $('devSidebarToggle').onclick = toggleDevSidebar;
+            $('devSidebarCollapsedLabel').onclick = toggleDevSidebar;
             $('flowchartEntry').onclick = showFlowchart;
             $('previewType').onchange = (e) => {{
                 if (e.target.value === 'mobile') setPreviewMode('mobile');
@@ -304,8 +320,82 @@ def generate_standalone_html(project_name, pages, prd_data, transitions, modals,
         function detectPreviewType() {{
             try {{
                 const doc = previewFrame.contentDocument || previewFrame.contentWindow.document;
-                const w = Math.max(doc.body.scrollWidth, doc.body.offsetWidth);
-                setPreviewMode(w <= 500 ? 'mobile' : 'web');
+                const body = doc.body;
+                const html = doc.documentElement;
+                const htmlContent = html.innerHTML;
+
+                const hasVisibleAside = (() => {{
+                    const asides = doc.querySelectorAll('aside');
+                    for (const aside of asides) {{
+                        const cls = String(aside.className || '');
+                        if (cls.includes('hidden') && (cls.includes('md:flex') || cls.includes('md:block') || cls.includes('lg:flex') || cls.includes('lg:block'))) {{
+                            continue;
+                        }}
+                        return true;
+                    }}
+                    return false;
+                }})();
+
+                const hasAlwaysVisibleSidebar = (() => {{
+                    const els = doc.querySelectorAll('[class*="w-64"], [class*="w-72"]');
+                    for (const el of els) {{
+                        const cls = String(el.className || '');
+                        if (cls.includes('hidden') && (cls.includes('md:') || cls.includes('lg:'))) {{
+                            continue;
+                        }}
+                        return true;
+                    }}
+                    return false;
+                }})();
+
+                const table = doc.querySelector('table');
+                const hasDataTable = table && doc.querySelectorAll('table tr').length > 2;
+
+                const hasWebFeatures =
+                    hasVisibleAside ||
+                    hasAlwaysVisibleSidebar ||
+                    doc.querySelector('[class*="sidebar"]') !== null ||
+                    htmlContent.includes('ant-dark') ||
+                    htmlContent.includes('ant-table') ||
+                    (body.classList.contains('flex') && htmlContent.includes('h-screen') && !htmlContent.includes('bottom-0')) ||
+                    htmlContent.includes('w-screen') ||
+                    hasDataTable ||
+                    htmlContent.includes('max-w-7xl') ||
+                    htmlContent.includes('max-w-6xl') ||
+                    htmlContent.includes('max-w-5xl') ||
+                    htmlContent.includes('container mx-auto');
+
+                const appEl = doc.querySelector('#app');
+                const hasMobileFeatures =
+                    body.classList.contains('max-w-md') ||
+                    htmlContent.includes('max-w-md') ||
+                    htmlContent.includes('max-w-sm') ||
+                    htmlContent.includes('max-width: 430px') ||
+                    htmlContent.includes('max-width:430px') ||
+                    htmlContent.includes('max-width: 480px') ||
+                    htmlContent.includes('max-width:480px') ||
+                    htmlContent.includes('max-w-[480px]') ||
+                    htmlContent.includes('max-w-[430px]') ||
+                    htmlContent.includes('user-scalable=no') ||
+                    doc.querySelector('[class*="bottom-nav"]') !== null ||
+                    doc.querySelector('[class*="safe-area"]') !== null ||
+                    doc.querySelector('nav[class*="fixed"][class*="bottom-0"]') !== null ||
+                    doc.querySelector('[class*="pb-safe"]') !== null ||
+                    doc.querySelector('header[class*="md:hidden"]') !== null ||
+                    doc.querySelector('[class*="md:hidden"][class*="header"]') !== null ||
+                    (appEl && (appEl.style.maxWidth === '480px' || String(appEl.className || '').includes('max-w-')));
+
+                if (hasWebFeatures) {{
+                    setPreviewMode('web');
+                }} else if (hasMobileFeatures) {{
+                    setPreviewMode('mobile');
+                }} else {{
+                    const maxWidth = Math.max(
+                        body.scrollWidth, body.offsetWidth,
+                        html.clientWidth, html.scrollWidth, html.offsetWidth
+                    );
+                    setPreviewMode(maxWidth > 600 ? 'web' : 'mobile');
+                }}
             }} catch (e) {{ setPreviewMode('mobile'); }}
         }}
 
@@ -313,6 +403,26 @@ def generate_standalone_html(project_name, pages, prd_data, transitions, modals,
             previewWrapper.className = mode === 'mobile' 
                 ? 'bg-white overflow-hidden preview-frame-mobile' 
                 : 'bg-white overflow-hidden preview-frame-web';
+        }}
+
+        function toggleDevSidebar() {{
+            devSidebarExpanded = !devSidebarExpanded;
+            const sidebar = $('devSidebar');
+            const content = $('devSidebarContent');
+            const label = $('devSidebarCollapsedLabel');
+            const toggle = $('devSidebarToggle');
+
+            if (devSidebarExpanded) {{
+                sidebar.classList.remove('collapsed'); sidebar.classList.add('expanded');
+                label.classList.add('hidden'); label.classList.remove('flex');
+                content.classList.remove('hidden'); content.classList.add('flex');
+                toggle.innerHTML = '<i class="fas fa-chevron-left text-xs"></i>';
+            }} else {{
+                sidebar.classList.remove('expanded'); sidebar.classList.add('collapsed');
+                label.classList.remove('hidden'); label.classList.add('flex');
+                content.classList.add('hidden'); content.classList.remove('flex');
+                toggle.innerHTML = '<i class="fas fa-chevron-right text-xs"></i>';
+            }}
         }}
 
         function togglePrdSidebar() {{

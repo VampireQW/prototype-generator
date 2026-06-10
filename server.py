@@ -1149,6 +1149,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_copy_project()
         elif self.path == '/create-placeholder':
             self.handle_create_placeholder()
+        elif self.path == '/create-ai-ide-package':
+            self.handle_create_ai_ide_package()
         elif self.path == '/api/prd/save':
             self.handle_prd_save()
         elif self.path == '/api/inspector/apply':
@@ -3656,6 +3658,287 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             import traceback
             traceback.print_exc()
             self.send_error_response(str(e))
+
+    def handle_create_ai_ide_package(self):
+        """创建 AI IDE 项目包（不调用大模型，用于 Cursor/Codex 等外部工具）"""
+        try:
+            data = self.read_json_body()
+            project_id = data.get('projectId', '')
+            project_name = data.get('projectName', '未命名项目')
+            form_data = data.get('formData', {})
+            image_assets = data.get('imageAssets', {})  # {pageIndex: [{kind,name,base64,...}]}
+            prompt = data.get('prompt', '')
+
+            if not project_id:
+                self.send_error_response("缺少projectId")
+                return
+
+            print(f"[AI IDE] 创建项目包: {project_name} ({project_id})")
+
+            project_folder = os.path.join(PROJECTS_DIR, project_id)
+            pages_folder = os.path.join(project_folder, 'pages')
+            ref_folder = os.path.join(project_folder, 'reference')
+            os.makedirs(project_folder, exist_ok=True)
+            os.makedirs(pages_folder, exist_ok=True)
+            os.makedirs(ref_folder, exist_ok=True)
+
+            global_data = form_data.get('global', {})
+            pages_data = form_data.get('pages', [])
+            now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            manifest = []
+            page_asset_map = {}
+            for page_index_str, assets in image_assets.items():
+                try:
+                    page_index = int(page_index_str)
+                except Exception:
+                    page_index = 0
+                page_asset_map.setdefault(page_index, [])
+                page_name = pages_data[page_index].get('name', f'页面{page_index + 1}') if page_index < len(pages_data) else f'页面{page_index + 1}'
+
+                for i, asset in enumerate(assets or []):
+                    base64_data = asset.get('base64', '')
+                    kind = asset.get('kind', 'reference')
+                    prefix = 'ppt' if kind == 'ppt' else 'ref'
+                    filename = f"page-{page_index + 1:02d}-{prefix}-{i + 1}"
+                    saved = save_base64_image(base64_data, ref_folder, filename)
+                    if not saved:
+                        continue
+
+                    item = {
+                        'pageIndex': page_index + 1,
+                        'pageName': page_name,
+                        'kind': kind,
+                        'path': f"reference/{saved}",
+                        'originalName': asset.get('name', saved),
+                        'similarity': asset.get('similarity', pages_data[page_index].get('similarity', 'layout') if page_index < len(pages_data) else 'layout'),
+                        'slideIndex': asset.get('slideIndex'),
+                        'slideTitle': asset.get('slideTitle', '')
+                    }
+                    manifest.append(item)
+                    page_asset_map[page_index].append(item)
+
+            with open(os.path.join(ref_folder, 'manifest.json'), 'w', encoding='utf-8') as f:
+                json.dump(manifest, f, ensure_ascii=False, indent=2)
+
+            record = {
+                'global': global_data,
+                'pages': pages_data,
+                'status': 'pending_external',
+                'externalMode': 'ai_ide_package',
+                'createdAt': now,
+                'referenceManifest': manifest
+            }
+            with open(os.path.join(project_folder, 'record.json'), 'w', encoding='utf-8') as f:
+                json.dump(record, f, ensure_ascii=False, indent=2)
+
+            def md_escape(value):
+                return str(value or '').replace('\r\n', '\n').strip()
+
+            design_system_id = global_data.get('designSystemId') or ''
+            skill_id = global_data.get('skillId') or DEFAULT_SKILL_ID
+            active_design_context = get_design_system_context(design_system_id, 18000)
+            active_skill_context = get_skill_context(skill_id, 12000, include_references=True) if skill_id and skill_id != DEFAULT_SKILL_ID else ''
+
+            design_md = f"""# DESIGN
+
+## 全局风格
+- 产物类型：{md_escape(global_data.get('skillName') or global_data.get('skillId') or 'Web 原型')}
+- 设计系统：{md_escape(global_data.get('designSystemName') or '默认风格')}
+- 设计系统 ID：{md_escape(global_data.get('designSystemId') or 'default')}
+- 组件风格：{md_escape(global_data.get('componentStyle') or 'Ant Design')}
+- 背景模式：{'深色' if global_data.get('backgroundMode') == 'dark' else '浅色'}
+- 主色：{md_escape(global_data.get('primaryColor') or '#004fff')}
+- 强调色：{md_escape(global_data.get('secondaryColor') or '#10B981')}
+
+## 执行优先级
+1. 用户在 `TASK.md` 和 `pages/*.md` 中写明的业务需求。
+2. 本文件指定的设计系统、组件风格和主题约束。
+3. `reference/manifest.json` 中每张图片的用途和页面归属。
+4. 前端实现可用性、响应式和交互完整性。
+
+## 设计要求
+- 如果选择了具体设计系统，优先遵守该品牌/系统的色彩、字体、组件语言和信息密度。
+- 主色和强调色用于微调按钮、焦点态、关键图标和状态提示，不要粗暴覆盖设计系统的核心视觉。
+- 页面应是高保真可演示原型，不要只做线框图。
+- 使用真实业务文案和示例数据，不使用 Lorem ipsum。
+"""
+            if active_design_context:
+                design_md += f"""
+
+## 已选择设计系统原始规范
+
+以下内容来自原型生成器的设计系统资产。实现时请优先遵守。
+
+```md
+{active_design_context}
+```
+"""
+            if active_skill_context:
+                design_md += f"""
+
+## 产物类型工作流规范
+
+以下内容来自原型生成器的产物类型 Skill。实现时请遵守。
+
+```md
+{active_skill_context}
+```
+"""
+            with open(os.path.join(project_folder, 'DESIGN.md'), 'w', encoding='utf-8') as f:
+                f.write(design_md)
+
+            agents_md = f"""# AGENTS
+
+你是高级前端原型工程师和 UI/UX 设计师。请在当前文件夹中完成一个可直接预览的高保真 HTML 原型。
+
+## 工作方式
+- 先阅读 `TASK.md`、`DESIGN.md`、`reference/manifest.json` 和 `pages/` 下的页面需求。
+- 所有页面优先实现为一个完整的 `index.html`，除非任务明确要求拆分。
+- 可以使用 CDN：Tailwind CSS、Vue 3、FontAwesome、ECharts、Google Fonts。
+- 必须实现页面切换、核心交互、弹窗/抽屉/筛选/状态反馈等可演示行为。
+- 必须保留与页面需求一致的信息架构和业务语义。
+- 参考图路径以 `reference/manifest.json` 为准，不要混淆不同页面的图片。
+- 完成后确保 `index.html` 位于项目根目录，原型生成器会自动识别为已完成项目。
+
+## 禁止
+- 不要调用外部后端接口。
+- 不要只输出说明文字。
+- 不要忽略 `DESIGN.md` 中的设计系统/组件风格。
+- 不要把不同页面的参考图串用。
+"""
+            with open(os.path.join(project_folder, 'AGENTS.md'), 'w', encoding='utf-8') as f:
+                f.write(agents_md)
+
+            task_lines = [
+                f"# {project_name}",
+                "",
+                "## 目标",
+                "基于本项目包生成一个完整、可运行、可演示的高保真 HTML 原型。",
+                "",
+                "## 最终交付",
+                "- 在项目根目录生成 `index.html`。",
+                "- 单文件可直接打开预览，包含 CSS 和 JS。",
+                "- 页面、交互、视觉风格和参考图用途必须与本包资料一致。",
+                "",
+                "## 推荐阅读顺序",
+                "1. `DESIGN.md`",
+                "2. `reference/manifest.json`",
+                "3. `pages/*.md`",
+                "4. `prompt.full.md`（可选，保留原型生成器生成的完整提示词）",
+                "",
+                "## 页面清单"
+            ]
+
+            for idx, page in enumerate(pages_data):
+                name = md_escape(page.get('name') or f'页面{idx + 1}')
+                task_lines.append(f"- {idx + 1:02d}. [{name}](pages/{idx + 1:02d}-{self.safe_markdown_filename(name)}.md)")
+
+            with open(os.path.join(project_folder, 'TASK.md'), 'w', encoding='utf-8') as f:
+                f.write('\n'.join(task_lines) + '\n')
+
+            for idx, page in enumerate(pages_data):
+                name = md_escape(page.get('name') or f'页面{idx + 1}')
+                assets = page_asset_map.get(idx, [])
+                asset_lines = []
+                if assets:
+                    for asset in assets:
+                        kind_label = 'PPT 原始配图' if asset.get('kind') == 'ppt' else '参考图'
+                        similarity = asset.get('similarity') or page.get('similarity', 'layout')
+                        asset_lines.append(f"- `{asset['path']}`：{kind_label}，用途 `{similarity}`")
+                        if asset.get('slideIndex'):
+                            asset_lines.append(f"  - 原始页码：第 {asset.get('slideIndex')} 页；标题：{asset.get('slideTitle') or '未命名'}")
+                else:
+                    asset_lines.append("- 无")
+
+                page_md = f"""# {idx + 1:02d}. {name}
+
+## 页面定位
+- 页面名称：{name}
+- 参考图模式：{md_escape(page.get('similarity') or 'layout')}
+
+## 布局描述
+{md_escape(page.get('layout')) or '未填写'}
+
+## 核心功能
+{md_escape(page.get('features')) or '未填写'}
+
+## 交互说明
+{md_escape(page.get('interaction')) or '未填写'}
+
+## 关联图片
+{chr(10).join(asset_lines)}
+
+## 实现要求
+- 页面必须能在最终 `index.html` 中通过导航或交互进入。
+- 请使用真实示例数据补齐列表、表格、卡片、状态、空态等内容。
+- 如果参考图模式为 `pixel`，尽量严格还原布局、比例、颜色和信息密度。
+- 如果参考图模式为 `style`，只借鉴视觉调性，不照搬结构。
+- 如果参考图模式为 `layout`，只借鉴结构和模块关系，视觉以 `DESIGN.md` 为准。
+"""
+                page_file = os.path.join(pages_folder, f"{idx + 1:02d}-{self.safe_markdown_filename(name)}.md")
+                with open(page_file, 'w', encoding='utf-8') as f:
+                    f.write(page_md)
+
+            if prompt:
+                with open(os.path.join(project_folder, 'prompt.full.md'), 'w', encoding='utf-8') as f:
+                    f.write(prompt)
+
+            readme_md = f"""# {project_name}
+
+这是原型生成器创建的 AI IDE 项目包，不会调用第三方大模型。
+
+## 用法
+1. 用 Cursor / Codex / Claude Code 等 AI 编程工具打开本文件夹。
+2. 对 AI 说：`请阅读 AGENTS.md 和 TASK.md，基于 pages/ 与 reference/ 下的资料，完成 index.html。`
+3. AI 完成后刷新原型生成器项目列表，即可预览、导出或发布。
+
+## 关键文件
+- `AGENTS.md`：AI 编程工具执行规则。
+- `TASK.md`：总体任务。
+- `DESIGN.md`：设计系统、组件风格、主题色等约束。
+- `pages/`：每页结构化需求。
+- `reference/manifest.json`：图片和页面的对应关系。
+"""
+            with open(os.path.join(project_folder, 'README.md'), 'w', encoding='utf-8') as f:
+                f.write(readme_md)
+
+            projects = self.load_projects()
+            new_project = {
+                'id': project_id,
+                'name': project_name + ' (AI IDE待生成)',
+                'model_name': 'AI IDE 项目包',
+                'status': 'pending_external',
+                'url': f'/projects/{project_id}/TASK.md',
+                'date': now
+            }
+            projects.insert(0, new_project)
+            self.save_projects(projects)
+
+            cur_user = self.get_current_user()
+            if cur_user:
+                db.set_project_owner(project_id, cur_user['id'])
+
+            instruction = f"请阅读 AGENTS.md 和 TASK.md，基于 pages/ 与 reference/ 下的资料，完成 index.html。"
+            self.send_json_response({
+                'success': True,
+                'project': new_project,
+                'projectDir': os.path.abspath(project_folder),
+                'instruction': instruction,
+                'manifest': manifest
+            })
+
+        except Exception as e:
+            print(f"[错误] 创建 AI IDE 项目包失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_error_response(str(e))
+
+    def safe_markdown_filename(self, name):
+        """生成 Markdown 文件名片段"""
+        safe = re.sub(r'[\\/:*?"<>|#\[\]\(\)`]', '', str(name or 'page'))
+        safe = re.sub(r'\s+', '_', safe).strip('._ ')
+        return safe[:40] if safe else 'page'
 
     # ==================== GitHub 列表页生成 ====================
 

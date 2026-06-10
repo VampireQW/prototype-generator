@@ -197,8 +197,10 @@ function setupEventListeners() {
     // AI生成
     $('aiGenerateBtn').onclick = generateWithAI;
 
-    // 复制Prompt
-    $('copyPromptBtn').onclick = copyPromptToClipboard;
+    // 外部 AI 生成
+    if ($('externalAiBtn')) {
+        $('externalAiBtn').onclick = openExternalAiModal;
+    }
 
     if ($('skillSelect')) {
         $('skillSelect').onchange = () => {
@@ -2238,6 +2240,32 @@ function pollGenerationStatus(projectId) {
     setTimeout(poll, POLL_INTERVAL);
 }
 
+// ==================== 外部 AI 生成 ====================
+function openExternalAiModal() {
+    const modal = $('externalAiModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+function closeExternalAiModal() {
+    const modal = $('externalAiModal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+
+async function runExternalAiMode(mode) {
+    closeExternalAiModal();
+    if (mode === 'prompt') {
+        await copyPromptToClipboard();
+        return;
+    }
+    if (mode === 'package') {
+        await createAiIdePackage();
+    }
+}
+
 // ==================== 复制Prompt功能 ====================
 async function copyPromptToClipboard() {
     // 验证是否有任何输入
@@ -2328,6 +2356,106 @@ ${prompt}
     } catch (err) {
         console.error('操作失败:', err);
         showToast('操作失败: ' + err.message, 'error');
+    }
+}
+
+// ==================== AI IDE 项目包 ====================
+async function createAiIdePackage() {
+    const hasInput = hasAnyInput();
+    if (!hasInput) {
+        await showAppAlert({
+            title: '还没有可打包的需求',
+            message: '请先填写页面名称、布局描述、功能说明，或上传参考图/导入 PPT。',
+            tone: 'warning'
+        });
+        return;
+    }
+
+    const btn = $('externalAiBtn');
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 打包中...';
+    }
+
+    const prompt = generatePrompt();
+    const formData = collectFormData();
+    const projectName = getProjectNameFromForm();
+    const projectId = generateProjectIdFromName(projectName);
+
+    const imageAssets = {};
+    pages.forEach((id, index) => {
+        const similarity = (document.querySelector(`input[name="similarity_${id}"]:checked`) || {}).value || 'layout';
+        const assets = [];
+
+        (pagePptImages[id] || []).forEach((img, imgIndex) => {
+            assets.push({
+                kind: 'ppt',
+                name: img.name || `ppt-${index + 1}-${imgIndex + 1}`,
+                base64: img.base64,
+                slideIndex: img.slideIndex || index + 1,
+                slideTitle: img.slideTitle || '',
+                similarity: 'source'
+            });
+        });
+
+        (pageFiles[id] || []).forEach((img, imgIndex) => {
+            assets.push({
+                kind: 'reference',
+                name: img.name || `reference-${index + 1}-${imgIndex + 1}`,
+                base64: img.base64,
+                similarity
+            });
+        });
+
+        if (assets.length > 0) {
+            imageAssets[index] = assets;
+        }
+    });
+
+    try {
+        const response = await fetch('/create-ai-ide-package', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                projectId,
+                projectName,
+                formData,
+                imageAssets,
+                prompt
+            })
+        });
+
+        const result = await response.json();
+        if (result.success && result.project) {
+            allProjects.unshift(result.project);
+            renderProjectList();
+
+            const instruction = `${result.instruction}\n\n项目目录：${result.projectDir}`;
+            try {
+                await navigator.clipboard.writeText(instruction);
+                showToast('✅ AI IDE 项目包已创建，启动指令已复制');
+            } catch (e) {
+                showToast('✅ AI IDE 项目包已创建');
+            }
+
+            await showAppAlert({
+                title: 'AI IDE 项目包已创建',
+                message: `项目目录：${result.projectDir}\n\n已生成 AGENTS.md、TASK.md、DESIGN.md、pages/ 和 reference/manifest.json。用 Cursor/Codex 打开该目录后，粘贴已复制的启动指令即可。`,
+                tone: 'success',
+                confirmText: '知道了'
+            });
+        } else {
+            showToast('打包失败: ' + (result.error || '未知错误'), 'error');
+        }
+    } catch (err) {
+        console.error('创建 AI IDE 项目包失败:', err);
+        showToast('打包失败: ' + err.message, 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
     }
 }
 
