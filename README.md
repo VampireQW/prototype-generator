@@ -18,11 +18,39 @@
 实际用起来，可以分成两步：
 
 1. **组织资料，交给 Agent 制作。** 在原型生成器里整理页面需求、参考图和设计设置，复制完整 Prompt，或导出 AI IDE 项目包，交给本地 Agent。你也可以直接在 Agent 工具里完成原型制作，再把项目添加到这里。
-2. **接入原型，整理 PRD 和标注。** 配合你在 Agent 中使用的协作 skill，让 Agent 按项目的接入与 PRD 导入约定整理草稿，再通过项目提供的导入工具落库。页面需求和对应元素的标注，就能在工作台里统一查看、修改和交付。具体格式见 [PRD 草稿导入说明](docs/features.md#prd-草稿落库-proto_importpy2026-09-30)。
+2. **接入原型，整理 PRD 和标注。** 安装仓库提供的 [prototype-flow 协作 skill](docs/agent-skill.md)，让 Agent 按项目的接入与 PRD 导入约定整理草稿，再通过项目提供的导入工具落库。页面需求和对应元素的标注，就能在工作台里统一查看、修改和交付。具体格式见 [PRD 草稿导入说明](docs/features.md#prd-草稿落库-proto_importpy2026-09-30)。
 
 我也希望原型做完之后，需求说明能一起留下来。这里的 PRD 和序号标注都支持 Markdown，可以继续补充文字、表格和图片；整理好的内容还能随研发版一起导出，或发布到 GitHub Pages，方便大家评审和沟通。
 
 欢迎大家试试看，也欢迎分享自己的使用方式和建议。
+
+## 界面预览
+
+以下截图使用演示任务数据，展示从需求组织到原型评审的主要界面。
+
+### 1. 新建项目
+
+按页面整理布局、功能、交互说明和参考图，形成供本地 Agent 使用的结构化资料。
+
+![新建项目：页面需求、参考图与设计设置](docs/images/new-project.png)
+
+### 2. 原型 PRD 标注
+
+将页面需求与元素序号关联，使用 Markdown 编写、查看和维护 PRD。
+
+![原型 PRD 标注：手机原型序号与右侧需求说明](docs/images/prd-annotations.png)
+
+### 3. 原型微调
+
+点选原型元素，描述修改要求并复制 Prompt，交给本地 Agent 继续调整。
+
+![原型微调：选中按钮并填写修改要求](docs/images/prototype-inspector.png)
+
+### 4. 手机外壳预览
+
+在手机外壳中体验原型交互，支持切换 App / Web 视图及显示、隐藏外壳。
+
+![原型预览：带手机外壳的任务管理 App](docs/images/mobile-preview.png)
 
 ## ✨ 功能特性
 
@@ -221,6 +249,7 @@ python server.py
 ├── tools/                 # 首页 CSS 构建工具
 ├── design-systems/        # 中文化设计系统资产（DESIGN.md）
 ├── skills/                # 按产物类型拆分的生成 skills
+├── agent-skills/          # 可安装到本地 Agent 的协作 skill
 ├── craft/                 # 色彩、字体、反 AI 味等通用设计规范
 ├── templates/             # 页面模板
 └── 启动项目.bat           # Windows 启动脚本
@@ -229,6 +258,12 @@ python server.py
 ---
 
 ## 🎯 使用指南
+
+### 本地 Agent 协作 skill
+
+仓库自带 `agent-skills/prototype-flow/`，覆盖原型接入、Markdown PRD / 元素标注落库和修改任务协作。支持复制到 Codex 或 Claude Code 的技能目录，保留整个目录及引用文件；安装与使用见 [协作 skill 指南](docs/agent-skill.md)。
+
+只安装 skill 不会自动把目录加入首页项目列表。Agent 完成导入后，在“本地原型”中添加原型目录即可查看 PRD；已登记项目刷新工作台即可。
 
 ### 生成原型
 
@@ -347,4 +382,4 @@ python -m pytest tests -q
 
 ## 📄 License
 
-MIT License - 详见 [LICENSE](LICENSE)
+MIT License

@@ -281,7 +281,7 @@ PRD (需求文档) 以 Markdown 形式存储在 `projects/{id}/prd/{pageName}.md
 
 ### PRD 草稿落库 proto_import.py（2026-09-30）
 
-面向「画原型的 Agent 接着写 PRD」这一步：Agent 根据已有需求和原型，判断哪条该做序号标注、哪条该进页面需求，写成项目根 `.prototype/prd.draft.json`；落库由 [`proto_import.py`](../proto_import.py) 完成，不让 Agent 直接修改 `prd.json`。PRD 内容由 Agent 整理，导入工具负责校验和保存。业务规则不明确时记入 `unknowns`，不要补造；跨会话可用 `.prototype/brief.md` 留下已确认的需求和上下文。协作 skill 可以指导这一步，导入格式与命令以本节和脚本中的示例为准。
+面向「画原型的 Agent 接着写 PRD」这一步：Agent 根据已有需求和原型，判断哪条该做序号标注、哪条该进页面需求，写成项目根 `.prototype/prd.draft.json`；落库由 [`proto_import.py`](../proto_import.py) 完成，不让 Agent 直接修改 `prd.json`。PRD 内容由 Agent 整理，导入工具负责校验和保存。业务规则不明确时记入 `unknowns`，不要补造；跨会话可用 `.prototype/brief.md` 留下已确认的需求和上下文。仓库提供可安装的 [`prototype-flow` 协作 skill](../agent-skills/prototype-flow/SKILL.md)，覆盖接入、PRD 落库和修改任务；[安装指南](agent-skill.md) 包含 Codex / Claude Code 的技能目录与使用示例。
 
 - 草稿（schemaVersion 1）：`pages[{file | pageId, stateId?, document?, annotations?[{protoId, body}]}]`。`file` 按登记表 casefold 匹配，`stateId` 默认 `default` 且必须已登记；`unknowns[]` 只回显不落库。
 - 命令：`python proto_import.py <项目根 | p-xxxx 登记ID> [草稿路径] [--dry-run] [--skip-missing] [--replace-doc]`（在 `原型生成器\` 目录下；p-xxxx 查 `data/external.json`）。传未登记的项目根也能跑（会建 `.prototype` 并登记页面），但工作台要看到它仍需在首页登记一次。

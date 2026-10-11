@@ -20,6 +20,7 @@
 *   **HTML PPT**：支持 PPTX 解析、原始配图回填、参考图辅助、概览小图和全屏播放。
 *   **视觉设置**：138 份视觉风格，组件语言随风格，主题模式和自定义配色按主动修改覆盖。
 *   **外部 AI 生成**：支持「仅复制完整prompt（1-2页面）」和「AI IDE 项目包（多页面）」两种模式。
+*   **本地 Agent 协作 skill**：可安装的 `prototype-flow`，指导原型接入、PRD 草稿落库与修改任务协作。
 *   **预览器**：本地 / AI 共用预览、微调、标注，支持 Web / App 切换与真机外壳开关。
 *   **PRD 撰写**：所见即所得 Markdown、表格、文字配色、图片插入与拖拽缩放、自动保存。
 *   **微调模式**：所见即所得的元素选择与 AI 修改。
@@ -38,6 +39,7 @@
 | [开发规范 (best_practices.md)](best_practices.md) | **开发必读**：各种规约、注意事项、防 Bug 指南 |
 | [更新日志 (changelog.md)](changelog.md) | 版本迭代记录 |
 | [2026.10 更新说明](releases/2026-10-11.md) | 本次更新亮点与升级方式 |
+| [Agent 协作 skill](agent-skill.md) | prototype-flow 的安装、使用与 PRD 落库 |
 | [任务归档 (archive/)](archive/) | 历史开发任务记录 |
 
 ## 目录结构速览
@@ -50,6 +52,7 @@
 ├── docs/                  # 开发文档（本目录）
 ├── design-systems/        # 设计系统 DESIGN.md 资产
 ├── skills/                # 原型、Dashboard、Mobile、SaaS、HTML PPT 等生成 skills
+├── agent-skills/          # 本地 Agent 可安装的协作 skill
 ├── craft/                 # 通用设计工艺与反 AI 味规范
 ├── projects/              # 项目数据存储
 ├── src/                   # 前端源码 (index.html / login.html / viewer.html)

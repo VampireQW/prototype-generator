@@ -1,0 +1,4 @@
+interface:
+  display_name: "原型工作台协作"
+  short_description: "将本地原型接入工作台，整理 Markdown PRD 并生成元素标注"
+  default_prompt: "使用 $prototype-flow 将当前 HTML 原型接入工作台，并根据已确认需求整理 PRD 草稿与元素标注后正式落库。"
