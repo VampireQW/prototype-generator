@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>__PROJECT_TITLE__ · 原型评审</title>
+        <style>
+            :root {
+                --bg: #f7f8f8;
+                --surface: #fff;
+                --alt: #f1f2f4;
+                --border: #d8dee3;
+                --note-divider: color-mix(in srgb, var(--border) 60%, var(--surface));
+                --text: #1a1d23;
+                --muted: #4e5560;
+                --accent: #2563eb;
+                --soft: #eef2ff;
+                --control: #808790;
+                --on-accent: #fff;
+                --font: 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
+                --left: 224px;
+                --right: 400px;
+            }
+            * { box-sizing: border-box; }
+            @media (prefers-color-scheme: dark) { :root { --bg:#0b0d10;--surface:#121519;--alt:#1a1e23;--border:#363c44;--text:#f2f4f7;--muted:#a8b0ba;--accent:#7ba2ff;--soft:#1b2946;--control:#7e8795;--on-accent:#0b0d10;color-scheme:dark; } }
+            /* 文字颜色：正文存浅色 token，暗底按 DESIGN_MASTER 暗色对应色映射（与工作台 proto-markdown.css 同一张表） */
+            @media (prefers-color-scheme: dark) {
+                [style="color:#b42318"] { color: #ff8a8a !important; } [style="color:#b45309"] { color: #f0a35e !important; } [style="color:#046c4e"] { color: #5fd39b !important; }
+                [style="color:#1d4ed8"] { color: #7ba2ff !important; } [style="color:#0f766e"] { color: #4fd1c5 !important; } [style="color:#626b78"] { color: #a8b0ba !important; }
+            }
+            body {
+                margin: 0;
+                background: var(--bg);
+                color: var(--text);
+                font: 14px/1.7 var(--font);
+                height: 100vh;
+                overflow: hidden;
+                letter-spacing: .02em;
+                display: flex;
+                flex-direction: column;
+            }
+            .brand { width:32px;height:32px;padding:6px;border-radius:6px;background:var(--accent);color:var(--on-accent);flex:none; }
+            svg { width:18px;height:18px;vertical-align:middle; }
+            .brand svg { width:20px;height:20px; }
+            button {
+                min-height: 32px;
+                font: inherit;
+                color: inherit;
+                border: 1px solid var(--control);
+                border-radius: 6px;
+                background: var(--surface);
+                padding: 5px 10px;
+                cursor: pointer;
+                white-space: nowrap;
+            }
+            button:hover { background: var(--alt); }
+            button:focus-visible,
+            a:focus-visible,
+            .note:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+            header.topbar {
+                height: 56px;
+                flex: none;
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                padding: 0 20px;
+                border-bottom: 1px solid var(--border);
+                background: var(--surface);
+            }
+            .topbar strong { flex: 1; }
+            .topbar #scope { max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+            .muted { color: var(--muted); font-size: 12px; }
+            #source { color:var(--muted);text-decoration:none;font-size:12px;white-space:nowrap; }
+            #source:hover { color: var(--accent); }
+            .layout {
+                display: grid;
+                grid-template-columns: var(--left) minmax(0, 1fr) var(--right);
+                flex: 1;
+                min-height: 0;
+            }
+            .layout.left-closed { --left: 40px; }
+            .layout.right-closed { --right: 0px; }
+            .layout.prd-empty { grid-template-columns: var(--left) minmax(0, 1fr) 0; }
+            .left-closed #tree { display: none; }
+            .right-closed aside, .prd-empty aside { display: none; }
+            nav {
+                overflow: auto;
+                border-right: 1px solid var(--border);
+                background: var(--surface);
+            }
+            nav > button { border: 0; width: 100%; padding: 12px; }
+            #tree { padding: 12px 8px; }
+            #tree h3 { font-size: 13px; padding: 6px 10px; margin: 4px 0; color: var(--muted); }
+            #tree button {
+                display: block;
+                width: 100%;
+                text-align: left;
+                border: 0;
+                white-space: normal;
+                margin: 2px 0;
+                font-size: 13px;
+                padding: 8px 16px;
+            }
+            #tree button[aria-current='true'] { background: var(--soft); color: var(--accent); }
+            .canvas { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+            iframe { border: 0; width: 100%; flex: 1; background: var(--surface); }
+            aside {
+                position: relative;
+                background: var(--surface);
+                overflow: auto;
+                border-left: 1px solid var(--border);
+                padding: 12px 16px 16px;
+            }
+            /* PRD 区左缘拖拽条：拖动放大/缩小右栏（与编辑态一致）。中部常显一枚短握把，让“可拖”可被发现；悬停/拖动时整条亮主色。 */
+            #prd-resizer { position: absolute; left: 0; top: 0; bottom: 0; width: 10px; margin-left: -5px; cursor: ew-resize; touch-action: none; z-index: 6; }
+            #prd-resizer::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 2px; background: transparent; transition: background .12s ease-out; }
+            #prd-resizer::after { content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 40px; margin-top: -20px; border-radius: 2px; background: var(--control); opacity: .55; transition: background .12s ease-out, opacity .12s ease-out; }
+            @media (hover: hover) { #prd-resizer:hover::before { background: var(--accent); } #prd-resizer:hover::after { background: var(--accent); opacity: 1; } }
+            #prd-resizer.resizing::before { background: var(--accent); }
+            #prd-resizer.resizing::after { background: var(--accent); opacity: 1; }
+            .right-closed #prd-resizer, .prd-empty #prd-resizer { display: none; }
+            aside h2 { font-size: 17px; margin: 0 0 4px; }
+            details { border-bottom: 1px solid var(--border); padding: 7px 0; }
+            details:last-of-type { border-bottom: 0; }
+            summary { font-weight: 600; cursor: pointer; line-height: 1.5; }
+            details[open] > summary { margin-bottom: 6px; }
+            summary:focus-visible { outline:2px solid var(--accent);outline-offset:2px; }
+            .markdown { overflow-wrap: anywhere; }
+            .markdown h1 { font-size: 20px; }
+            .markdown h2 { font-size: 17px; }
+            .markdown h3 { font-size: 15px; }
+            .markdown h4 { font-size: 14px; }
+            .markdown :is(h1,h2,h3,h4) { margin: 12px 0 6px; line-height: 1.55; }
+            .markdown p { margin: 0; } /* 与工作台同口径：Enter 换段与自然折行间距一致 */
+            .markdown > :first-child { margin-top: 0; }
+            .markdown > :last-child { margin-bottom: 0; }
+            .markdown pre { white-space: pre-wrap; background: var(--alt); padding: 10px; border-radius: 6px; }
+            .markdown code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; background: var(--alt); padding: 1px 5px; border-radius: 4px; }
+            .markdown pre code { background: none; padding: 0; }
+            .markdown table { border-collapse: collapse; width: 100%; }
+            .markdown th, .markdown td { border: 1px solid var(--border); padding: 6px; text-align: left; }
+            .markdown blockquote { border-left: 3px solid var(--border); margin: 8px 0; padding: 2px 12px; color: var(--muted); }
+            .markdown ul, .markdown ol { padding-left: 22px; }
+            .markdown li.task { list-style: none; margin-left: -20px; }
+            .markdown a { color: var(--accent); }
+            .markdown hr { border: 0; border-top: 1px solid var(--border); }
+            .note { display: block; border-bottom: 1px dashed var(--note-divider); padding: 14px 8px; margin: 0 -8px; border-radius: 8px; cursor: pointer; }
+            .note:hover { background: var(--alt); }
+            /* 与操作台右栏同式：序号单独首行，正文另起一行（预览与导出一致） */
+            .note-head { display: flex; align-items: center; margin-bottom: 8px; }
+            .note-no { min-width: 20px; height: 20px; margin: 0; padding: 0 5px; border-radius: 50% 50% 50% 4px; background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 600; line-height: 20px; text-align: center; font-variant-numeric: tabular-nums; }
+            .note.stale .note-no { background: var(--muted); }
+            .note-no { --pin-custom-ink: #191919; }
+            .note:not(.stale) .note-no { background: var(--pin-fill,var(--accent)); color: var(--pin-ink,var(--on-accent)); }
+            .markdown img { display: block; max-width: 100%; height: auto; margin: 8px 0; border-radius: 6px; }
+            .note .markdown { font-size: 14px; }
+            .note .markdown > :first-child { margin-top: 0; }
+            .note .markdown > :last-child { margin-bottom: 0; }
+            .note.stale { opacity: .55; cursor: default; }
+            .note.flash { animation: note-flash 1.2s ease; }
+            @keyframes note-flash { 0%, 45% { background: var(--soft); } 100% { background: transparent; } }
+            .empty { margin: 40px; padding: 24px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
+            [hidden] { display: none !important; }
+            @media (max-width: 1100px) {
+                :root { --left: 180px; --right: 320px; }
+                .topbar .muted { display: none; }
+            }
+        </style>
+    </head>
+    <body>
+        <header class="topbar">
+            <span class="brand" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="m12 3 10 5-10 5L2 8Z M2 12l10 5 10-5 M2 16l10 5 10-5"/></svg></span>
+            <strong id="project">__PROJECT_TITLE__</strong><span id="scope" class="muted">请选择页面</span><span class="muted" id="generated"></span>
+            <a id="source" target="_blank" rel="noopener">交互原型 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M14 3h7v7 M21 3 10 14 M10 3H3v18h18v-7"/></svg></a><span class="muted">只读评审</span><button id="toggle-prd">收起 PRD</button>
+        </header>
+        <main class="layout" id="layout">
+            <nav aria-label="页面列表">
+                <button id="toggle-pages" aria-label="展开或收起页面列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+                <div id="tree"></div>
+            </nav>
+            <section class="canvas">
+                <iframe id="frame" title="交互原型" sandbox="allow-same-origin allow-scripts" hidden></iframe>
+                <div id="empty" class="empty">选择左侧页面查看交互原型。</div>
+            </section>
+            <aside>
+                <div id="prd-resizer" title="拖拽调节 PRD 宽度" aria-hidden="true"></div>
+                <h2>PRD</h2>
+                <details id="document-section" open>
+                    <summary>页面需求</summary>
+                    <div id="document" class="markdown"></div>
+                </details>
+                <details id="notes-section" open>
+                    <summary>标注明细 <span class="muted" id="notes-count"></span></summary>
+                    <div id="notes"></div>
+                </details>
+            </aside>
+        </main>
+        <noscript>请开启 JavaScript 查看评审内容（页面树、PRD 与标注气泡均依赖脚本渲染）。</noscript>
+        <script type="application/json" id="review-data">__REVIEW_DATA__</script>
+        <script>
+            'use strict';
+            const $ = (id) => document.getElementById(id);
+            /* 壳与原型 iframe 走 postMessage（气泡三脚本已由导出流程内嵌进每个原型页）：
+               不跨文档读写 iframe，所以 ZIP 解压后 file:// 双击打开（每个文件独立源）与 GitHub Pages 同样可用。 */
+
+            // ---------- 零依赖精简 Markdown 渲染器（先转义再变换，禁原始 HTML） ----------
+            function esc(s) {
+                return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            }
+            function inline(s) {
+                const literals = [];
+                const hold = html => { literals.push(html); return '\u0000' + (literals.length - 1) + '\u0000'; };
+                return esc(s)
+                    .replace(/`([^`]+)`/g, (m, code) => hold(`<code>${code}</code>`))
+                    .replace(/!\[([^\]]*)\]\((prd-assets\/[a-f0-9]{64}\.(?:png|jpg|gif|webp))(?:\s+&quot;([^\n]*?)&quot;)?\)/g, (m, alt, path, title = '') => {
+                        const size = /(?:^|\s)proto-width=(\d{1,4})$/.exec(title);
+                        const width = size && +size[1] >= 48 && +size[1] <= 4096 ? ` width="${+size[1]}"` : '';
+                        if (width) title = title.slice(0, size.index).trim();
+                        return hold(`<img src="${esc(new URL('proto/' + path, location.href).href)}" alt="${alt}"${width}${title ? ` title="${title}"` : ''} loading="lazy">`);
+                    })
+                    // 文字颜色：与工作台 safeHTML 同口径，只放行 <span style="color:…"> 这一种内联 HTML（色值限十六进制 / 颜色名）
+                    .replace(/&lt;span style=&quot;color:(#[0-9a-fA-F]{3,8}|[a-zA-Z]+)&quot;&gt;/g, (m, c) => `<span style="color:${c.toLowerCase()}">`)
+                    .replace(/&lt;\/span&gt;/g, '</span>')
+                    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+                    .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+                    .replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (m, t, u) =>
+                        /^(https?:|mailto:|#)/.test(u) ? `<a href="${u}" target="_blank" rel="noopener">${t}</a>` : t)
+                    .replace(/\u0000(\d+)\u0000/g, (m, index) => literals[+index]);
+            }
+            function md(src) {
+                const lines = String(src || '').replace(/\r\n?/g, '\n').split('\n');
+                const out = [];
+                let i = 0, para = [];
+                const flushPara = () => {
+                    if (para.length) { out.push(`<p>${para.map(inline).join('<br>')}</p>`); para = []; }
+                };
+                while (i < lines.length) {
+                    const line = lines[i];
+                    let m = line.match(/^```\w*\s*$/);
+                    if (m) {
+                        flushPara();
+                        const buf = [];
+                        i++;
+                        while (i < lines.length && !/^```\s*$/.test(lines[i])) buf.push(lines[i++]);
+                        i++;
+                        out.push(`<pre><code>${esc(buf.join('\n'))}</code></pre>`);
+                        continue;
+                    }
+                    if (/^\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\|[\s:|-]+\|\s*$/.test(lines[i + 1]) && lines[i + 1].includes('-')) {
+                        flushPara();
+                        const parseRow = (r) => r.trim().replace(/^\||\|$/g, '').split('|').map((c) => inline(c.trim()));
+                        const head = parseRow(line);
+                        i += 2;
+                        const rows = [];
+                        while (i < lines.length && /^\|.*\|\s*$/.test(lines[i])) rows.push(parseRow(lines[i++]));
+                        out.push(`<table><thead><tr>${head.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+                        continue;
+                    }
+                    m = line.match(/^(#{1,4})\s+(.*)$/);
+                    if (m) { flushPara(); out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); i++; continue; }
+                    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { flushPara(); out.push('<hr>'); i++; continue; }
+                    if (/^>\s?/.test(line)) {
+                        flushPara();
+                        const buf = [];
+                        while (i < lines.length && /^>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^>\s?/, ''));
+                        out.push(`<blockquote>${md(buf.join('\n'))}</blockquote>`);
+                        continue;
+                    }
+                    if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+                        flushPara();
+                        const ordered = /^\s*\d+\./.test(line);
+                        const itemRe = ordered ? /^\s*\d+\.\s+(.*)$/ : /^\s*[-*+]\s+(.*)$/;
+                        const items = [];
+                        while (i < lines.length && itemRe.test(lines[i])) {
+                            const t = lines[i].match(itemRe)[1];
+                            i++;
+                            const task = t.match(/^\[([ xX])\]\s+(.*)$/);
+                            items.push(task
+                                ? `<li class="task"><input type="checkbox" disabled${task[1] !== ' ' ? ' checked' : ''}> ${inline(task[2])}</li>`
+                                : `<li>${inline(t)}</li>`);
+                        }
+                        out.push(ordered ? `<ol>${items.join('')}</ol>` : `<ul>${items.join('')}</ul>`);
+                        continue;
+                    }
+                    if (!line.trim()) { flushPara(); i++; continue; }
+                    para.push(line);
+                    i++;
+                }
+                flushPara();
+                return out.join('\n');
+            }
+
+            // ---------- 数据与状态 ----------
+            let data = null;
+            try { data = JSON.parse($('review-data').textContent); } catch (_) { data = null; }
+            const frame = $('frame');
+            let current = { page: null, stateId: null };
+            let orders = {};            // stateId -> { map: noteId -> displayNumber, stale: Set }
+            let pendingState = null;    // 跨页切换时，等原型页报 ready 后再进入的状态
+            let loadedFile = null;
+            let frameReady = false;     // 当前 iframe 页已握手（收到 ready 且已下发 init）
+
+            const safePath = (path) => {
+                const parts = String(path || '').replace(/\\/g, '/').split('/');
+                if (parts.some((p) => !p || p.startsWith('.') || p.includes(':'))) throw new Error('原型文件路径无效');
+                return parts.map(encodeURIComponent).join('/');
+            };
+
+            /* file:// 下 iframe 源为 opaque（'null'），targetOrigin 只能用 '*'；接收侧以 e.source === frame.contentWindow 校验。 */
+            function post(msg) {
+                try { frame.contentWindow?.postMessage(Object.assign({ __review: 1 }, msg), '*'); } catch (_) { /* iframe 未就绪 */ }
+            }
+
+            const canvas = document.querySelector('.canvas');
+            let hotspotPointer = null;
+            canvas.addEventListener('pointerdown', e => { hotspotPointer = { x: e.clientX, y: e.clientY, moved: false }; }, true);
+            canvas.addEventListener('pointermove', e => {
+                if (hotspotPointer && Math.hypot(e.clientX - hotspotPointer.x, e.clientY - hotspotPointer.y) > 8) hotspotPointer.moved = true;
+            }, true);
+            canvas.addEventListener('pointercancel', () => { hotspotPointer = null; }, true);
+            canvas.addEventListener('click', e => {
+                const drag = hotspotPointer?.moved; hotspotPointer = null;
+                if (drag || !frameReady || e.defaultPrevented || e.button !== 0 || e.detail === 0 || e.target.closest('button,a,input,textarea,select,[contenteditable],[data-prototype-owned]') || String(getSelection()).trim()) return;
+                post({ type: 'showHotspots' });
+            });
+
+            // ---------- 左栏页面树 ----------
+            function buildTree() {
+                const tree = $('tree');
+                tree.replaceChildren();
+                for (const page of data.pages) {
+                    if ((page.states || []).length <= 1) {
+                        tree.append(treeButton(page.title, page, page.states?.[0]?.id || 'default'));
+                    } else {
+                        const h = document.createElement('h3');
+                        h.textContent = page.title;
+                        tree.append(h);
+                        for (const st of page.states) tree.append(treeButton(st.title, page, st.id));
+                    }
+                }
+            }
+            function treeButton(text, page, stateId) {
+                const b = document.createElement('button');
+                b.textContent = text;
+                b.dataset.scope = page.id + '\n' + stateId;
+                b.onclick = () => selectPage(page, stateId);
+                return b;
+            }
+
+            // ---------- 页面 / 状态切换 ----------
+            function selectPage(page, stateId) {
+                const samePage = current.page?.id === page.id && loadedFile === page.file;
+                current = { page, stateId };
+                if (!samePage) orders = {};
+                syncChrome();
+                renderAside();
+                if (samePage && frameReady) {
+                    post({ type: 'enterState', stateId });
+                } else {
+                    pendingState = stateId;
+                    loadedFile = page.file;
+                    frameReady = false;
+                    frame.hidden = false;
+                    $('empty').hidden = true;
+                    frame.src = 'proto/' + safePath(page.file);
+                }
+            }
+            function syncChrome() {
+                const { page, stateId } = current;
+                const st = page.states?.find((s) => s.id === stateId);
+                $('scope').textContent = (page.states?.length || 0) > 1 ? `${page.title} / ${st?.title || stateId}` : page.title;
+                try { $('source').href = 'proto/' + safePath(page.file); } catch (_) { $('source').removeAttribute('href'); }
+                for (const b of $('tree').querySelectorAll('button'))
+                    b.setAttribute('aria-current', String(b.dataset.scope === page.id + '\n' + stateId));
+                history.replaceState(null, '', '#' + new URLSearchParams({ p: page.id, s: stateId }).toString());
+            }
+
+            // ---------- 原型页握手：页内 bridge 报 ready 后下发标注，跟随真实页面 / 状态 ----------
+            const pageNotes = () => data.annotations
+                .filter((n) => n.pageId === current.page.id)
+                .map((n) => Object.assign({}, n, { bodyHtml: md((n.body || '').trim() ? n.body : '*（空标注）*') }));
+            function onFrameReady(ids) {
+                if (!current.page || !loadedFile) return;
+                const actual = data.pages.find((p) => p.id === ids.pageId);
+                if (actual && actual.id !== current.page.id) {
+                    /* 原型内部导航到了另一个已登记页面：跟随。 */
+                    current = { page: actual, stateId: actual.states.some((s) => s.id === ids.stateId) ? ids.stateId : actual.states[0].id };
+                    orders = {};
+                    pendingState = null;
+                    syncChrome();
+                } else if (ids.stateId && ids.stateId !== current.stateId && current.page.states?.some((s) => s.id === ids.stateId)) {
+                    current.stateId = ids.stateId;
+                    syncChrome();
+                }
+                let enterState = null;
+                if (pendingState) {
+                    if (pendingState !== (ids.stateId || 'default')) enterState = pendingState;
+                    pendingState = null;
+                }
+                frameReady = true;
+                // 先按当前页/状态判定 PRD 是否为空，再把真实侧栏开合态下发给 iframe；避免切页瞬间沿用上一页状态。
+                renderAside();
+                post({ type: 'init', notes: pageNotes(), asideOpen: prdAsideOpen(), enterState });
+            }
+            window.addEventListener('message', (e) => {
+                if (e.source !== frame.contentWindow || !e.data || e.data.__review !== 1) return;
+                const m = e.data;
+                if (m.type === 'ready') { onFrameReady(m.ids || {}); return; }
+                if (!frameReady) return;   // 握手前的空 sync 丢掉，免右栏闪一下“–”
+                if (m.type === 'sync') onPinSync(m.map || {}, m.state || 'default', m.stale || []);
+                else if (m.type === 'focus') onPinFocus(m.noteId);
+            });
+
+            // ---------- 气泡层回调 ----------
+            function onPinSync(map, state, stale) {
+                orders[state] = { map, stale: new Set(stale) };
+                if (current.page && state !== current.stateId && current.page.states?.some((s) => s.id === state)) {
+                    /* 原型自身切换了状态（页内交互）：右栏与页面树跟随。 */
+                    current.stateId = state;
+                    syncChrome();
+                }
+                if (state === current.stateId) renderAside();
+            }
+            function onPinFocus(noteId) {
+                const row = $('notes').querySelector(`[data-note-id="${CSS.escape(noteId)}"]`);
+                if (!row) return;
+                // 与 viewer extScrollNoteIntoView 同语义（单套同源）：定位行首（序号）进视口，行首已可见则不滚。
+                // scrollIntoView({block:'nearest'}) 对「比滚动容器高且正覆盖视口」的长标注是规范 no-op，长文标注停在视口中部时点序号不滚动（2026-09-30 用户报障）。
+                const sc = row.closest('aside');
+                const top = row.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+                if (top < 0 || top >= sc.clientHeight) sc.scrollTo({ top: sc.scrollTop + top - 12, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+                row.classList.remove('flash');
+                void row.offsetWidth;
+                row.classList.add('flash');
+            }
+            function reveal(note) {
+                // 定位在原型页内完成（review-bridge.js：目标被折叠隐藏时先联动展开再滚到位）
+                post({ type: 'reveal', note });
+            }
+
+            // ---------- 右栏 PRD ----------
+            const prdAsideOpen = () => !$('layout').classList.contains('right-closed') && !$('layout').classList.contains('prd-empty');
+            function renderAside() {
+                const { page, stateId } = current;
+                if (!page) return;
+                const doc = data.documents.find((d) => d.pageId === page.id && d.stateId === stateId);
+                const docHasContent = !!doc?.markdown?.trim();
+                $('document-section').hidden = !docHasContent;
+                $('document').innerHTML = docHasContent ? md(doc.markdown) : '';
+                const notes = data.annotations.filter((n) => n.pageId === page.id && n.stateId === stateId);
+                const notesHasContent = notes.length > 0;
+                $('notes-section').hidden = !notesHasContent;
+                $('notes-count').textContent = notesHasContent ? `（${notes.length}）` : '';
+                const prdEmpty = !docHasContent && !notesHasContent;
+                $('layout').classList.toggle('prd-empty', prdEmpty);
+                $('toggle-prd').hidden = prdEmpty;
+                // 切换页面时 renderAside 可能先于新 iframe 加载；只向当前已握手文件同步，避免把新页状态误发给旧 iframe。
+                if (frameReady && current.page?.file === loadedFile)
+                    post({ type: 'aside', open: !prdEmpty && !$('layout').classList.contains('right-closed') });
+                const cache = orders[stateId];
+                let rows;
+                if (cache) {
+                    const pos = (n) => (cache.map[n.id] ?? 1e9);
+                    const byPos = (a, b) => pos(a) - pos(b) || a.number - b.number;
+                    rows = [
+                        ...notes.filter((n) => !cache.stale.has(n.id)).sort(byPos).map((n) => [n, cache.map[n.id] ?? '–', false]),
+                        ...notes.filter((n) => cache.stale.has(n.id)).sort(byPos).map((n) => [n, cache.map[n.id] ?? '–', true]),
+                    ];
+                } else {
+                    rows = notes.slice().sort((a, b) => a.number - b.number).map((n) => [n, n.number, false]);
+                }
+                const host = $('notes');
+                host.replaceChildren();
+                for (const [note, num, stale] of rows) {
+                    const row = document.createElement('section');
+                    row.className = 'note' + (stale ? ' stale' : '');
+                    row.dataset.noteId = note.id;
+                    row.tabIndex = 0;
+                    row.setAttribute('aria-label', `标注 ${num}${stale ? '，已失锚' : '，回车定位到原型位置'}`);
+                    const no = document.createElement('span');
+                    no.className = 'note-no';
+                    no.textContent = num;
+                    no.setAttribute('aria-hidden', 'true');
+                    const customColor = /^#[0-9a-f]{6}$/i.test(note.color || '') ? note.color : null;
+                    if (customColor && !stale) { no.style.setProperty('--pin-fill', customColor); no.style.setProperty('--pin-ink', 'var(--pin-custom-ink)'); }
+                    if (stale) row.title = '标注已失锚：原型中找不到对应元素';
+                    const body = document.createElement('div');
+                    body.className = 'markdown';
+                    body.innerHTML = md(note.body || '');
+                    const head = document.createElement('div');
+                    head.className = 'note-head';
+                    head.append(no);
+                    row.append(head, body);
+                    if (!stale) {
+                        row.onclick = () => reveal(note);
+                        row.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); reveal(note); } };
+                    }
+                    host.append(row);
+                }
+            }
+
+            // ---------- 启动 ----------
+            if (!data?.pages?.length) {
+                $('empty').textContent = '评审数据缺失或无效，请重新发布。';
+            } else {
+                $('project').textContent = data.name || '原型项目';
+                document.title = `${data.name || '原型项目'} · 原型评审`;
+                $('generated').textContent = data.publishedAt ? '发布于 ' + String(data.publishedAt).slice(0, 16).replace('T', ' ') : '';
+                buildTree();
+                const params = new URLSearchParams(location.hash.slice(1));
+                const page = data.pages.find((p) => p.id === params.get('p')) || data.pages[0];
+                const stateId = page.states?.some((s) => s.id === params.get('s')) ? params.get('s') : (page.states?.[0]?.id || 'default');
+                selectPage(page, stateId);
+            }
+            $('toggle-pages').onclick = () => $('layout').classList.toggle('left-closed');
+            /* PRD 宽度：拖拽调节 + localStorage 记忆；收起时清除内联宽度让 --right 归 0。 */
+            const PRD_KEY = 'proto-review-prd-width';
+            const applyPrdWidth = () => {
+                const w = parseInt(localStorage.getItem(PRD_KEY) || '0', 10);
+                if (w >= 280) $('layout').style.setProperty('--right', Math.min(w, 720) + 'px');
+            };
+            applyPrdWidth();
+            $('toggle-prd').onclick = () => {
+                const closed = $('layout').classList.toggle('right-closed');
+                $('toggle-prd').textContent = closed ? '显示 PRD' : '收起 PRD';
+                if (closed) $('layout').style.removeProperty('--right');
+                else applyPrdWidth();
+                post({ type: 'aside', open: !closed });
+                // 与 viewer 同源（约定 11/12）：收起态开的序号 popover，展开右栏时迁移为右栏定位——关 popover + 行首定位 + 高亮。
+                if (!closed) {
+                    let openPopId = null;
+                    try { openPopId = frame.contentWindow?.__reviewPopNoteId?.(); } catch (_) { /* 未握手 */ }
+                    if (openPopId) { try { frame.contentWindow?.__reviewHidePop?.(); } catch (_) { /* 未握手 */ } onPinFocus(openPopId); }
+                }
+            };
+            const prdResizer = $('prd-resizer');
+            prdResizer.addEventListener('pointerdown', (e) => {
+                if ($('layout').classList.contains('right-closed')) return;
+                e.preventDefault();
+                prdResizer.setPointerCapture(e.pointerId);
+                prdResizer.classList.add('resizing');
+                const startX = e.clientX, startWidth = document.querySelector('aside').offsetWidth;
+                const move = (ev) => $('layout').style.setProperty('--right', Math.max(280, Math.min(startWidth + (startX - ev.clientX), 720)) + 'px');
+                const up = () => {
+                    prdResizer.removeEventListener('pointermove', move);
+                    prdResizer.removeEventListener('pointerup', up);
+                    prdResizer.classList.remove('resizing');
+                    const w = parseInt($('layout').style.getPropertyValue('--right'), 10);
+                    if (w >= 280) { try { localStorage.setItem(PRD_KEY, String(w)); } catch (_) { /* 存储异常忽略 */ } }
+                };
+                prdResizer.addEventListener('pointermove', move);
+                prdResizer.addEventListener('pointerup', up);
+            });
+        </script>
+    </body>
+</html>

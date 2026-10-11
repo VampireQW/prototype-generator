@@ -9,7 +9,7 @@
 """
 
 import http.server
-import socketserver
+import socket
 import os
 import json
 import re
@@ -27,10 +27,19 @@ import threading
 import time
 import sys
 import http.cookies
+import ipaddress
+import posixpath
 import zipfile
 import xml.etree.ElementTree as ET
 
 import db  # 团队协作数据库
+import mimetypes
+from pathlib import Path
+
+import proto_meta  # 原型元数据层（.prototype 三文件 + revision CAS，与全流程格式互认）
+import review_export  # 评审壳导出（GitHub Pages 评审站构建，纯函数模块）
+import design_settings
+import home_thumbnails
 
 # ==================== PyInstaller 兼容 ====================
 def get_base_path():
@@ -51,6 +60,53 @@ STATUS_PENDING = 'pending'
 STATUS_GENERATING = 'generating'
 STATUS_COMPLETED = 'completed'
 STATUS_FAILED = 'failed'
+
+# ==================== 外部项目登记（标注整合） ====================
+# 任意文件夹的 HTML 原型可登记进本工具，用 viewer 打开并进入标注模式；
+# 元数据写入项目目录的 .prototype/（格式与「原型生成全流程」互认）。
+EXTERNAL_FILE = os.path.join('data', 'external.json')
+EXTERNAL_LOCK = threading.RLock()
+REQUEST_LOCK = threading.RLock()  # 保持既有读写串行；目录对话框独立处理
+
+
+def load_external_registry():
+    """读取外部项目登记表"""
+    try:
+        with open(EXTERNAL_FILE, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    if not isinstance(data.get('projects'), dict):
+        data['projects'] = {}
+    data['roots'] = [r for r in data.get('roots', []) if isinstance(r, str) and r.strip()] if isinstance(data.get('roots', []), list) else []
+    return data
+
+
+def save_external_registry(data):
+    os.makedirs(os.path.dirname(EXTERNAL_FILE), exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix='external', suffix='.tmp', dir=os.path.dirname(EXTERNAL_FILE))
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8', newline='\n') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.write('\n')
+        os.replace(tmp, EXTERNAL_FILE)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def external_root_for(project_id):
+    """登记项目 ID -> 真实目录；未登记或目录失效返回 None"""
+    item = load_external_registry()['projects'].get(project_id)
+    if not item:
+        return None
+    try:
+        root = Path(item.get('root', '')).resolve()
+    except OSError:
+        return None
+    return root if root.is_dir() else None
 
 # ==================== 模型配置 ====================
 MODELS_FILE = 'models.json'
@@ -361,7 +417,8 @@ def list_design_system_assets():
             'displayName': design_system_display_name(name, first_markdown_heading(text, name)),
             'category': category,
             'categoryLabel': DESIGN_SYSTEM_CATEGORY_CN.get(category, category),
-            'colors': extract_design_system_colors(text)
+            'colors': design_settings.resolve_settings({}, design_settings.load_preset(name, DESIGN_SYSTEMS_DIR))['effectivePalette'],
+            'preset': design_settings.load_preset(name, DESIGN_SYSTEMS_DIR)
         })
     return items
 
@@ -438,10 +495,18 @@ def get_craft_context(section_ids=None, max_chars=None):
 
 
 def get_design_system_context(design_system_id, max_chars=None):
-    ds_id = safe_asset_id(design_system_id)
-    if not ds_id or ds_id in ('default', 'none'):
-        return ''
+    ds_id = safe_asset_id(design_system_id) or 'default'
+    if ds_id == 'none': ds_id = 'default'
     return read_text_file(design_system_path(ds_id), max_chars or MAX_DESIGN_SYSTEM_CHARS)
+
+
+def normalize_design_form(form_data, design_system_id=None):
+    form_data = dict(form_data) if isinstance(form_data, dict) else {}
+    raw = dict(form_data.get('global') or {})
+    if design_system_id is not None: raw['designSystemId'] = design_system_id
+    preset = design_settings.load_preset(raw.get('designSystemId', ''), globals().get('DESIGN_SYSTEMS_DIR', 'design-systems'))
+    form_data['global'] = design_settings.resolve_settings(raw, preset)
+    return form_data
 
 
 def is_default_design_system(design_system_id):
@@ -454,11 +519,11 @@ def get_minimal_skill_rules(skill_id):
     return MINIMAL_SKILL_RULES.get(sid) or MINIMAL_SKILL_RULES[DEFAULT_SKILL_ID]
 
 
-def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', craft_sections=None):
+def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', craft_sections=None, global_settings=None):
     """将 Open Design 的资产层按需注入现有生成任务。
 
-    默认风格下只注入必要摘要，避免普通原型生成携带大段 OpenDesign 上下文。
-    只有用户选择具体设计系统时，才注入对应 DESIGN.md。
+    默认风格使用精简规范与默认 DESIGN.md；具体风格注入对应资产。
+    配色和主题仅在用户主动修改时作为覆盖指令。
     """
     sid = safe_asset_id(skill_id) or DEFAULT_SKILL_ID
     default_design = is_default_design_system(design_system_id)
@@ -473,7 +538,7 @@ def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', cra
     parts = [
         "# 生成上下文",
         "下面是本次生成的必要约束。请严格遵守，但不要在页面中解释这些规则。",
-        "优先级：用户明确需求 > 选中的设计系统 > 产物类型规则 > 通用设计规则 > 用户表单里的主题色/辅助色/组件风格。",
+        "优先级：" + design_settings.PRIORITY + "。",
     ]
 
     if large_ppt_import:
@@ -481,11 +546,14 @@ def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', cra
 
     if default_design:
         parts.append("\n## 通用设计规则（精简）\n\n" + MINIMAL_CRAFT_RULES)
+        default_context = get_design_system_context('default', 6000)
+        if default_context:
+            parts.append("\n## 默认视觉风格预设（继承）\n\n" + default_context)
     else:
         design_system = get_design_system_context(design_system_id, design_limit)
         if design_system:
             parts.append(f"\n## Active DESIGN.md ({design_system_id})\n\n{design_system}")
-            parts.append("若 DESIGN.md 与用户表单颜色冲突，以 DESIGN.md 的品牌色、字体和组件语言为准。")
+            parts.append("视觉风格为默认基线；用户明确需求和主动自定义的配色 / 主题模式覆盖同名预设，其他字体、排版与组件语言继续继承。")
         else:
             parts.append("\n## 通用设计规则（精简）\n\n" + MINIMAL_CRAFT_RULES)
 
@@ -508,6 +576,7 @@ def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', cra
         if craft:
             parts.append(f"\n## Craft Rules（按需）\n\n{craft}")
 
+    parts.append('\n## 继承与主动覆盖\n\n' + design_settings.prompt_rules(global_settings or {}))
     parts.append(f"\n# 用户原始需求\n\n{user_prompt}")
     parts.append(
         "\n# 最终输出约束\n"
@@ -540,16 +609,184 @@ def get_model_max_tokens(model_name):
     return configured
 
 
+GITHUB_TOKEN_FILE = os.path.join(DATA_DIR, 'github_token.bin')
+
+
+def _dpapi_transform(data, protect):
+    """Windows DPAPI 加/解密（绑定当前用户账户）；仅 Windows 可用，失败抛异常。"""
+    import ctypes
+    from ctypes import wintypes
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    buf = ctypes.create_string_buffer(bytes(data), len(data))
+    blob_in = DATA_BLOB(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
+    blob_out = DATA_BLOB()
+    fn = ctypes.windll.crypt32.CryptProtectData if protect else ctypes.windll.crypt32.CryptUnprotectData
+    if not fn(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
+        raise ctypes.WinError()
+    try:
+        return ctypes.string_at(blob_out.pbData, blob_out.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(blob_out.pbData)
+
+
+def save_github_token(token):
+    """把 GitHub Token 持久化到本地 data/github_token.bin（已在 .gitignore 内，不入库）。
+    Windows 走 DPAPI 按当前用户账户加密落盘（其他用户/拷走文件无法解密）；
+    非 Windows 或 DPAPI 不可用时退化为明文（同为本机本地文件）。传空字符串则清除。"""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        if not token:
+            if os.path.exists(GITHUB_TOKEN_FILE):
+                os.remove(GITHUB_TOKEN_FILE)
+            return True
+        raw = token.encode('utf-8')
+        try:
+            blob = b'D' + _dpapi_transform(raw, True) if sys.platform == 'win32' else b'P' + raw
+        except Exception as enc_e:
+            print(f"[GitHub] DPAPI 加密不可用，退化为明文本地存储: {enc_e}")
+            blob = b'P' + raw
+        fd, tmp = tempfile.mkstemp(prefix='ghtok', suffix='.tmp', dir=DATA_DIR)
+        with os.fdopen(fd, 'wb') as f:
+            f.write(blob)
+        os.replace(tmp, GITHUB_TOKEN_FILE)
+        try:
+            os.chmod(GITHUB_TOKEN_FILE, 0o600)
+        except Exception:
+            pass
+        return True
+    except Exception as e:
+        print(f"[GitHub] Token 持久化失败: {e}")
+        return False
+
+
+def load_github_token():
+    """读取本地持久化的 GitHub Token；不存在/损坏/解密失败则返回 ''。"""
+    try:
+        if not os.path.exists(GITHUB_TOKEN_FILE):
+            return ''
+        with open(GITHUB_TOKEN_FILE, 'rb') as f:
+            blob = f.read()
+        if not blob:
+            return ''
+        tag, body = blob[:1], blob[1:]
+        if tag == b'D':
+            return _dpapi_transform(body, False).decode('utf-8')
+        if tag == b'P':
+            return body.decode('utf-8')
+        return blob.decode('utf-8', 'ignore')  # 兼容无前缀的历史明文
+    except Exception as e:
+        print(f"[GitHub] Token 读取失败: {e}")
+        return ''
+
+
 def get_github_runtime_config():
-    """GitHub token 只从环境变量读取，避免把密钥写进 config.json。"""
+    """GitHub token 优先用环境变量（CI/临时覆盖）；否则用本地持久化（DPAPI 加密）的 token。
+    不写入 config.json，避免密钥混入可共享的配置；持久化文件在 data/（已 .gitignore）。"""
     config = load_config()
     gh = config.get('github', {})
-    token = os.environ.get('PROTOTYPE_GITHUB_TOKEN') or os.environ.get('GITHUB_TOKEN') or ''
+    token = os.environ.get('PROTOTYPE_GITHUB_TOKEN') or os.environ.get('GITHUB_TOKEN') or load_github_token()
     return {
         'token': token,
         'username': gh.get('username', ''),
         'repo': gh.get('repo', 'my-prototypes')
     }
+
+
+def github_api_session(token):
+    """带自动重试的 GitHub API Session（连接池里的僵尸连接被 GitHub 关闭后自动重连）。"""
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    retry_strategy = Retry(total=3, backoff_factor=1, connect=3, read=3,
+                           status_forcelist=[500, 502, 503, 504],
+                           allowed_methods=["GET", "PUT", "POST", "DELETE"])
+    session = requests.Session()
+    session.mount('https://', HTTPAdapter(max_retries=retry_strategy))
+    session.headers.update({
+        'Authorization': f'token {token}',
+        'Accept': 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+    })
+    return session
+
+
+def github_ensure_pages(session, api_base, username, repo):
+    """确保仓库存在、含根重定向且已启用 Pages（与内部发布管线同口径），返回默认分支。"""
+    repo_url = f"{api_base}/repos/{username}/{repo}"
+    try:
+        r = session.get(repo_url, timeout=15)
+        if r.status_code == 404:
+            create_resp = session.post(f"{api_base}/user/repos",
+                                       json={'name': repo, 'private': False, 'auto_init': True}, timeout=20)
+            if create_resp.status_code not in (200, 201):
+                raise Exception(f"创建仓库失败: {create_resp.json().get('message', create_resp.text)}")
+            time.sleep(2)  # 等待仓库初始化
+        elif r.status_code != 200:
+            raise Exception(f"访问仓库失败（HTTP {r.status_code}）: {r.json().get('message', r.text)}")
+    except requests.exceptions.RequestException as req_e:
+        raise Exception(f"连接 GitHub API 失败（检查网络或Token）: {req_e}")
+    default_branch = session.get(repo_url, timeout=15).json().get('default_branch', 'main')
+    root_index_path = f"{api_base}/repos/{username}/{repo}/contents/index.html"
+    if session.get(root_index_path, timeout=10).status_code == 404:
+        put_resp = session.put(root_index_path, json={
+            'message': 'Add root redirect for GitHub Pages',
+            'content': base64.b64encode(b'<meta http-equiv="refresh" content="0;url=projects/">').decode(),
+            'branch': default_branch
+        }, timeout=15)
+        if put_resp.status_code not in (200, 201):
+            raise Exception(f"创建根目录 'index.html' 失败: {put_resp.json().get('message', put_resp.text)}")
+    pages_api_url = f"{api_base}/repos/{username}/{repo}/pages"
+    pages_headers = {'Accept': 'application/vnd.github+json'}
+    pages_resp = session.get(pages_api_url, headers=pages_headers, timeout=10)
+    if pages_resp.status_code == 404:
+        post_resp = session.post(pages_api_url, headers=pages_headers,
+                                 json={'source': {'branch': default_branch, 'path': '/'}}, timeout=15)
+        if post_resp.status_code not in (200, 201):
+            raise Exception(f"启用 GitHub Pages 失败: {post_resp.json().get('message', post_resp.text)}")
+    elif pages_resp.status_code != 200:
+        raise Exception(f"检查 GitHub Pages 状态失败（HTTP {pages_resp.status_code}）: {pages_resp.json().get('message', pages_resp.text)}")
+    return default_branch
+
+
+def github_upload_dir(session, api_base, username, repo, branch, export_dir, remote_prefix):
+    """把本地导出目录逐个文件上传到远端 remote_prefix 下（已存在则带 sha 更新）。"""
+    label = remote_prefix.rstrip('/').split('/')[-1]
+
+    def upload_file(local_path, remote_path):
+        with open(local_path, 'rb') as f:
+            content_b64 = base64.b64encode(f.read()).decode()
+
+        file_api_url = f"{api_base}/repos/{username}/{repo}/contents/{remote_path}"
+
+        # Check if file exists to get SHA for update
+        existing = session.get(file_api_url, timeout=10)
+        payload = {
+            'message': f'Update prototype: {label}',
+            'content': content_b64,
+            'branch': branch
+        }
+        if existing.status_code == 200:
+            payload['sha'] = existing.json().get('sha', '')
+            print(f"[GitHub] 更新文件: {remote_path}")
+        else:
+            print(f"[GitHub] 创建文件: {remote_path}")
+
+        put_resp = session.put(file_api_url, json=payload, timeout=30)
+        if put_resp.status_code not in (200, 201):
+            raise Exception(f"上传文件失败 {remote_path}: {put_resp.json().get('message', put_resp.text)}")
+        print(f"[GitHub] 文件 '{remote_path}' 上传成功。")
+
+    # 遍历 export_dir 下的所有文件并上传
+    if os.path.exists(export_dir):
+        for root_dir, _, files in os.walk(export_dir):
+            for file_name in files:
+                local_path = os.path.join(root_dir, file_name)
+                rel_path = os.path.relpath(local_path, export_dir).replace('\\', '/')
+                upload_file(local_path, f"{remote_prefix}/{rel_path}")
+    else:
+        raise Exception(f"导出目录不存在: {export_dir}")
 
 
 def chinese_to_pinyin(text):
@@ -1044,11 +1281,42 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         body = self.rfile.read(content_length)
         return json.loads(body.decode('utf-8'))
 
+    def is_local_resource_request(self):
+        """仅用于权限判断；覆盖 Windows 大小写、尾点及数据流路径别名。"""
+        path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).replace('\\', '/')
+        path = posixpath.normpath('/' + path.lstrip('/'))
+        path = '/'.join(part.split(':', 1)[0].rstrip(' .').casefold() for part in path.split('/'))
+        return path.startswith(('/api/external/', '/api/proto/', '/ext/', '/api/ext/', '/api/home/')) or path == '/data/external.json'
+
+    def do_HEAD(self):
+        if self.is_local_resource_request() and not self.require_local_origin():
+            return
+        if self.is_home_cache_request():
+            self.send_error(403)
+            return
+        super().do_HEAD()
+
+    def is_home_cache_request(self):
+        path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).replace('\\', '/')
+        path = posixpath.normpath('/' + path.lstrip('/'))
+        path = '/'.join(part.split(':', 1)[0].rstrip(' .').casefold() for part in path.split('/'))
+        return path.startswith('/data/home-thumbnails')
+
     def do_GET(self):
+        with REQUEST_LOCK:
+            self.dispatch_get()
+
+    def dispatch_get(self):
         """处理 GET 请求"""
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
+        if self.is_local_resource_request() and not self.require_local_origin():
+            return
+
+        if self.is_home_cache_request():
+            self.send_error(403)
+            return
 
         # ---- 认证 & 团队 路由 ----
         if path == '/api/auth/me':
@@ -1062,6 +1330,19 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_get_my_projects(query)
         elif path == '/api/projects/team':
             self.handle_get_team_projects(query)
+        # ---- 外部项目与原型元数据（标注整合） ----
+        elif path == '/api/home/thumbnail':
+            self.handle_home_thumbnail(query)
+        elif path == '/api/external/list':
+            self.handle_external_list()
+        elif path == '/api/proto/read':
+            self.handle_proto_read(query)
+        elif path == '/api/ext/publish-status':
+            self.handle_ext_publish_status(query)
+        elif path == '/api/ext/export':
+            self.handle_ext_export(query)
+        elif path.startswith('/ext/'):
+            self.handle_external_file(path)
         # ---- 项目文件访问控制 ----
         elif path.startswith('/projects/'):
             self.handle_project_file_access(path)
@@ -1099,7 +1380,20 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
 
     def do_POST(self):
+        if self.path.split('?')[0] == '/api/external/pick-folder':
+            self.dispatch_post()
+        else:
+            with REQUEST_LOCK:
+                self.dispatch_post()
+
+    def dispatch_post(self):
         path = self.path.split('?')[0]  # 去掉查询参数
+        if path.startswith(('/api/external/', '/api/proto/', '/api/ext/')) or path == '/api/projects/workbench':
+            if not self.require_local_origin():
+                return
+            if self.headers.get_content_type() != 'application/json':
+                self.send_json_status({'ok': False, 'error': '此操作需要 JSON 请求'}, 415)
+                return
         # ---- 认证路由 ----
         if path == '/api/auth/register':
             self.handle_auth_register()
@@ -1128,6 +1422,25 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         elif path.startswith('/api/projects/') and path.endswith('/shared-teams'):
             project_id = urllib.parse.unquote(path.split('/api/projects/')[1].rsplit('/shared-teams', 1)[0])
             self.handle_get_project_shared_teams(project_id)
+        # ---- 外部项目与原型元数据（标注整合） ----
+        elif path == '/api/projects/workbench':
+            self.handle_project_workbench()
+        elif path == '/api/external/add':
+            self.handle_external_add()
+        elif path == '/api/external/remove':
+            self.handle_external_remove()
+        elif path == '/api/external/delete':
+            self.handle_external_delete()
+        elif path == '/api/external/pick-folder':
+            self.handle_pick_folder()
+        elif path == '/api/external/roots/add':
+            self.handle_root_add()
+        elif path == '/api/external/roots/remove':
+            self.handle_root_remove()
+        elif path == '/api/proto/save':
+            self.handle_proto_save()
+        elif path == '/api/proto/upload-image':
+            self.handle_proto_upload_image()
         # ---- 原有路由 ----
         elif self.path == '/upload':
             self.handle_upload()
@@ -1173,6 +1486,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_github_publish()
         elif self.path == '/api/github/unpublish':
             self.handle_github_unpublish()
+        elif path == '/api/ext/publish':
+            self.handle_ext_publish()
+        elif path == '/api/ext/unpublish':
+            self.handle_ext_unpublish()
         else:
             self.send_error(404, "Not Found")
 
@@ -1244,6 +1561,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             form_data = data.get('formData', {})  # 用户输入的表单数据
             global_data = form_data.get('global', {}) if isinstance(form_data, dict) else {}
             design_system_id = data.get('designSystemId') or global_data.get('designSystemId') or ''
+            form_data = normalize_design_form(form_data, design_system_id)
+            global_data = form_data['global']
             skill_id = data.get('skillId') or global_data.get('skillId') or DEFAULT_SKILL_ID
 
             # 增量更新参数
@@ -1344,11 +1663,11 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 # 在prompt中提示AI参考原有内容
                 enhanced_prompt = prompt + image_manifest + f"\n\n# 重要提示\n这是一个增量更新任务。原项目中有{reused_pages}个页面内容未变化。请保持整体风格一致，重点关注变化的部分。"
                 print(f"[增量] 使用增强prompt调用AI")
-                composed_prompt = compose_generation_prompt(enhanced_prompt, design_system_id, skill_id)
+                composed_prompt = compose_generation_prompt(enhanced_prompt, design_system_id, skill_id, global_settings=global_data)
                 html_content = self.call_ai_model(composed_prompt, images)
             else:
                 # 正常调用AI
-                composed_prompt = compose_generation_prompt(prompt + image_manifest, design_system_id, skill_id)
+                composed_prompt = compose_generation_prompt(prompt + image_manifest, design_system_id, skill_id, global_settings=global_data)
                 html_content = self.call_ai_model(composed_prompt, images)
 
             if not html_content:
@@ -1445,6 +1764,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             form_data = data.get('formData', {})
             global_data = form_data.get('global', {}) if isinstance(form_data, dict) else {}
             design_system_id = data.get('designSystemId') or global_data.get('designSystemId') or ''
+            form_data = normalize_design_form(form_data, design_system_id)
+            global_data = form_data['global']
             skill_id = data.get('skillId') or global_data.get('skillId') or DEFAULT_SKILL_ID
             is_incremental = data.get('incremental', False)
             source_project_id = data.get('sourceProjectId', None)
@@ -1492,7 +1813,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             # 保存 prompt
             prompt_path = os.path.join(project_folder, 'prompt.txt')
             with open(prompt_path, 'w', encoding='utf-8') as f:
-                f.write(compose_generation_prompt(prompt + image_manifest, design_system_id, skill_id))
+                f.write(compose_generation_prompt(prompt + image_manifest, design_system_id, skill_id, global_settings=global_data))
 
             # 获取当前选中的模型名称
             current_model = get_selected_model()
@@ -1565,7 +1886,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     enhanced_prompt = prompt
                     if is_incremental and source_html_content and reused_pages > 0:
                         enhanced_prompt += f"\n\n# 重要提示\n这是一个增量更新任务。原项目中有{reused_pages}个页面内容未变化。请保持整体风格一致。"
-                    composed_prompt = compose_generation_prompt(enhanced_prompt + image_manifest, design_system_id, skill_id)
+                    composed_prompt = compose_generation_prompt(enhanced_prompt + image_manifest, design_system_id, skill_id, global_settings=global_data)
 
                     # 使用类似 call_ai_model 的逻辑
                     html_content = self._call_ai_for_async(composed_prompt, images)
@@ -3512,6 +3833,498 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
 
+    def send_json_status(self, data, status):
+        """按指定状态码发送 JSON 响应（如 400/403/404/409）"""
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+
+    # ==================== 外部项目登记与原型元数据（标注整合） ====================
+
+    def require_local_origin(self):
+        """外部目录能力只向本机同源开放，阻止跨站读取与 DNS rebinding。"""
+        try:
+            peer = ipaddress.ip_address(self.client_address[0])
+            peer = getattr(peer, 'ipv4_mapped', None) or peer
+            host = self.headers.get('Host', '')
+            target = urllib.parse.urlsplit('http://' + host)
+            allowed = (peer.is_loopback and target.hostname in {'127.0.0.1', 'localhost', '::1'}
+                       and (target.port or 80) == self.server.server_address[1]
+                       and not target.username and not target.password and not target.path
+                       and not target.query and not target.fragment)
+            origin = self.headers.get('Origin')
+            if origin is not None:
+                allowed = allowed and origin == 'http://' + host
+            allowed = allowed and self.headers.get('Sec-Fetch-Site', '') in {'', 'same-origin', 'none'}
+        except (ValueError, AttributeError):
+            allowed = False
+        if not allowed:
+            self.send_json_status({'ok': False, 'error': '本地项目只能通过本机同源工作台访问'}, 403)
+        return bool(allowed)
+
+    def handle_pick_folder(self):
+        try:
+            path = proto_meta.pick_folder()
+            self.send_json_response({'ok': True, 'path': path, 'cancelled': not bool(path)})
+        except BlockingIOError as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 409)
+        except Exception as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 503)
+
+    def handle_root_add(self):
+        try:
+            data = self.read_json_body()
+            raw = str(data.get('path', '')).strip().strip('"')
+            if not raw:
+                raise ValueError('请选择文件夹或粘贴目录路径')
+            source = Path(raw).expanduser()
+            if proto_meta.is_linked_path(source):
+                raise ValueError('不支持符号链接或目录联接，请选择真实目录')
+            root = source.resolve()
+            if not root.is_dir():
+                raise ValueError('目录不存在')
+            if proto_meta.skip_scan_directory(root):
+                raise ValueError('不能将工具、依赖或交付目录加入项目清单')
+            if proto_meta.discover_pages(root):
+                self.send_json_response(self.register_external(root))
+                return
+            with EXTERNAL_LOCK:
+                reg = load_external_registry()
+                if not any(proto_meta.project_id_for(Path(r)) == proto_meta.project_id_for(root) for r in reg['roots']):
+                    reg['roots'].append(str(root))
+                    save_external_registry(reg)
+            found, errors = proto_meta.scan_roots(reg['roots'], reg['projects'])
+            self.send_json_response({'ok': True, 'connected': False, 'roots': reg['roots'], 'candidates': len(found), 'errors': errors})
+        except (ValueError, OSError) as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 400)
+
+    def handle_root_remove(self):
+        try:
+            raw = str(self.read_json_body().get('path', '')).strip()
+            if not raw:
+                raise ValueError('缺少目录路径')
+            pid = proto_meta.project_id_for(Path(raw))
+            with EXTERNAL_LOCK:
+                reg = load_external_registry()
+                reg['roots'] = [r for r in reg['roots'] if proto_meta.project_id_for(Path(r)) != pid]
+                save_external_registry(reg)
+            self.send_json_response({'ok': True, 'roots': reg['roots']})
+        except (ValueError, OSError) as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 400)
+
+    def register_external(self, root):
+        with EXTERNAL_LOCK, proto_meta.PROJECT_LOCK:
+            pages = proto_meta.discover_pages(root)
+            if not pages:
+                raise ValueError('目录中没有 HTML 原型')
+            pid = proto_meta.project_id_for(root)
+            bundle = proto_meta.ensure_bundle(root)
+            proto_meta.ensure_project_id(root, bundle, pid)
+            proto_meta.ensure_pages_registered(root, bundle)
+            reg = load_external_registry()
+            if pid not in reg['projects']:
+                reg['projects'][pid] = {'root': str(root), 'name': root.name,
+                                       'createdAt': proto_meta.directory_created_at(root),
+                                       'addedAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                save_external_registry(reg)
+        return {'ok': True, 'connected': True, 'projectId': pid, 'name': reg['projects'][pid]['name'],
+                'pages': len(pages), 'revision': bundle['revision'], 'viewerUrl': f'/src/viewer.html?ext={pid}'}
+
+    def safe_ai_project_root(self, project_id):
+        """AI ID 只能指向 projects/ 内的直属真实项目目录。"""
+        if not isinstance(project_id, str) or not project_id or project_id != project_id.rstrip(' .') or any(c in project_id for c in '/\\:') or project_id in ('.', '..') or project_id.startswith('.'):
+            raise ValueError('项目 ID 无效')
+        parent = Path(PROJECTS_DIR).resolve()
+        source = parent / project_id
+        if proto_meta.is_linked_path(source):
+            raise ValueError('不支持符号链接或目录联接项目')
+        root = source.resolve()
+        if root.parent != parent:
+            raise ValueError('项目目录必须位于 AI 项目目录中')
+        if not root.is_dir():
+            raise FileNotFoundError('项目不存在或已删除')
+        return root
+
+    def require_ai_project_access(self, project_id):
+        """保留离线个人版及已登录团队项目的现有访问规则。"""
+        user = self.get_current_user()
+        if user:
+            owner_id = db.get_project_owner(project_id)
+            if owner_id is None:
+                db.set_project_owner(project_id, user['id'])
+            elif not db.can_user_access_project(project_id, user['id']):
+                self.send_json_status({'ok': False, 'error': '无权访问此项目'}, 403)
+                return False
+        return True
+
+    def require_registered_project_access(self, pid):
+        item = load_external_registry()['projects'].get(pid) or {}
+        if item.get('source') != 'ai':
+            return True
+        try:
+            root = self.safe_ai_project_root(item.get('aiProjectId'))
+            if root != Path(item.get('root', '')).resolve():
+                raise ValueError('AI 项目登记目录已失效')
+        except (ValueError, OSError) as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 404)
+            return False
+        return self.require_ai_project_access(item['aiProjectId'])
+
+    def register_ai_workbench(self, project_id):
+        root = self.safe_ai_project_root(project_id)
+        record = proto_meta.read_json(root / 'record.json', {})
+        if not isinstance(record, dict):
+            record = {}
+        discovered = proto_meta.discover_pages(root)
+        if not discovered:
+            raise FileNotFoundError('原型尚未生成，请先完成生成')
+        listing = proto_meta.read_json(Path(PROJECTS_FILE), [])
+        item = next((p for p in listing if isinstance(p, dict) and p.get('id') == project_id), {}) if isinstance(listing, list) else {}
+        name = str(item.get('name') or record.get('projectName') or record.get('title') or project_id)
+        for suffix in (' (待外部生成)', ' (AI IDE待生成)'):
+            if name.endswith(suffix):
+                name = name[:-len(suffix)]
+        index_file = next((page for page in discovered if page['file'].casefold() == 'index.html'), None)
+        detected = self.extract_pages_from_html(proto_meta.safe_asset(root, index_file['file']).read_text(encoding='utf-8', errors='replace')) if index_file else []
+        with EXTERNAL_LOCK, proto_meta.PROJECT_LOCK:
+            bundle = proto_meta.ensure_ai_project_bundle(root, record, detected, name)
+            pid = bundle['project']['id']
+            registry = load_external_registry()
+            registered = registry['projects'].setdefault(pid, {
+                'createdAt': record.get('createdAt') or proto_meta.directory_created_at(root),
+                'addedAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')})
+            registered.update(root=str(root), name=name, source='ai', aiProjectId=project_id, github_remote_id=project_id)
+            if record.get('github_url') and not registered.get('github_url'):
+                registered['github_url'] = record['github_url']
+                registered['github_published_at'] = record.get('github_published_at', '')
+                old_mode = record.get('github_publish_mode') or record.get('github_mode', '')
+                registered['github_publish_mode'] = {'preview': 'pure', 'dev': 'review'}.get(old_mode, old_mode)
+            save_external_registry(registry)
+        return {'ok': True, 'connected': True, 'projectId': pid, 'aiProjectId': project_id,
+                'name': name, 'pages': len(bundle['project']['pages']), 'revision': bundle['revision'],
+                'viewerUrl': f'/src/viewer.html?ext={pid}'}
+
+    def handle_project_workbench(self):
+        try:
+            project_id = self.read_json_body().get('projectId')
+            self.safe_ai_project_root(project_id)
+            if not self.require_ai_project_access(project_id):
+                return
+            self.send_json_response(self.register_ai_workbench(project_id))
+        except FileNotFoundError as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 404)
+        except ValueError as error:
+            status = 409 if '元数据' in str(error) or '版本' in str(error) else 400
+            self.send_json_status({'ok': False, 'error': str(error)}, status)
+        except OSError:
+            self.send_json_status({'ok': False, 'error': '项目目录不可读写，请检查目录权限'}, 500)
+
+    def handle_external_list(self):
+        """列出已登记的外部项目（附带页面数与元数据 revision）"""
+        items, scan_errors = [], []
+        reg = load_external_registry()
+        for pid, item in reg['projects'].items():
+            if item.get('source') == 'ai':
+                continue
+            root = Path(item.get('root', ''))
+            exists = root.is_dir()
+            pages = proto_meta.discover_pages(root, scan_errors) if exists else []
+            revision = None
+            if exists:
+                try:
+                    revision = proto_meta.load_bundle(root)['revision']
+                except Exception:
+                    revision = None
+            items.append({'projectId': pid, 'root': str(root), 'name': item.get('name') or root.name,
+                          'createdAt': proto_meta.directory_created_at(root, item.get('createdAt') or item.get('addedAt', '')),
+                          'addedAt': item.get('addedAt', ''), 'exists': exists,
+                          'pages': len(pages), 'revision': revision})
+        items.sort(key=lambda x: x['createdAt'], reverse=True)
+        discovered, errors = proto_meta.scan_roots(reg['roots'], reg['projects'])
+        home_thumbnails.discovered = {item['projectId']: item['root'] for item in discovered}
+        self.send_json_response({'ok': True, 'items': items, 'discovered': discovered,
+                                 'roots': reg['roots'], 'errors': scan_errors + errors})
+
+    def handle_home_thumbnail(self, query):
+        try:
+            pid = query.get('id', [''])[0]
+            if query.get('source', [''])[0] == 'ai':
+                root = self.safe_ai_project_root(pid)
+                if not self.require_ai_project_access(pid):
+                    return
+            elif query.get('source', [''])[0] == 'local':
+                if pid in load_external_registry()['projects']:
+                    if not self.require_registered_project_access(pid):
+                        return
+                    root = external_root_for(pid)
+                else:
+                    raw = home_thumbnails.discovered.get(pid)
+                    if raw and not any(Path(base).resolve() in {Path(raw).resolve(), Path(raw).resolve().parent} for base in load_external_registry()['roots']):
+                        raw = None
+                    root = Path(raw).resolve() if raw else None
+                if root is None or not root.is_dir() or proto_meta.is_linked_path(root):
+                    raise FileNotFoundError('项目目录不可用')
+            else:
+                raise ValueError('项目来源无效')
+            pages = proto_meta.discover_pages(root)
+            if not pages:
+                raise FileNotFoundError('项目还没有可预览页面')
+            state, image = home_thumbnails.request(root, pages[0]['file'])
+            if image:
+                body = image.read_bytes()
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/png')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Cache-Control', 'private, max-age=60')
+                self.send_header('X-Content-Type-Options', 'nosniff')
+                self.end_headers(); self.wfile.write(body)
+            else:
+                self.send_json_status({'status': state}, 503 if state == 'unavailable' else 429 if state == 'busy' else 202)
+        except (ValueError, FileNotFoundError):
+            self.send_json_status({'status': 'unavailable'}, 404)
+        except OSError:
+            self.send_json_status({'status': 'unavailable'}, 503)
+
+    def handle_external_add(self):
+        """登记一个任意文件夹的原型项目，并初始化 .prototype 元数据（幂等）"""
+        try:
+            data = self.read_json_body()
+            raw = str(data.get('path', '')).strip().strip('"')
+            if not raw:
+                self.send_json_status({'ok': False, 'error': '请填写项目目录路径'}, 400)
+                return
+            try:
+                source = Path(raw).expanduser()
+                if proto_meta.is_linked_path(source):
+                    raise ValueError('不支持符号链接或目录联接，请选择真实目录')
+                root = source.resolve()
+                if proto_meta.skip_scan_directory(root):
+                    raise ValueError('不能将工具、依赖或交付目录加入项目清单')
+            except OSError:
+                self.send_json_status({'ok': False, 'error': '路径无效'}, 400)
+                return
+            if not root.is_dir():
+                self.send_json_status({'ok': False, 'error': '目录不存在'}, 400)
+                return
+            pages = proto_meta.discover_pages(root)
+            if not pages:
+                self.send_json_status({'ok': False, 'error': '目录中没有 HTML 原型（需要根目录或 pages/ 下有 .html 文件）'}, 400)
+                return
+            self.send_json_response(self.register_external(root))
+        except ValueError as e:
+            self.send_json_status({'ok': False, 'error': str(e)}, 400)
+        except Exception as e:
+            print(f'[外部项目登记错误] {e}')
+            self.send_error_response(str(e))
+
+    def handle_external_remove(self):
+        """从登记表移除（不删除磁盘上的项目与 .prototype 元数据）"""
+        try:
+            data = self.read_json_body()
+            pid = str(data.get('projectId', ''))
+            with EXTERNAL_LOCK:
+                reg = load_external_registry()
+                if pid in reg['projects']:
+                    del reg['projects'][pid]
+                    save_external_registry(reg)
+            self.send_json_response({'ok': True})
+        except Exception as e:
+            self.send_error_response(str(e))
+
+    def handle_external_delete(self):
+        """删除登记项目并连带删除本地文件夹（前端二次确认，服务端再做路径安全校验）"""
+        import shutil
+        try:
+            data = self.read_json_body()
+            pid = str(data.get('projectId', ''))
+            with EXTERNAL_LOCK:
+                reg = load_external_registry()
+                entry = reg['projects'].get(pid)
+                if not entry:
+                    self.send_json_status({'ok': False, 'error': '项目未登记或已被移除'}, 404)
+                    return
+                snapshot = dict(entry)
+                others = {k: dict(v) for k, v in reg['projects'].items() if k != pid}
+                watched_roots = list(reg['roots'])
+            source = Path(snapshot.get('root', ''))
+            if proto_meta.is_linked_path(source):
+                self.send_json_status({'ok': False, 'error': '不支持删除符号链接或目录联接，请手动处理'}, 400)
+                return
+            try:
+                root = source.resolve()
+            except OSError:
+                self.send_json_status({'ok': False, 'error': '路径无效'}, 400)
+                return
+            if not root.is_dir():
+                # 目录本就不存在：只移除登记，保持列表与磁盘一致
+                with EXTERNAL_LOCK:
+                    reg = load_external_registry()
+                    reg['projects'].pop(pid, None)
+                    save_external_registry(reg)
+                self.send_json_response({'ok': True, 'folderDeleted': False, 'root': str(root),
+                                         'publishedUrl': snapshot.get('github_url', '')})
+                return
+            tool_dir = Path(__file__).resolve().parent
+            problems = []
+            if root.parent == root or len(root.parts) < 2:
+                problems.append('不能删除磁盘根目录')
+            elif root == tool_dir or root in tool_dir.parents:
+                problems.append('该目录包含原型生成器工具，不能删除')
+            elif tool_dir in root.parents:
+                problems.append('工具目录内的项目请通过 AI 项目列表管理')
+            if not problems:
+                for other in others.values():
+                    try:
+                        other_root = Path(other.get('root', '')).resolve()
+                    except OSError:
+                        continue
+                    if root in other_root.parents:
+                        problems.append(f'该文件夹内还有已登记的项目「{other.get("name") or other_root.name}」，请先移除')
+                        break
+            if not problems:
+                for text in watched_roots:
+                    try:
+                        watched = Path(text).resolve()
+                    except OSError:
+                        continue
+                    if watched != root and root in watched.parents:
+                        problems.append(f'该文件夹包含监视根目录 {watched}，请先停止监视')
+                        break
+            if problems:
+                self.send_json_status({'ok': False, 'error': problems[0]}, 400)
+                return
+            try:
+                shutil.rmtree(root)
+            except OSError as error:
+                self.send_json_status({'ok': False, 'error': f'文件夹删除失败（登记已保留）：{error}'}, 500)
+                return
+            with EXTERNAL_LOCK:
+                reg = load_external_registry()
+                reg['projects'].pop(pid, None)
+                reg['roots'] = [r for r in reg['roots'] if proto_meta.project_id_for(Path(r)) != pid]
+                save_external_registry(reg)
+            self.send_json_response({'ok': True, 'folderDeleted': True, 'root': str(root),
+                                     'publishedUrl': snapshot.get('github_url', '')})
+        except Exception as e:
+            print(f'[外部项目删除错误] {e}')
+            self.send_error_response(str(e))
+
+    def handle_external_file(self, path):
+        """以白名单方式伺服登记项目的原型文件（/ext/<projectId>/<相对路径>）"""
+        parts = path.split('/', 3)
+        if len(parts) < 4 or not parts[3]:
+            self.send_error(404)
+            return
+        pid = urllib.parse.unquote(parts[2])
+        rel = urllib.parse.unquote(parts[3])
+        if not self.require_registered_project_access(pid):
+            return
+        root = external_root_for(pid)
+        if root is None:
+            self.send_error(403)
+            return
+        try:
+            target = proto_meta.safe_asset(root, rel)
+        except ValueError:
+            self.send_error(403)
+            return
+        except FileNotFoundError:
+            self.send_error(404)
+            return
+        suffix = target.suffix.lower()
+        if suffix in ('.html', '.htm'):
+            ctype = 'text/html; charset=utf-8'
+        elif suffix in ('.js', '.mjs'):
+            ctype = 'application/javascript; charset=utf-8'
+        elif suffix == '.css':
+            ctype = 'text/css; charset=utf-8'
+        else:
+            ctype = mimetypes.guess_type(str(target))[0] or 'application/octet-stream'
+        raw = target.read_bytes()
+        if suffix in ('.html', '.htm'):
+            raw = review_export.inject_hotspot_bootstrap(raw.decode('utf-8', errors='surrogateescape')).encode('utf-8', errors='surrogateescape')
+        self.send_response(200)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
+
+    def handle_proto_read(self, query):
+        """读取项目元数据 bundle + 发现的页面（viewer 标注模式数据源）"""
+        pid = query.get('projectId', [''])[0]
+        if not self.require_registered_project_access(pid):
+            return
+        root = external_root_for(pid)
+        if root is None:
+            self.send_json_status({'ok': False, 'error': '项目未登记或目录已失效'}, 404)
+            return
+        try:
+            bundle = proto_meta.ensure_bundle(root)
+            proto_meta.ensure_project_id(root, bundle, pid)
+            proto_meta.ensure_pages_registered(root, bundle)
+            self.send_json_response({'ok': True, 'root': str(root), 'bundle': bundle,
+                                     'discovered': proto_meta.discover_pages(root)})
+        except ValueError as e:
+            self.send_json_status({'ok': False, 'error': str(e)}, 409)
+
+    def handle_proto_save(self):
+        """保存项目元数据（expectedRevision CAS；冲突返回 409 + 当前 bundle）"""
+        try:
+            data = self.read_json_body()
+            pid = str(data.get('projectId', ''))
+            if not self.require_registered_project_access(pid):
+                return
+            root = external_root_for(pid)
+            if root is None:
+                self.send_json_status({'ok': False, 'error': '项目未登记或目录已失效'}, 404)
+                return
+            current = proto_meta.load_bundle(root)
+            if int(data.get('expectedRevision', -1)) != current['revision']:
+                self.send_json_status({'ok': False, 'conflict': True,
+                                       'error': '版本冲突：项目已被其他页面或 Agent 更新，请重新载入',
+                                       'current': current}, 409)
+                return
+            incoming = proto_meta.validate_bundle(data.get('bundle') or {})
+            if incoming['project']['id'] != pid:
+                self.send_json_status({'ok': False, 'error': '不能覆盖其他项目'}, 400)
+                return
+            # confirmed 只锁标注：页面需求文档可随时双击编辑（用户裁定 2026-09-28），故文档不参与已确认保护
+            by_id = {item['id']: item for item in incoming['prd']['annotations']}
+            for item in current['prd']['annotations']:
+                if item.get('confirmed') and by_id.get(item['id']) != item:
+                    raise ValueError('已确认的标注不可修改、取消确认或删除')
+            incoming['revision'] = current['revision'] + 1
+            proto_meta.save_bundle(root, incoming)
+            self.send_json_response({'ok': True, 'bundle': incoming})
+        except ValueError as e:
+            self.send_json_status({'ok': False, 'error': str(e)}, 400)
+        except Exception as e:
+            print(f'[元数据保存错误] {e}')
+            self.send_error_response(str(e))
+
+    def handle_proto_upload_image(self):
+        """上传本地 PRD 图片；正文仍通过 proto/save 的 CAS 保存。"""
+        try:
+            if int(self.headers.get('Content-Length', 0)) > 14 * 1024 * 1024:
+                self.send_json_status({'ok': False, 'error': '图片不能超过 10 MB'}, 413)
+                return
+            data = self.read_json_body()
+            pid = str(data.get('projectId', ''))
+            if not self.require_registered_project_access(pid):
+                return
+            root = external_root_for(pid)
+            if root is None:
+                self.send_json_status({'ok': False, 'error': '项目未登记或目录已失效'}, 404)
+                return
+            rel = proto_meta.store_prd_image(root, data.get('dataUrl'))
+            self.send_json_response({'ok': True, 'path': rel, 'url': '/ext/' + urllib.parse.quote(pid) + '/' + rel})
+        except (ValueError, TypeError) as e:
+            self.send_json_status({'ok': False, 'error': str(e)}, 400)
+        except OSError:
+            self.send_json_status({'ok': False, 'error': '图片保存失败，请检查项目目录权限'}, 500)
+
     def send_error_response(self, message):
         """发送错误响应"""
         self.send_response(500)
@@ -3593,6 +4406,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             project_name = data.get('projectName', '未命名项目')
             form_data = data.get('formData', {})
             image_files = data.get('imageFiles', {})  # {pageIndex: [base64...]}
+            form_data = normalize_design_form(form_data)
+            global_data = form_data['global']
+            instruction = compose_generation_prompt(data.get('prompt', ''), global_data.get('designSystemId', ''), global_data.get('skillId', DEFAULT_SKILL_ID), global_settings=global_data)
 
             if not project_id:
                 self.send_error_response("缺少projectId")
@@ -3651,7 +4467,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 db.set_project_owner(project_id, cur_user['id'])
 
             print(f"[完成] 占位项目已创建: {project_folder}")
-            self.send_json_response({'success': True, 'project': new_project})
+            with open(os.path.join(project_folder, 'prompt.txt'), 'w', encoding='utf-8') as f:
+                f.write(instruction)
+            self.send_json_response({'success': True, 'project': new_project, 'instruction': instruction})
 
         except Exception as e:
             print(f"[错误] 创建占位项目失败: {e}")
@@ -3669,6 +4487,11 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             image_assets = data.get('imageAssets', {})  # {pageIndex: [{kind,name,base64,...}]}
             prompt = data.get('prompt', '')
 
+            # 页面组织形态：auto 按页数推荐（≤3 单文件 / ≥4 拆分多页）
+            layout_pref = str(data.get('pageLayout') or 'auto')
+            if layout_pref not in ('auto', 'single', 'split'):
+                layout_pref = 'auto'
+
             if not project_id:
                 self.send_error_response("缺少projectId")
                 return
@@ -3682,9 +4505,30 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             os.makedirs(pages_folder, exist_ok=True)
             os.makedirs(ref_folder, exist_ok=True)
 
-            global_data = form_data.get('global', {})
+            form_data = normalize_design_form(form_data)
+            global_data = form_data['global']
             pages_data = form_data.get('pages', [])
             now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            layout = layout_pref if layout_pref != 'auto' else ('single' if len(pages_data) <= 3 else 'split')
+
+            if layout == 'single':
+                layout_line = '- 所有页面实现为一个完整的 `index.html`；页面间切换是单页内的状态切换，经 PrototypeBridge 管理（每个“页面”对应一个状态，stateId 用页面名的小写 slug）。'
+                finish_line = '- 完成后确保 `index.html` 位于项目根目录，原型生成器会自动识别为已完成项目。'
+                page_decl = '页面声明：`index.html` 的 `<html lang="zh-CN" data-proto-page="home" data-proto-state="默认状态ID">`；每个“页面”（状态）切换时同步更新 `data-proto-state`。'
+                delivery_lines = [
+                    '- 在项目根目录生成 `index.html`。',
+                    '- 单文件可直接打开预览，包含 CSS 和 JS；页面间切换为单页内状态切换。',
+                ]
+                page_entry_req = '- 页面必须能在最终 `index.html` 中通过导航或交互进入（作为单页内的一个状态）。'
+            else:
+                layout_line = '- `index.html` 为入口首页；其余页面生成为 `pages/` 下独立 HTML 文件；共享样式与脚本放 `assets/`。'
+                finish_line = '- 完成后确保 `index.html` 位于项目根目录且能导航到 `pages/` 子页，原型生成器会自动识别为已完成项目。'
+                page_decl = '每个页面 `<html lang="zh-CN" data-proto-page="页面ID" data-proto-state="default">`。页面 ID 必须与文件名一致：文件名去扩展名、转小写、连续符号并为单个 `-`（`index.html` 固定为 `home`，`pages/detail.html` → `detail`，`pages/作业详情.html` → `作业详情`）。'
+                delivery_lines = [
+                    '- 在项目根目录生成 `index.html` 入口页，`pages/` 下生成各子页面 HTML，`assets/` 放共享样式脚本。',
+                    '- 全部为纯静态文件，可直接打开预览，不依赖构建与后端。',
+                ]
+                page_entry_req = '- 页面必须生成为 `pages/` 下独立 HTML 文件，并能从入口页导航进入。'
 
             manifest = []
             page_asset_map = {}
@@ -3726,6 +4570,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 'pages': pages_data,
                 'status': 'pending_external',
                 'externalMode': 'ai_ide_package',
+                'pageLayout': layout,
                 'createdAt': now,
                 'referenceManifest': manifest
             }
@@ -3742,33 +4587,29 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
             design_md = f"""# DESIGN
 
-## 全局风格
+## 视觉风格预设
 - 产物类型：{md_escape(global_data.get('skillName') or global_data.get('skillId') or 'Web 原型')}
-- 设计系统：{md_escape(global_data.get('designSystemName') or '默认风格')}
-- 设计系统 ID：{md_escape(global_data.get('designSystemId') or 'default')}
-- 组件风格：{md_escape(global_data.get('componentStyle') or 'Ant Design')}
-- 背景模式：{'深色' if global_data.get('backgroundMode') == 'dark' else '浅色'}
-- 主色：{md_escape(global_data.get('primaryColor') or '#004fff')}
-- 强调色：{md_escape(global_data.get('secondaryColor') or '#10B981')}
+- 视觉风格：{md_escape(global_data.get('designSystemName') or '默认风格')}
+- 视觉风格 ID：{md_escape(global_data.get('designSystemId') or 'default')}
+- 配色：{'自定义' if global_data['colorMode'] == 'custom' else '跟随风格'}
+- 主题模式：{ {'inherit': '跟随风格', 'light': '浅色', 'dark': '深色'}[global_data['themeMode']] }
+- 组件语言：跟随视觉风格
 
-## 执行优先级
-1. 用户在 `TASK.md` 和 `pages/*.md` 中写明的业务需求。
-2. 本文件指定的设计系统、组件风格和主题约束。
-3. `reference/manifest.json` 中每张图片的用途和页面归属。
-4. 前端实现可用性、响应式和交互完整性。
+## 继承与主动覆盖
+{design_settings.prompt_rules(global_data)}
 
-## 设计要求
-- 如果选择了具体设计系统，优先遵守该品牌/系统的色彩、字体、组件语言和信息密度。
-- 主色和强调色用于微调按钮、焦点态、关键图标和状态提示，不要粗暴覆盖设计系统的核心视觉。
-- 页面应是高保真可演示原型，不要只做线框图。
-- 使用真实业务文案和示例数据，不使用 Lorem ipsum。
+## 执行要求
+- 用户在 `TASK.md` 和 `pages/*.md` 中明确指定的需求优先于预设。
+- `reference/manifest.json` 中每张图片的用途和页面归属按用户指定执行。
+- 原始风格规范中的颜色、主题与以上主动覆盖冲突时，采用主动覆盖；字体、排版和组件语言继续继承。
+- 页面应是高保真可演示原型，使用真实业务文案与示例数据，响应式和交互状态完整。
 """
             if active_design_context:
                 design_md += f"""
 
 ## 已选择设计系统原始规范
 
-以下内容来自原型生成器的设计系统资产。实现时请优先遵守。
+以下内容是视觉风格预设基线；未主动覆盖的部分继承此规范，冲突按上方优先级执行。
 
 ```md
 {active_design_context}
@@ -3794,18 +4635,27 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
 ## 工作方式
 - 先阅读 `TASK.md`、`DESIGN.md`、`reference/manifest.json` 和 `pages/` 下的页面需求。
-- 所有页面优先实现为一个完整的 `index.html`，除非任务明确要求拆分。
+{layout_line}
 - 可以使用 CDN：Tailwind CSS、Vue 3、FontAwesome、ECharts、Google Fonts。
 - 必须实现页面切换、核心交互、弹窗/抽屉/筛选/状态反馈等可演示行为。
 - 必须保留与页面需求一致的信息架构和业务语义。
 - 参考图路径以 `reference/manifest.json` 为准，不要混淆不同页面的图片。
-- 完成后确保 `index.html` 位于项目根目录，原型生成器会自动识别为已完成项目。
+{finish_line}
+
+## 可管理原型约定（必须遵守）
+产物会被原型生成器的「标注 / PRD 管理」功能接管，必须遵守：
+1. {page_decl}
+2. 所有「未来可能被点名修改或标注」的元素都要预埋 `data-proto-id`：导航、页头、每个按钮、表格、卡片、表单行、状态徽标、空态块。kebab-case 命名，页面内唯一（跨页面可重复）。
+3. 多状态页面必须提供 `window.PrototypeBridge = {{ enter(stateId) {{ ... }} }}`：推荐元素用 `data-state-visible="状态A,状态B"` 声明可见状态；enter 与页面自身的导航、Tab、路由和弹层切换都同步更新 `document.documentElement.dataset.protoState`，重复调用结果一致，异步切换返回 Promise，不重载整页。
+4. 文件名可用中文，但路径中不要出现 `#`、`?`、空格。
+5. 根元素声明 `data-proto-preview="{'mobile' if global_data.get('skillId') == 'mobile-app' else 'web'}"`；单文件的业务视图按页面名小写 slug 登记 stateId，保留中文，连续符号合成 `-`，重复名称追加 `-2`、`-3`；default 指向初始视图。
 
 ## 禁止
 - 不要调用外部后端接口。
 - 不要只输出说明文字。
 - 不要忽略 `DESIGN.md` 中的设计系统/组件风格。
 - 不要把不同页面的参考图串用。
+- 不要删除任何 `data-proto-id`、`data-proto-page` 属性。
 """
             with open(os.path.join(project_folder, 'AGENTS.md'), 'w', encoding='utf-8') as f:
                 f.write(agents_md)
@@ -3817,9 +4667,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 "基于本项目包生成一个完整、可运行、可演示的高保真 HTML 原型。",
                 "",
                 "## 最终交付",
-                "- 在项目根目录生成 `index.html`。",
-                "- 单文件可直接打开预览，包含 CSS 和 JS。",
+                *delivery_lines,
                 "- 页面、交互、视觉风格和参考图用途必须与本包资料一致。",
+                "- 所有页面遵循 AGENTS.md 的可管理原型约定：稳定 data-proto-id、页面声明和预览类型。",
+                "- 同文件多视图提供 PrototypeBridge.enter(stateId)，业务导航同步 data-proto-state，切换不得重载整页。",
                 "",
                 "## 推荐阅读顺序",
                 "1. `DESIGN.md`",
@@ -3870,7 +4721,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 {chr(10).join(asset_lines)}
 
 ## 实现要求
-- 页面必须能在最终 `index.html` 中通过导航或交互进入。
+{page_entry_req}
 - 请使用真实示例数据补齐列表、表格、卡片、状态、空态等内容。
 - 如果参考图模式为 `pixel`，尽量严格还原布局、比例、颜色和信息密度。
 - 如果参考图模式为 `style`，只借鉴视觉调性，不照搬结构。
@@ -3944,8 +4795,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
     def generate_index_html(self, manifest, username, repo):
         """生成 projects/index.html 列表页 HTML"""
-        mode_labels = {'preview': '纯净版', 'dev': '研发版', 'embedded': '内嵌版'}
-        mode_colors = {'preview': '#3b82f6', 'dev': '#8b5cf6', 'embedded': '#f59e0b'}
+        mode_labels = {'preview': '纯净版', 'pure': '纯净版', 'dev': '研发版', 'review': '研发版'}
+        mode_colors = {'preview': '#3b82f6', 'pure': '#3b82f6', 'dev': '#8b5cf6', 'review': '#8b5cf6'}
 
         cards_html = ''
         sorted_items = sorted(manifest, key=lambda x: x.get('publishedAt', ''), reverse=True)
@@ -3954,7 +4805,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             url = item.get('url', '#')
             published_at = item.get('publishedAt', '')[:10]
             mode = item.get('mode', 'preview')
-            mode_label = mode_labels.get(mode, mode)
+            mode_label = mode_labels.get(mode, '已发布')
             mode_color = mode_colors.get(mode, '#6b7280')
             cards_html += f'''
             <div class="card" onclick="window.open('{url}','_blank')">
@@ -4208,39 +5059,31 @@ function copyLink(url, btn) {{
     # ==================== 导出 API ====================
 
     def handle_export(self):
-        """触发本地导出，支持三种模式: preview / embedded / dev"""
+        """兼容旧调用方，所有产物使用本地项目的纯净版 / 研发版构建器。"""
         try:
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
 
             project_id = data.get('projectId', '')
-            mode = data.get('mode', 'preview')  # preview | embedded | dev
+            mode = self.normalize_export_mode(data.get('mode', 'preview'))
 
             if not project_id:
                 self.send_error_response("缺少 projectId")
                 return
 
-            project_dir = os.path.join(PROJECTS_DIR, project_id)
-            if not os.path.exists(project_dir):
-                self.send_error_response(f"项目不存在: {project_id}")
+            self.safe_ai_project_root(project_id)
+            if not self.require_ai_project_access(project_id):
                 return
 
             print(f"[导出] 项目: {project_id}, 模式: {mode}")
 
-            # 动态导入 export_project 模块
-            import importlib.util
-            ep_path = os.path.join(get_base_path(), 'export_project.py')
-            spec = importlib.util.spec_from_file_location("export_project", ep_path)
-            ep = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(ep)
-
-            export_dir = ep.export_project(project_id, mode=mode)
+            export_dir = self.build_ai_export(project_id, mode)
 
             # 自动打开导出目录（Windows）
             try:
                 import subprocess
-                subprocess.Popen(f'explorer "{os.path.abspath(export_dir)}"')
+                subprocess.Popen(['explorer', os.path.abspath(export_dir)])
             except Exception:
                 pass
 
@@ -4250,11 +5093,30 @@ function copyLink(url, btn) {{
                 'message': f'已导出到: {export_dir}'
             })
 
+        except (ValueError, FileNotFoundError) as e:
+            self.send_json_status({'success': False, 'error': str(e)}, 400 if isinstance(e, ValueError) else 404)
         except Exception as e:
             print(f"[错误] 导出失败: {e}")
             import traceback
             traceback.print_exc()
             self.send_error_response(str(e))
+
+    def normalize_export_mode(self, mode):
+        modes = {'preview': 'pure', 'dev': 'review', 'pure': 'pure', 'review': 'review'}
+        if not isinstance(mode, str) or mode not in modes:
+            raise ValueError('导出仅支持纯净版和研发版，内嵌版已移除')
+        return modes[mode]
+
+    def build_ai_export(self, project_id, mode):
+        self.register_ai_workbench(project_id)
+        root = self.safe_ai_project_root(project_id)
+        bundle = proto_meta.load_bundle(root)
+        output_parent = Path(get_base_path()) / 'exports'
+        output_parent.mkdir(parents=True, exist_ok=True)
+        output = tempfile.mkdtemp(prefix=f'ai-{mode}-', dir=output_parent)
+        builder = review_export.build_pure_export if mode == 'pure' else review_export.build_review_export
+        builder(root, bundle, output)
+        return output
 
     # ==================== GitHub 配置 API ====================
 
@@ -4264,6 +5126,7 @@ function copyLink(url, btn) {{
             config = load_config()
             gh = get_github_runtime_config()
             token = gh.get('token', '')
+            env_token = os.environ.get('PROTOTYPE_GITHUB_TOKEN') or os.environ.get('GITHUB_TOKEN') or ''
             # 打码显示
             masked_token = (token[:6] + '****' + token[-4:]) if len(token) > 10 else ('****' if token else '')
             self.send_json_response({
@@ -4272,7 +5135,8 @@ function copyLink(url, btn) {{
                 'repo': gh.get('repo', 'my-prototypes'),
                 'tokenMasked': masked_token,
                 'hasToken': bool(token),
-                'tokenSource': 'env' if token else ''
+                'tokenSource': 'env' if env_token else ('stored' if token else ''),
+                'tokenState': 'ready' if token else ('unreadable' if os.path.isfile(GITHUB_TOKEN_FILE) else 'missing')
             })
         except Exception as e:
             self.send_error_response(str(e))
@@ -4290,8 +5154,13 @@ function copyLink(url, btn) {{
             if 'github' not in config:
                 config['github'] = {}
 
-            # Token 不再写入 config.json，避免密钥落盘；仅在当前进程中临时可用。
+            # Token 不写入 config.json（避免密钥混入可共享配置）；持久化到本地 data/（DPAPI 加密，重启后仍可用）。
+            token_saved = False
             if data.get('token'):
+                token_saved = save_github_token(data['token'])
+                if not token_saved:
+                    self.send_json_response({'success': False, 'error': 'Token 未能保存到本地，请检查服务账户与目录权限后重试', 'tokenStored': False})
+                    return
                 os.environ['PROTOTYPE_GITHUB_TOKEN'] = data['token']
             if 'username' in data:
                 config['github']['username'] = data['username']
@@ -4303,7 +5172,8 @@ function copyLink(url, btn) {{
                 json.dump(config, f, ensure_ascii=False, indent=4)
 
             print(f"[GitHub] 配置已保存: {config['github']['username']}/{config['github']['repo']}")
-            self.send_json_response({'success': True, 'message': '配置已保存，Token 仅保存在当前进程环境变量中'})
+            msg = '配置已保存' + ('，Token 已安全存到本地（重启后仍可用）' if data.get('token') else '')
+            self.send_json_response({'success': True, 'message': msg, 'tokenStored': token_saved})
 
         except Exception as e:
             self.send_error_response(str(e))
@@ -4359,9 +5229,13 @@ function copyLink(url, btn) {{
             data = json.loads(body.decode('utf-8'))
 
             project_id = data.get('projectId', '')
-            mode = data.get('mode', 'preview')  # 导出模式: dev / preview / embedded
+            mode = self.normalize_export_mode(data.get('mode', 'preview'))
             if not project_id:
                 self.send_error_response("缺少 projectId")
+                return
+
+            self.safe_ai_project_root(project_id)
+            if not self.require_ai_project_access(project_id):
                 return
 
             gh = get_github_runtime_config()
@@ -4469,51 +5343,13 @@ function copyLink(url, btn) {{
 
             # ---- 4.5. 执行本地导出 ----
             print(f"[GitHub] 步骤 4.5/7: 按模式 '{mode}' 执行本地导出...")
-            import importlib.util
-            ep_path = os.path.join(get_base_path(), 'export_project.py')
-            spec = importlib.util.spec_from_file_location("export_project", ep_path)
-            ep = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(ep)
-
-            export_dir = ep.export_project(project_id, mode=mode)
+            export_dir = self.build_ai_export(project_id, mode)
             print(f"[GitHub] 导出目录: {export_dir}")
 
             # ---- 5. 上传项目文件 ----
             print(f"[GitHub] 步骤 5/7: 上传项目文件到 'projects/{project_id}/' 目录...")
-            def upload_file(local_path, remote_path):
-                with open(local_path, 'rb') as f:
-                    content_b64 = base64.b64encode(f.read()).decode()
-
-                file_api_url = f"{api_base}/repos/{username}/{repo}/contents/{remote_path}"
-
-                # Check if file exists to get SHA for update
-                existing = session.get(file_api_url, timeout=10)
-                payload = {
-                    'message': f'Update prototype: {project_id}',
-                    'content': content_b64,
-                    'branch': default_branch
-                }
-                if existing.status_code == 200:
-                    payload['sha'] = existing.json().get('sha', '')
-                    print(f"[GitHub] 更新文件: {remote_path}")
-                else:
-                    print(f"[GitHub] 创建文件: {remote_path}")
-
-                put_resp = session.put(file_api_url, json=payload, timeout=30)
-                if put_resp.status_code not in (200, 201):
-                    raise Exception(f"上传文件失败 {remote_path}: {put_resp.json().get('message', put_resp.text)}")
-                print(f"[GitHub] 文件 '{remote_path}' 上传成功。")
-
-            # 遍历 export_dir 下的所有文件并上传
-            if os.path.exists(export_dir):
-                for root_dir, _, files in os.walk(export_dir):
-                    for file_name in files:
-                        local_path = os.path.join(root_dir, file_name)
-                        rel_path = os.path.relpath(local_path, export_dir).replace('\\', '/')
-                        remote_path = f"projects/{project_id}/{rel_path}"
-                        upload_file(local_path, remote_path)
-            else:
-                raise Exception(f"导出目录不存在: {export_dir}")
+            github_upload_dir(session, api_base, username, repo, default_branch,
+                              export_dir, f"projects/{project_id}")
 
             print(f"[GitHub] 项目文件上传完成。")
 
@@ -4562,25 +5398,287 @@ function copyLink(url, btn) {{
                 'message': f'发布成功！约 1-3 分钟后链接生效: {pages_url_result}'
             })
 
+        except (ValueError, FileNotFoundError) as e:
+            self.send_json_status({'success': False, 'error': str(e)}, 400 if isinstance(e, ValueError) else 404)
         except Exception as e:
             print(f"[错误] GitHub 发布失败: {e}")
             import traceback
             traceback.print_exc()
             self.send_error_response(f"GitHub 发布失败: {str(e)}")
 
+    # ==================== 外部项目评审壳发布 API ====================
 
-print(f"=" * 50)
-print(f"原型生成器服务启动")
-print(f"地址: http://localhost:{PORT}/src/")
-print(f"项目目录: {os.path.abspath(PROJECTS_DIR)}")
-print(f"=" * 50)
+    def sync_ai_publication(self, item):
+        """统一发布仍更新 AI 项目原 record / 列表，保留既有分享链接身份。"""
+        if not item or item.get('source') != 'ai':
+            return
+        root = self.safe_ai_project_root(item['aiProjectId'])
+        fields = {'github_url': item.get('github_url'), 'github_published_at': item.get('github_published_at'),
+                  'github_mode': item.get('github_publish_mode'), 'github_publish_mode': item.get('github_publish_mode')}
+        record = proto_meta.read_json(root / 'record.json', {})
+        if not isinstance(record, dict):
+            record = {}
+        for key, value in fields.items():
+            if value:
+                record[key] = value
+            else:
+                record.pop(key, None)
+        proto_meta.write_json_atomic(root / 'record.json', record)
+        listing = proto_meta.read_json(Path(PROJECTS_FILE), [])
+        if isinstance(listing, list):
+            for project in listing:
+                if isinstance(project, dict) and project.get('id') == item['aiProjectId']:
+                    for key, value in fields.items():
+                        if value:
+                            project[key] = value
+                        else:
+                            project.pop(key, None)
+                    proto_meta.write_json_atomic(Path(PROJECTS_FILE), listing)
+                    break
 
-socketserver.TCPServer.allow_reuse_address = True
+    def handle_ext_publish_status(self, query):
+        """查询外部项目评审壳发布状态（读登记表，供 viewer 悬浮工具栏展示）。"""
+        pid = query.get('projectId', [''])[0]
+        if not self.require_registered_project_access(pid):
+            return
+        item = load_external_registry()['projects'].get(pid)
+        if not item:
+            self.send_json_status({'ok': False, 'error': '项目未登记'}, 404)
+            return
+        self.send_json_response({'ok': True, 'published': bool(item.get('github_url')),
+                                 'url': item.get('github_url', ''),
+                                 'publishedAt': item.get('github_published_at', ''),
+                                 'mode': item.get('github_publish_mode', '')})
+
+    def handle_ext_publish(self):
+        """发布已登记外部项目为 GitHub Pages 评审壳（交互原型 + PRD + 标注气泡）。"""
+        try:
+            data = self.read_json_body()
+        except Exception:
+            self.send_json_status({'ok': False, 'error': '请求体不是有效 JSON'}, 400)
+            return
+        pid = str(data.get('extId', ''))
+        if not self.require_registered_project_access(pid):
+            return
+        mode = str(data.get('mode', 'review'))
+        if mode not in ('review', 'pure'):
+            self.send_json_status({'ok': False, 'error': "mode 仅支持 'review'（研发版）/ 'pure'（纯净版）"}, 400)
+            return
+        root = external_root_for(pid)
+        if root is None:
+            self.send_json_status({'ok': False, 'error': '项目未登记或目录已失效'}, 404)
+            return
+        gh = get_github_runtime_config()
+        token, username, repo = gh.get('token', ''), gh.get('username', ''), gh.get('repo', 'my-prototypes')
+        if not token or not username:
+            self.send_json_status({'ok': False, 'error': '需要先配置 GitHub Token 才能发布',
+                                   'needGithubConfig': True}, 400)
+            return
+        try:
+            bundle = proto_meta.ensure_bundle(root)
+            proto_meta.ensure_project_id(root, bundle, pid)
+            proto_meta.ensure_pages_registered(root, bundle)
+        except ValueError as e:
+            self.send_json_status({'ok': False, 'error': str(e)}, 409)
+            return
+        tmp_dir = tempfile.mkdtemp(prefix='review-export-')
+        try:
+            api_base = 'https://api.github.com'
+            session = github_api_session(token)
+            version_label = '研发版评审壳' if mode == 'review' else '纯净版'
+            print(f"[GitHub] 开始发布{version_label} '{pid}' 到 '{username}/{repo}'")
+            default_branch = github_ensure_pages(session, api_base, username, repo)
+            published_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            if mode == 'pure':
+                built = review_export.build_pure_export(root, bundle, tmp_dir)
+            else:
+                built = review_export.build_review_export(root, bundle, tmp_dir, published_at=published_at)
+            print(f"[GitHub] {version_label}构建完成，共 {len(built['files'])} 个文件，开始上传...")
+            registry = load_external_registry()
+            item = registry['projects'].get(pid)
+            remote_id = (item.get('github_remote_id') or pid) if item else pid
+            github_upload_dir(session, api_base, username, repo, default_branch,
+                              tmp_dir, f"projects/{remote_id}")
+            pages_url = f"https://{username}.github.io/{repo}/projects/{remote_id}/"
+            if item:
+                item['github_url'] = pages_url
+                item['github_published_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                item['github_publish_mode'] = mode
+                save_external_registry(registry)
+                self.sync_ai_publication(item)
+            try:
+                self.update_github_listing(session, api_base, username, repo, default_branch,
+                                           project_id=remote_id,
+                                           project_name=bundle['project'].get('name', pid),
+                                           project_url=pages_url, mode=mode, remove=False)
+            except Exception as e:
+                print(f"[GitHub] 警告: 更新列表页失败（非致命错误）: {e}")
+            print(f"[GitHub] {version_label} '{pid}' 发布完成: {pages_url}")
+            self.send_json_response({'ok': True, 'url': pages_url,
+                                     'publishedAt': item.get('github_published_at', '') if item else '',
+                                     'message': f'发布成功！约 1-3 分钟后链接生效: {pages_url}'})
+        except Exception as e:
+            print(f"[错误] 评审壳发布失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_status({'ok': False, 'error': f'发布失败: {e}'}, 500)
+        finally:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def handle_ext_export(self, query):
+        """本地导出下载（GET）：单页面纯净版回单个 HTML 文件，其余一律打 ZIP 包。"""
+        import io
+        import zipfile
+        pid = str(query.get('extId', [''])[0])
+        if not self.require_registered_project_access(pid):
+            return
+        mode = str(query.get('mode', ['pure'])[0])
+        if mode not in ('pure', 'review'):
+            self.send_json_status({'ok': False, 'error': "mode 仅支持 'pure'（纯净版）/ 'review'（研发版）"}, 400)
+            return
+        root = external_root_for(pid)
+        if root is None:
+            self.send_json_status({'ok': False, 'error': '项目未登记或目录已失效'}, 404)
+            return
+        try:
+            bundle = proto_meta.ensure_bundle(root)
+            proto_meta.ensure_project_id(root, bundle, pid)
+            proto_meta.ensure_pages_registered(root, bundle)
+        except ValueError as e:
+            self.send_json_status({'ok': False, 'error': str(e)}, 409)
+            return
+        item = load_external_registry()['projects'].get(pid) or {}
+        base_name = str(item.get('name') or bundle['project'].get('name') or pid).strip() or pid
+        version_label = '纯净版' if mode == 'pure' else '研发版'
+        tmp_dir = tempfile.mkdtemp(prefix='ext-export-')
+        try:
+            if mode == 'pure':
+                built = review_export.build_pure_export(root, bundle, tmp_dir)
+            else:
+                built = review_export.build_review_export(root, bundle, tmp_dir)
+            # 单页面纯净版：直接下载原型页面本身；其余（多页纯净版 / 研发版）打 ZIP
+            if mode == 'pure' and built.get('htmlCount') == 1:
+                html_rel = next((rel for rel in built['files']
+                                 if rel.lower().endswith('.html') and rel != 'index.html'), 'index.html')
+                payload = (Path(tmp_dir) / html_rel).read_bytes()
+                filename = f'{base_name}.html'
+                content_type = 'text/html; charset=utf-8'
+            else:
+                buffer = io.BytesIO()
+                with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    for rel in built['files']:
+                        zf.write(Path(tmp_dir) / rel, rel)
+                payload = buffer.getvalue()
+                filename = f'{base_name}-{version_label}.zip'
+                content_type = 'application/zip'
+            encoded = urllib.parse.quote(filename)
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Disposition', f"attachment; filename*=UTF-8''{encoded}")
+            self.send_header('Content-Length', str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            print(f"[导出] 外部项目 '{pid}' {version_label}已导出: {filename}（{len(payload)} 字节）")
+        except Exception as e:
+            print(f"[错误] 外部项目导出失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_status({'ok': False, 'error': f'导出失败: {e}'}, 500)
+        finally:
+            import shutil
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def handle_ext_unpublish(self):
+        """取消发布外部项目评审壳：远端删除 + 列表移除 + 本地记录清除。"""
+        try:
+            data = self.read_json_body()
+        except Exception:
+            self.send_json_status({'ok': False, 'error': '请求体不是有效 JSON'}, 400)
+            return
+        pid = str(data.get('extId', ''))
+        if not self.require_registered_project_access(pid):
+            return
+        registry = load_external_registry()
+        if pid not in registry['projects']:
+            self.send_json_status({'ok': False, 'error': '项目未登记'}, 404)
+            return
+        gh = get_github_runtime_config()
+        token, username, repo = gh.get('token', ''), gh.get('username', ''), gh.get('repo', 'my-prototypes')
+        if not token or not username:
+            self.send_json_status({'ok': False, 'error': '需要先配置 GitHub Token 才能取消发布',
+                                   'needGithubConfig': True}, 400)
+            return
+        try:
+            api_base = 'https://api.github.com'
+            session = github_api_session(token)
+            repo_info = session.get(f"{api_base}/repos/{username}/{repo}", timeout=15).json()
+            default_branch = repo_info.get('default_branch', 'main')
+            print(f"[GitHub] 取消发布评审壳: {pid}")
+            remote_id = registry['projects'][pid].get('github_remote_id') or pid
+            # 递归列出 projects/<extId>/ 下所有文件并逐一删除
+            pending = [f"{api_base}/repos/{username}/{repo}/contents/projects/{remote_id}"]
+            while pending:
+                resp = session.get(pending.pop(), timeout=15)
+                if resp.status_code != 200:
+                    continue
+                for f in resp.json():
+                    if f.get('type') == 'dir':
+                        pending.append(f['url'])
+                    elif f.get('type') == 'file':
+                        del_resp = session.delete(f['url'], json={
+                            'message': f'Remove prototype: {pid}',
+                            'sha': f['sha'],
+                            'branch': default_branch
+                        }, timeout=20)
+                        if del_resp.status_code in (200, 201):
+                            print(f"[GitHub] 已删除: {f['path']}")
+                        else:
+                            print(f"[GitHub] 删除失败: {f['path']} ({del_resp.status_code})")
+            try:
+                self.update_github_listing(session, api_base, username, repo, default_branch,
+                                           project_id=remote_id, project_name='', project_url='', mode='', remove=True)
+            except Exception as e:
+                print(f"[GitHub] 警告: 更新列表页失败（非致命错误）: {e}")
+            item = registry['projects'].get(pid)
+            if item:
+                item.pop('github_url', None)
+                item.pop('github_published_at', None)
+                item.pop('github_publish_mode', None)
+                save_external_registry(registry)
+                self.sync_ai_publication(item)
+            self.send_json_response({'ok': True, 'message': '已取消发布，GitHub 文件已删除'})
+        except Exception as e:
+            print(f"[错误] 取消评审壳发布失败: {e}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_status({'ok': False, 'error': f'取消发布失败: {e}'}, 500)
+
+
+class PrototypeHTTPServer(http.server.ThreadingHTTPServer):
+    allow_reuse_address = os.name != 'nt'
+
+    def server_bind(self):
+        if os.name == 'nt':
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
 
 try:
-    with socketserver.TCPServer(("", PORT), CustomHandler) as httpd:
+    with PrototypeHTTPServer(("", PORT), CustomHandler) as httpd:
+        print(f"=" * 50)
+        print(f"原型生成器服务启动")
+        print(f"地址: http://localhost:{PORT}/src/")
+        print(f"项目目录: {os.path.abspath(PROJECTS_DIR)}")
+        print(f"=" * 50)
         httpd.serve_forever()
 except KeyboardInterrupt:
     print("\n服务已停止")
+except OSError as e:
+    if e.errno in (48, 98, 10013, 10048):
+        print(f"\n端口 {PORT} 已被占用，请先关闭旧的原型生成器服务，再重新启动。")
+    else:
+        print(f"\n服务错误: {e}")
+    sys.exit(1)
 except Exception as e:
     print(f"\n服务错误: {e}")
+    sys.exit(1)

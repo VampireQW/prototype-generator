@@ -22,6 +22,7 @@ let modelsList = [];
 let currentModel = null;
 let selectedModelId = '';
 let designSystemsList = [];
+let customColorFields = new Set();
 let skillsList = [];
 let pptInputMode = 'import'; // import | pages
 let activeReferenceDropZoneId = null;
@@ -122,19 +123,263 @@ const $ = (id) => document.getElementById(id);
 
 // ==================== 初始化 ====================
 document.addEventListener('DOMContentLoaded', async () => {
-    // 检查登录状态
-    await checkAuth();
     setupEventListeners();
-    await Promise.all([loadModels(), loadDesignSystems(), loadSkills()]);
-    addPage(); // 默认添加一个页面
-
+    HomeUI.init();
+    addPage();
+    await checkAuth();
     const params = new URLSearchParams(window.location.search);
+    let homeSource = 'local';
+    try { homeSource = localStorage.getItem('prototype-home-source') || 'local'; } catch (_) { /* 使用默认来源 */ }
     if (params.get('tab') === 'team' && currentUser) {
+        switchProjectSource('ai');
         await switchProjectTab('team');
-    } else {
-        loadProjects();
-    }
+    } else switchProjectSource(homeSource);
+    await Promise.all([loadModels(), loadDesignSystems(), loadSkills()]);
+    HomeUI.summary();
 });
+
+// ==================== 外部项目（任意文件夹原型，可标注） ====================
+
+function toggleExternalAdd() {
+    const box = $('externalAddBox');
+    box.classList.toggle('hidden');
+    $('extAddToggleBtn').setAttribute('aria-expanded', String(!box.classList.contains('hidden')));
+    if (!box.classList.contains('hidden')) $('externalPathInput').focus();
+}
+
+// 顶部「选择文件夹/粘贴路径」操作区默认收起为 header 右上角小按钮
+function collapseExternalAddPanel() {
+    $('externalAddPanel').classList.add('hidden');
+    $('extAddPanelToggle').setAttribute('aria-expanded', 'false');
+    $('externalAddBox').classList.add('hidden');
+    $('extAddToggleBtn').setAttribute('aria-expanded', 'false');
+    if ($('externalAddPanel').contains(document.activeElement)) $('extAddPanelToggle').focus({preventScroll: true});
+}
+function toggleExternalAddPanel() {
+    if ($('externalAddPanel').classList.contains('hidden')) {
+        $('externalAddPanel').classList.remove('hidden');
+        $('extAddPanelToggle').setAttribute('aria-expanded', 'true');
+        $('externalPickBtn').focus({preventScroll: true});
+    } else collapseExternalAddPanel();
+}
+
+let externalLoading = false;
+let externalAdding = false;
+let externalProjects = [];
+function externalStatus(text, error = false) {
+    $('externalStatus').textContent = text;
+    $('externalStatus').dataset.error = String(error);
+}
+async function externalPost(route, body) {
+    const response = await fetch('/api/external/' + route, {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) throw new Error(data.error || '操作失败');
+    return data;
+}
+async function loadExternalProjects() {
+    if (externalLoading) return;
+    externalLoading = true;
+    HomeUI.loading($('externalList'));
+    document.querySelector('[aria-label="刷新本地项目"]').classList.add('is-loading');
+    $('externalList').setAttribute('aria-busy', 'true');
+    externalStatus('正在扫描…');
+    try {
+        const resp = await fetch('/api/external/list');
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error || '无法读取本地项目');
+        renderExternalProjects(data.items || [], data.discovered || []);
+        const roots = $('externalRoots');
+        roots.replaceChildren();
+        for (const path of data.roots || []) {
+            const row = document.createElement('div'); row.className = 'ep-root';
+            row.innerHTML = HomeUI.icon('folder');
+            const label = document.createElement('span'); label.className = 'ep-root-path'; label.textContent = path; label.title = path;
+            const button = document.createElement('button'); button.className = 'app-icon-button ep-root-remove'; button.type = 'button'; button.textContent = '×';
+            button.setAttribute('aria-label', '停止监视 ' + path);
+            button.title = '停止监视 ' + path;
+            button.onclick = async () => {
+                if (!confirm('停止监视此目录？已连接项目和磁盘文件会保留。')) return;
+                try { await externalPost('roots/remove', {path}); loadExternalProjects(); }
+                catch (e) { externalStatus(e.message, true); }
+            };
+            row.append(label, button); roots.append(row);
+        }
+        const errors = data.errors || [];
+        externalStatus(errors.length ? errors.map(e => `${e.root}：${e.error}`).join('；') :
+            `${data.items.length} 个已连接 · ${(data.discovered || []).length} 个新发现`, errors.length > 0);
+    } catch (e) {
+        externalStatus(e.message, true);
+        if (!externalProjects.length) HomeUI.empty($('externalList'), '项目读取失败', e.message, '重试', loadExternalProjects, 'error');
+    }
+    finally { externalLoading = false; $('externalList').setAttribute('aria-busy', 'false'); document.querySelector('[aria-label="刷新本地项目"]').classList.remove('is-loading'); }
+}
+window.addEventListener('focus', () => { if (!document.hidden) loadExternalProjects(); });
+document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !$('externalAddPanel').classList.contains('hidden')) collapseExternalAddPanel();
+});
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadExternalProjects(); });
+
+function renderExternalProjects(items, discovered = []) {
+    const box = $('externalList');
+    if (!box) return;
+    if (items) externalProjects = [...items, ...discovered];
+    const query = ($('externalSearch')?.value || '').trim().toLocaleLowerCase();
+    const timestamp = (item) => {
+        const created = Date.parse(item.createdAt);
+        if (Number.isFinite(created)) return created;
+        const added = Date.parse(item.addedAt);
+        return Number.isFinite(added) ? added : 0;
+    };
+    const entries = externalProjects.filter(item =>
+        `${item.name || ''} ${item.root || ''}`.toLocaleLowerCase().includes(query) &&
+        (($('externalFilter')?.value || 'all') === 'all' ||
+         ($('externalFilter').value === 'discovered' && item.discovered) ||
+         ($('externalFilter').value === 'connected' && item.exists && !item.discovered) ||
+         ($('externalFilter').value === 'missing' && !item.exists))
+    ).sort((a, b) => timestamp(b) - timestamp(a) ||
+        (a.name || '').localeCompare(b.name || '', 'zh-CN', {numeric: true}));
+    HomeUI.clear(box);
+    const status = $('externalSearchStatus');
+    status.hidden = !query;
+    status.textContent = query ? `找到 ${entries.length} 个项目` : '';
+    $('localResultCount').hidden = !!query;
+    HomeUI.updateCounts('local', externalProjects.length, entries.length);
+    if (!entries.length) {
+        const filtered = !!query || $('externalFilter')?.value !== 'all';
+        HomeUI.empty(box, filtered ? '没有匹配的项目' : '还没有本地原型', filtered ? '换个关键词，或清除筛选后查看全部项目。' : '添加一个项目文件夹，开始预览和标注。', filtered ? '清除筛选' : '添加本地项目', () => { if (filtered) { $('externalSearch').value = ''; $('externalFilter').value = 'all'; renderExternalProjects(); } else toggleExternalAddPanel(); });
+    }
+    for (const item of entries) box.append(buildExternalCard(item));
+}
+
+// 项目卡片与 AI 项目列表共用 project-card 卡片语言（名称 + 状态徽标 + 底部操作条）
+function buildExternalCard(item) {
+    const open = () => item.discovered ? connectExternalProject(item) : openExternalProject(item.projectId);
+    const { article, actions } = HomeUI.card({
+        id: item.projectId || item.root, name: item.name, kind: 'local',
+        badge: item.discovered ? '新发现' : item.exists ? '已连接' : '目录失效',
+        tone: item.discovered ? 'warning' : item.exists ? 'success' : 'danger',
+        badgeIcon: item.discovered ? 'spark' : item.exists ? 'check' : 'error',
+        meta: item.exists ? `${item.pages} 个页面${HomeUI.formatDate(item.createdAt) ? ' · ' + HomeUI.formatDate(item.createdAt) : ''}` : '请检查项目路径',
+        detail: item.root, open, disabled: !item.exists, preview: { source: 'local', id: item.projectId }
+    });
+    if (item.discovered) {
+        actions.append(HomeUI.action('connect', `连接项目 ${item.name}`, open));
+    } else {
+        actions.append(
+            HomeUI.action('open', `预览 ${item.name}`, open, { disabled: !item.exists }),
+            HomeUI.action('publish', `发布 / 导出 ${item.name}`, () => openExtPublishModal(item), { disabled: !item.exists }),
+            HomeUI.more(item.name, [
+                ...(!item.exists ? [{icon: 'folder', label: '添加新的项目目录', handler: () => { toggleExternalAddPanel(); if ($('externalAddBox').classList.contains('hidden')) toggleExternalAdd(); }}] : []),
+                { icon: 'remove', label: '移出列表，保留磁盘文件', handler: () => removeExternalProject(item.projectId) },
+                { icon: 'delete', label: '删除项目及本地文件', danger: true, handler: () => deleteExternalProject(item.projectId, item.name, item.root) }
+            ])
+        );
+    }
+    return article;
+}
+
+const connectingProjects = new Set();
+async function connectExternalProject(item) {
+    if (connectingProjects.has(item.projectId)) return;
+    connectingProjects.add(item.projectId);
+    const card = [...document.querySelectorAll('#externalList .project-card')].find(el => el.dataset.projectId === item.projectId);
+    const badge = card?.querySelector('.project-badge');
+    card?.setAttribute('aria-busy', 'true');
+    card?.querySelectorAll('button').forEach(button => { button.disabled = true; });
+    if (badge) { badge.innerHTML = HomeUI.icon('clock'); badge.append(document.createTextNode('连接中')); }
+    try { const data = await externalPost('add', {path: item.root}); window.location.href = data.viewerUrl; }
+    catch (e) {
+        externalStatus(e.message, true);
+        card?.querySelectorAll('button').forEach(button => { button.disabled = false; });
+        if (badge) { badge.innerHTML = HomeUI.icon('spark'); badge.append(document.createTextNode('新发现')); }
+    } finally { connectingProjects.delete(item.projectId); card?.removeAttribute('aria-busy'); }
+}
+
+function openExternalProject(pid) {
+    window.open(`viewer.html?ext=${encodeURIComponent(pid)}`, '_blank');
+}
+
+async function pickExternalFolder() {
+    const button = $('externalPickBtn');
+    if (button.disabled) return;
+    button.disabled = true; button.textContent = '选择中…';
+    try {
+        const data = await externalPost('pick-folder', {});
+        if (!data.cancelled) { $('externalPathInput').value = data.path; await addExternalProject(); }
+    } catch (e) {
+        externalStatus(e.message, true);
+        $('externalAddPanel').classList.remove('hidden');
+        $('extAddPanelToggle').setAttribute('aria-expanded', 'true');
+        $('externalAddBox').classList.remove('hidden');
+        $('extAddToggleBtn').setAttribute('aria-expanded', 'true');
+    } finally { button.disabled = false; button.textContent = '选择文件夹'; }
+}
+
+async function addExternalProject() {
+    if (externalAdding) return;
+    const input = $('externalPathInput');
+    const raw = (input.value || '').trim().replace(/^"|"$/g, '');
+    if (!raw) { externalStatus('请先选择文件夹或粘贴路径', true); return; }
+    externalAdding = true; $('externalPathAddBtn').disabled = true;
+    try {
+        const data = await externalPost('roots/add', {path: raw});
+        input.value = '';
+        collapseExternalAddPanel();
+        if (data.connected) window.location.href = data.viewerUrl;
+        else await loadExternalProjects();
+    } catch (e) { externalStatus(e.message, true); }
+    finally { externalAdding = false; $('externalPathAddBtn').disabled = false; }
+}
+
+async function removeExternalProject(pid) {
+    const confirmed = await showAppConfirm({
+        title: '移出列表',
+        message: '从列表移除该外部项目？磁盘文件与标注数据不会被删除。',
+        confirmText: '移出列表',
+        tone: 'warning'
+    });
+    if (!confirmed) return;
+    try {
+        await externalPost('remove', {projectId: pid});
+        loadExternalProjects();
+    } catch (e) {
+        showToast('移除失败：' + e.message, 'error');
+    }
+}
+
+// 删除项目：两级确认，明确告知本地文件夹会一起删除且不可恢复
+async function deleteExternalProject(pid, name, root) {
+    const first = await showAppConfirm({
+        title: '删除项目',
+        message: `确定要删除项目「${name}」吗？\n\n删除同样意味着要把本地的文件夹一起删除：\n${root}\n\n文件夹里的全部页面和 .prototype 标注数据都会一起删除。`,
+        confirmText: '继续',
+        cancelText: '再想想',
+        tone: 'danger'
+    });
+    if (!first) return;
+    const second = await showAppConfirm({
+        title: '最后确认',
+        message: `本地文件夹将被永久删除，此操作不可恢复：\n${root}`,
+        confirmText: '永久删除',
+        cancelText: '取消',
+        tone: 'danger'
+    });
+    if (!second) return;
+    try {
+        const data = await externalPost('delete', {projectId: pid});
+        if (data.publishedUrl) {
+            showToast('项目已删除；GitHub 评审站不会自动下线，如需移除请到仓库删除对应目录', 'info');
+        } else {
+            showToast(data.folderDeleted ? '项目与本地文件夹已删除' : '登记已移除（本地文件夹原本就不存在）');
+        }
+        loadExternalProjects();
+    } catch (e) {
+        showToast('删除失败：' + e.message, 'error');
+        loadExternalProjects();
+    }
+}
 
 // ==================== 轻提示浮层 ====================
 let helpBubbleEl = null;
@@ -233,24 +478,39 @@ function setupEventListeners() {
 
     // 颜色选择器
     $('primaryColor').oninput = (e) => {
+        customColorFields.add('primaryColor');
         $('primaryColorValue').textContent = e.target.value;
-        if (!$('designSystemSelect')?.value) updateDesignSystemHint();
+        updateDesignSystemHint();
     };
     $('secondaryColor').oninput = (e) => {
+        customColorFields.add('secondaryColor');
         $('secondaryColorValue').textContent = e.target.value;
-        if (!$('designSystemSelect')?.value) updateDesignSystemHint();
+        updateDesignSystemHint();
     };
     if ($('backgroundMode')) {
-        $('backgroundMode').onchange = () => {
-            if (!$('designSystemSelect')?.value) updateDesignSystemHint();
-        };
+        $('backgroundMode').onchange = updateDesignSystemHint;
     }
+    $('customColorsToggle').onchange = () => {
+        if (!$('customColorsToggle').checked) customColorFields.clear();
+        updateDesignSystemHint();
+    };
 
     // 搜索
+    $('externalSearch').oninput = () => renderExternalProjects();
+    $('externalFilter').onchange = () => renderExternalProjects();
+    $('externalSearch').onkeydown = (e) => {
+        if (e.key === 'Escape' && !e.isComposing) {
+            e.preventDefault();
+            e.target.value = '';
+            renderExternalProjects();
+        }
+    };
     $('projectSearch').oninput = (e) => {
-        searchQuery = e.target.value.toLowerCase();
+        searchQuery = e.target.value.trim().toLocaleLowerCase();
         renderProjectList();
     };
+
+    $('projectSearch').onkeydown = e => { if (e.key === 'Escape' && !e.isComposing) { e.target.value = ''; searchQuery = ''; renderProjectList(); } };
 
     // 记录模态框关闭
     $('closeRecordModal').onclick = closeRecordModal;
@@ -275,12 +535,10 @@ function setupEventListeners() {
 // ==================== 项目管理 ====================
 function createNewProject() {
     // 重置表单
-    $('primaryColor').value = '#004fff';
-    $('primaryColorValue').textContent = '#004fff';
-    $('secondaryColor').value = '#10B981';
-    $('secondaryColorValue').textContent = '#10B981';
-    $('backgroundMode').value = 'light';
-    $('componentStyle').value = 'Ant Design';
+    if ($('projectNameInput')) $('projectNameInput').value = '';
+    $('customColorsToggle').checked = false;
+    customColorFields.clear();
+    $('backgroundMode').value = 'inherit';
     if ($('designSystemSelect')) $('designSystemSelect').value = '';
     if ($('skillSelect')) $('skillSelect').value = 'web-prototype';
     pptInputMode = 'import';
@@ -295,134 +553,76 @@ function createNewProject() {
     $('pageCardsContainer').innerHTML = '';
     addPage();
 
-    $('headerTitle').textContent = '请输入您的设计灵感';
+    $('headerTitle').textContent = '新建项目';
     currentRecordProject = null;
 
     // 清空增量更新状态
     sourceProjectId = null;
     originalFormData = null;
     originalImageHashes = {};
+    HomeUI.show('new');
 }
 
-function loadProjects() {
-    if (!currentUser) {
-        // 未登录，用原始接口
-        fetch('/data/projects.json?t=' + Date.now())
-            .then(res => res.json())
-            .then(data => {
-                allProjects = data || [];
-                renderProjectList();
-            })
-            .catch(() => {
-                $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">暂无项目</div>';
-            });
-        return;
-    }
-
-    if (currentTab === 'my') {
-        fetch('/api/projects/my?t=' + Date.now())
-            .then(res => res.json())
-            .then(data => {
-                allProjects = data.projects || [];
-                renderProjectList();
-            })
-            .catch(() => {
-                $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">暂无项目</div>';
-            });
-    } else if (currentTab === 'team' && selectedTeamId) {
-        loadTeamProjects();
-    } else {
-        $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">请选择团队</div>';
-    }
+async function loadProjects() {
+    if (currentUser && currentTab === 'team') return loadTeamProjects();
+    const container = $('projectList');
+    if (container.getAttribute('aria-busy') === 'true') return;
+    HomeUI.loading(container);
+    const refresh = document.querySelector('[aria-label="刷新 AI 项目"]'); refresh.classList.add('is-loading');
+    container.setAttribute('aria-busy', 'true');
+    try {
+        const response = await fetch((currentUser ? '/api/projects/my' : '/data/projects.json') + '?t=' + Date.now());
+        if (!response.ok) throw new Error('无法读取项目，请稍后重试。');
+        const data = await response.json();
+        allProjects = Array.isArray(data) ? data : data.projects || [];
+        renderProjectList();
+    } catch (error) {
+        if (!allProjects.length) HomeUI.empty(container, '项目读取失败', error.message, '重试', loadProjects, 'error');
+        else showToast(error.message, 'error');
+    } finally { container.setAttribute('aria-busy', 'false'); refresh.classList.remove('is-loading'); }
 }
 
 function renderProjectList() {
     const container = $('projectList');
-    let filtered = allProjects;
-
-    if (searchQuery) {
-        filtered = allProjects.filter(p => p.name.toLowerCase().includes(searchQuery));
-    }
-
-    if (filtered.length === 0) {
-        container.innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">暂无项目</div>';
+    const filtered = allProjects.filter(p => String(p.name || '').toLocaleLowerCase().includes(searchQuery))
+        .sort((a, b) => (Date.parse(b.createdAt || b.date) || 0) - (Date.parse(a.createdAt || a.date) || 0));
+    HomeUI.updateCounts('ai', allProjects.length, filtered.length);
+    HomeUI.clear(container);
+    if (!filtered.length) {
+        HomeUI.empty(container, searchQuery ? '没有匹配的项目' : '还没有 AI 项目', searchQuery ? '换个关键词试试。' : '从一段设计需求开始，创建你的第一个原型。', searchQuery ? '清除搜索' : '新建项目', () => { if (searchQuery) { $('projectSearch').value = ''; searchQuery = ''; renderProjectList(); } else createNewProject(); }, 'spark');
         return;
     }
+    for (const project of filtered) {
+        const statuses = { generating: ['生成中', 'info', 'clock'], failed: ['生成失败', 'danger', 'error'], pending_external: ['待外部生成', 'warning', 'clock'] };
+        const [badge, tone, badgeIcon] = statuses[project.status] || ['已完成', 'success', 'check'];
+        const open = () => window.open(`viewer.html?project=${encodeURIComponent(project.id)}`, '_blank');
+        const { article, actions } = HomeUI.card({ id: project.id, name: project.name, kind: 'ai', badge, tone, badgeIcon,
+            meta: HomeUI.formatDate(project.createdAt || project.date) || project.date || '',
+            detail: [project.model_name, project.ownerName].filter(Boolean).join(' · ') || '原型项目', open,
+            preview: ['generating', 'pending_external', 'failed'].includes(project.status) ? null : { source: 'ai', id: project.id } });
+        const extraActions = [
+            { icon: 'edit', label: '编辑名称', handler: () => editProjectTitle(project.id, project.name) },
+            { icon: 'copy', label: '复制项目', handler: () => copyProject(project.id, project.name) },
+            { icon: 'history', label: '生成记录', handler: () => viewRecord(project.id) }
+        ];
+        if (currentUser && currentTab === 'my') extraActions.push({ icon: 'share', label: '分享到团队', handler: () => openShareModal(project.id) });
+        extraActions.push({ icon: 'delete', label: '移到回收站', danger: true, handler: () => deleteProject(project.id, project.name) });
+        actions.append(
+            HomeUI.action('open', `预览 ${project.name}`, open),
+            HomeUI.action('publish', `发布 / 导出 ${project.name}`, () => openExportModal(project.id, project.name)),
+            HomeUI.more(project.name, extraActions)
+        );
+        container.append(article);
+    }
+}
 
-    container.innerHTML = filtered.map(p => {
-        // 状态标签
-        let statusHTML = '';
-        if (p.status === 'generating') {
-            statusHTML = `
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-600 animate-pulse">
-                    <i class="fas fa-spinner fa-spin text-[10px]"></i>生成中
-                </span>`;
-        } else if (p.status === 'failed') {
-            statusHTML = `
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-50 text-red-500">
-                    <i class="fas fa-times-circle text-[10px]"></i>失败
-                </span>`;
-        } else if (p.status === 'pending_external') {
-            statusHTML = `
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-600">
-                    <i class="fas fa-clock text-[10px]"></i>待生成
-                </span>`;
-        } else {
-            statusHTML = `
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-50 text-green-600">
-                    <i class="fas fa-check-circle text-[10px]"></i>已完成
-                </span>`;
-        }
-
-        const safeName = p.name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-        const ownerHTML = p.ownerName ? `<p class="text-[11px] text-purple-400 mt-0.5 flex items-center gap-1"><i class="fas fa-user text-[9px]"></i>${p.ownerName}</p>` : '';
-
-        return `
-        <div class="project-card group bg-white border border-gray-200 rounded-xl overflow-hidden hover:shadow-md hover:border-indigo-200 transition-all duration-200 cursor-pointer"
-             onclick="window.open('viewer.html?project=${encodeURIComponent(p.id)}', '_blank')">
-            <div class="p-3.5">
-                <div class="flex items-start justify-between gap-2 mb-2">
-                    <p class="text-sm font-semibold text-gray-800 line-clamp-2 leading-snug flex-1" title="${p.name}">${p.name}</p>
-                    ${statusHTML}
-                </div>
-                <p class="text-xs text-gray-400">${p.date}</p>
-                ${p.model_name ? `<p class="text-[11px] text-indigo-400 mt-0.5 flex items-center gap-1"><i class="fas fa-robot text-[9px]"></i>${p.model_name}</p>` : ''}
-                ${ownerHTML}
-            </div>
-            <div class="flex items-center border-t border-gray-100 bg-gray-50/50 px-2 py-1.5 transition-opacity duration-150"
-                 onclick="event.stopPropagation()">
-                <button onclick="editProjectTitle('${p.id}', '${safeName}')"
-                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-blue-600 rounded hover:bg-blue-50 transition-colors" title="编辑">
-                    <i class="fas fa-edit"></i>
-                </button>
-                <button onclick="copyProject('${p.id}', '${safeName}')"
-                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-purple-600 rounded hover:bg-purple-50 transition-colors" title="复制">
-                    <i class="fas fa-copy"></i>
-                </button>
-                <button onclick="window.open('viewer.html?project=${encodeURIComponent(p.id)}', '_blank')"
-                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-indigo-600 rounded hover:bg-indigo-50 transition-colors" title="预览">
-                    <i class="fas fa-eye"></i>
-                </button>
-                <button onclick="viewRecord('${p.id}')"
-                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-green-600 rounded hover:bg-green-50 transition-colors" title="记录">
-                    <i class="fas fa-history"></i>
-                </button>
-                <button onclick="openExportModal('${p.id}', '${safeName}')"
-                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-orange-500 rounded hover:bg-orange-50 transition-colors" title="导出 & 分享">
-                    <i class="fas fa-paper-plane"></i>
-                </button>
-                ${currentUser && currentTab === 'my' ? `<button onclick="openShareModal('${p.id}')"
-                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-cyan-600 rounded hover:bg-cyan-50 transition-colors" title="分享到团队">
-                    <i class="fas fa-share-alt"></i>
-                </button>` : ''}
-                <button onclick="deleteProject('${p.id}', '${safeName}')"
-                        class="flex-1 flex items-center justify-center gap-1 py-1 text-xs text-gray-400 hover:text-red-500 rounded hover:bg-red-50 transition-colors" title="删除">
-                    <i class="fas fa-trash-alt"></i>
-                </button>
-            </div>
-        </div>
-    `;
-    }).join('');
+function showGeneratedProjects() {
+    currentTab = 'my';
+    $('tabMy').className = 'scope-tab is-active'; $('tabTeam').className = 'scope-tab';
+    $('teamSelector').classList.add('hidden');
+    $('projectSearch').value = ''; searchQuery = '';
+    switchProjectSource('ai');
+    HomeUI.show('projects');
 }
 
 async function deleteProject(id, name) {
@@ -634,6 +834,9 @@ async function viewRecord(projectId) {
 
 function renderRecordModal(record, projectId) {
     const container = $('recordContent');
+    const recordGlobal = record.global || {};
+    const preset = designSystemsList.find(ds => ds.id === (recordGlobal.designSystemId || record.designSystemId || 'default'))?.preset;
+    const design = DesignSettings.resolve(recordGlobal, preset);
 
     // 全局设置
     let html = `
@@ -644,16 +847,16 @@ function renderRecordModal(record, projectId) {
             <div class="grid grid-cols-2 gap-3 text-sm">
                 <div class="flex items-center gap-2">
                     <span class="text-gray-500">主色调:</span>
-                    <span class="w-5 h-5 rounded" style="background:${record.global?.primaryColor || '#004fff'}"></span>
-                    <span class="font-mono">${record.global?.primaryColor || '#004fff'}</span>
+                    <span class="w-5 h-5 rounded" style="background:${design.primaryColor}"></span>
+                    <span class="font-mono">${design.primaryColor}</span>
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-gray-500">强调色:</span>
-                    <span class="w-5 h-5 rounded" style="background:${record.global?.secondaryColor || '#10B981'}"></span>
-                    <span class="font-mono">${record.global?.secondaryColor || '#10B981'}</span>
+                    <span class="w-5 h-5 rounded" style="background:${design.secondaryColor}"></span>
+                    <span class="font-mono">${design.secondaryColor}</span>
                 </div>
-                <div><span class="text-gray-500">背景模式:</span> ${record.global?.backgroundMode || 'light'}</div>
-                <div><span class="text-gray-500">组件风格:</span> ${record.global?.componentStyle || 'Ant Design'}</div>
+                <div><span class="text-gray-500">主题模式:</span> ${{ inherit: '跟随风格', light: '浅色', dark: '深色' }[design.themeMode]}</div>
+                <div><span class="text-gray-500">配色:</span> ${design.colorMode === 'custom' ? '自定义' : '跟随风格'}</div>
             </div>
         </div>
     `;
@@ -709,6 +912,10 @@ async function regenerateFromRecord() {
 
     const record = currentRecordProject.record;
     closeRecordModal();
+    const savedProject = allProjects.find(project => project.id === currentRecordProject.id);
+    let savedName = savedProject?.name || record.global?.projectName || '';
+    if (savedProject?.status === 'pending_external') savedName = savedName.replace(/ \((待外部生成|AI IDE待生成)\)$/, '');
+    if ($('projectNameInput')) $('projectNameInput').value = savedName;
 
     // 保存来源项目ID（用于增量更新）
     sourceProjectId = currentRecordProject.id;
@@ -722,13 +929,13 @@ async function regenerateFromRecord() {
 
     // 恢复全局设置
     if (record.global) {
-        $('primaryColor').value = record.global.primaryColor || '#004fff';
-        $('primaryColorValue').textContent = record.global.primaryColor || '#004fff';
-        $('secondaryColor').value = record.global.secondaryColor || '#10B981';
-        $('secondaryColorValue').textContent = record.global.secondaryColor || '#10B981';
-        $('backgroundMode').value = record.global.backgroundMode || 'light';
-        $('componentStyle').value = record.global.componentStyle || 'Ant Design';
         if ($('designSystemSelect')) $('designSystemSelect').value = record.global.designSystemId || record.designSystemId || '';
+        const restored = DesignSettings.resolve(record.global, getSelectedDesignPreset());
+        customColorFields = new Set(restored.customColorFields);
+        $('customColorsToggle').checked = restored.colorMode === 'custom';
+        $('primaryColor').value = restored.primaryColor;
+        $('secondaryColor').value = restored.secondaryColor;
+        $('backgroundMode').value = restored.themeMode;
         if ($('skillSelect')) $('skillSelect').value = record.global.skillId || record.skillId || 'web-prototype';
         renderDesignSystemSelect();
         updateDesignSystemHint();
@@ -747,7 +954,7 @@ async function regenerateFromRecord() {
 
             const div = document.createElement('div');
             div.id = `page-${id}`;
-            div.className = 'bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden';
+            div.className = 'creation-page-card';
             div.innerHTML = html;
             $('pageCardsContainer').appendChild(div);
             setupPageListeners(id);
@@ -859,7 +1066,9 @@ async function regenerateFromRecord() {
         imagesCounts: pages.map(id => pageFiles[id]?.length || 0)
     });
 
-    $('headerTitle').textContent = '已加载历史记录 - 可修改后重新生成（支持增量更新）';
+    $('headerTitle').textContent = '继续编辑项目';
+    HomeUI.show('new');
+    HomeUI.summary();
     showToast('已加载历史记录，修改后将智能增量生成');
 }
 
@@ -875,7 +1084,7 @@ function addPage() {
 
     const div = document.createElement('div');
     div.id = `page-${id}`;
-    div.className = 'bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden';
+    div.className = 'creation-page-card';
     div.innerHTML = html;
 
     $('pageCardsContainer').appendChild(div);
@@ -1420,7 +1629,7 @@ function renderDesignSystemMenu(ordered) {
         {
             id: '',
             label: '默认风格',
-            categoryLabel: '使用当前主题色',
+            categoryLabel: '中性现代',
             colors: defaultColors
         },
         ...ordered
@@ -1464,14 +1673,27 @@ function selectDesignSystem(id) {
 }
 
 function getDefaultSwatchColors() {
-    return [
-        $('primaryColor') ? $('primaryColor').value : '#004fff',
-        $('secondaryColor') ? $('secondaryColor').value : '#10b981',
-        $('backgroundMode') && $('backgroundMode').value === 'dark' ? '#111827' : '#f8fafc',
-        '#ffffff',
-        '#111827',
-        '#e5e7eb'
-    ];
+    return DesignSettings.resolve({}, designSystemsList.find(ds => ds.id === 'default')?.preset).effectivePalette;
+}
+
+function getSelectedDesignPreset() {
+    const id = $('designSystemSelect')?.value || 'default';
+    return designSystemsList.find(ds => ds.id === id)?.preset || DesignSettings.fallback;
+}
+
+function getEffectiveDesignSettings() {
+    return DesignSettings.resolve({
+        designSettingsVersion: 2,
+        colorMode: $('customColorsToggle').checked ? 'custom' : 'preset',
+        customColorFields: [...customColorFields],
+        themeMode: $('backgroundMode').value,
+        primaryColor: $('primaryColor').value,
+        secondaryColor: $('secondaryColor').value,
+        designSystemId: $('designSystemSelect')?.value || '',
+        designSystemName: getSelectedDesignSystemName(),
+        skillId: $('skillSelect')?.value || 'web-prototype',
+        skillName: getSelectedSkillName()
+    }, getSelectedDesignPreset());
 }
 
 function renderSkillSelect() {
@@ -1525,16 +1747,21 @@ function escapeHtml(str) {
 function updateDesignSystemHint() {
     const hint = $('designSystemHelp');
     const id = $('designSystemSelect') ? $('designSystemSelect').value : '';
-    if (!id) {
-        if (hint) hint.dataset.help = '未选择时使用表单里的主题色、辅助色和组件风格作为主要视觉约束。';
-        renderDesignSystemSwatches({ colors: getDefaultSwatchColors() });
-        updateDesignSystemPickerButton(null);
-        return;
-    }
-    if (hint) hint.dataset.help = '已选择设计系统：品牌色彩、字体和组件语言优先；主题色/辅助色只作为微调偏好。';
+    if (hint) hint.dataset.help = '配色、字体和组件语言跟随视觉风格；自定义配色和主题模式优先于预设。';
+    const effective = getEffectiveDesignSettings();
+    $('primaryColor').value = effective.primaryColor;
+    $('secondaryColor').value = effective.secondaryColor;
+    $('primaryColorValue').textContent = effective.primaryColor;
+    $('secondaryColorValue').textContent = effective.secondaryColor;
+    const custom = effective.colorMode === 'custom';
+    $('customColorsPanel').hidden = !custom;
+    $('customColorsToggle').setAttribute('aria-expanded', String(custom));
+    $('primaryColor').disabled = !custom;
+    $('secondaryColor').disabled = !custom;
     const ds = designSystemsList.find(item => item.id === id) || null;
-    renderDesignSystemSwatches(ds);
+    renderDesignSystemSwatches({ colors: effective.effectivePalette });
     updateDesignSystemPickerButton(ds);
+    if (window.HomeUI) HomeUI.summary();
 }
 
 function renderDesignSystemSwatches(ds) {
@@ -1552,7 +1779,7 @@ function renderDesignSystemSwatches(ds) {
 
 function updateDesignSystemPickerButton(ds) {
     const label = $('designSystemPickerLabel');
-    if (label) label.textContent = getDesignSystemUiLabel(ds);
+    if (label) { label.textContent = getDesignSystemUiLabel(ds); label.title = label.textContent; }
 }
 
 function updateInputModeForSkill() {
@@ -1686,43 +1913,39 @@ function applyInputModeToPage(id, mode, options = {}) {
 }
 
 // ==================== AI 生成 ====================
-function generatePrompt() {
-    const global = {
-        primaryColor: $('primaryColor').value,
-        secondaryColor: $('secondaryColor').value,
-        backgroundMode: $('backgroundMode').value,
-        componentStyle: $('componentStyle').value,
-        designSystemId: $('designSystemSelect') ? $('designSystemSelect').value : '',
-        designSystemName: getSelectedDesignSystemName(),
-        skillId: $('skillSelect') ? $('skillSelect').value : 'web-prototype',
-        skillName: getSelectedSkillName()
-    };
+function generatePrompt(options = {}) {
+    const global = getEffectiveDesignSettings();
     const mode = SKILL_INPUT_MODES[global.skillId] || SKILL_INPUT_MODES['web-prototype'];
     const isPpt = global.skillId === 'html-ppt';
     const compactPpt = isPpt && pptInputMode === 'import';
     const productNoun = isPpt ? 'HTML 演示文稿' : 'HTML 原型页面';
+    const splitPackage = options.packageLayout === 'split' || (options.packageLayout === 'auto' && pages.length >= 4);
 
     let prompt = `你是专业的前端工程师和UI/UX设计师。
 请生成一个高保真的${productNoun}。
+
+# 项目名称
+${getProjectNameFromForm()}
 
 # 技术栈
 - Tailwind CSS (CDN)
 - Vue 3 (CDN, 可选)
 - FontAwesome (CDN)
 - ECharts (如需图表)
-- Google Fonts (Inter)
+- 中文优先的系统字体栈
+
+# 工作台接入要求（必须实现）
+- ${splitPackage ? 'index.html 为入口，子页放 pages/，共享样式与脚本放 assets/；每个 HTML 的 data-proto-page 根据文件名去扩展名后转为小写 slug，index.html 固定为 home。' : '当前输出为单个 index.html，data-proto-page 固定为 home。'}根元素声明 lang="zh-CN"、data-proto-state="default"、data-proto-preview="${global.skillId === 'mobile-app' ? 'mobile' : 'web'}"。
+- 导航、按钮、表单行、表格、卡片和状态提示使用稳定的 data-proto-id，采用 kebab-case，页面内唯一；修改原型时保留已有 ID。
+- 同一 HTML 内包含多个页面、Tab、分段或弹层状态时，提供 window.PrototypeBridge.enter(stateId)，复用原型自己的导航逻辑，重复调用结果一致；异步切换返回 Promise。
+- 各页面视图的 stateId 由下方页面名称转为小写，保留中文、数字和英文，连续空格或符号替换为一个短横线；重复名称追加 -2、-3。default 指向初始视图。
+- PrototypeBridge.enter 和原型自身的 Tab、路由、弹层交互都必须同步 document.documentElement.dataset.protoState；不得通过重新加载整页切换视图。
+- 不在原型中自行制作工作台的编辑、标注或导出工具栏，这些由预览工作台提供。
 
 # 全局设计规范
-- 主色: ${global.primaryColor}
-- 强调色: ${global.secondaryColor}
-- 背景模式: ${global.backgroundMode === 'light' ? '浅色' : '深色'}
-- 组件风格: ${global.componentStyle}
-- 设计系统: ${global.designSystemName}
+- 视觉风格: ${global.designSystemName}
 - 产物类型: ${global.skillName}
-- 约束优先级: 用户明确需求 > 设计系统 > 产物类型工作流 > craft 规则 > 主色/强调色/组件风格
-- 如果选择了具体设计系统，主色和强调色只作为微调偏好，不要覆盖该设计系统的核心品牌色、字体和组件语言
-- 圆角: 0.5rem
-- 阴影: 使用柔和现代的阴影
+${DesignSettings.promptRules(global)}
 
 ${isPpt ? `# HTML PPT 播放模式要求（必须实现）
 - 生成单文件 HTML deck，不是长网页。
@@ -1785,19 +2008,20 @@ ${isPpt ? `# HTML PPT 播放模式要求（必须实现）
     prompt += `
 # 输出要求（重要！）
 
-请输出一个**完整的、独立的HTML文件**。
+${splitPackage ? '请交付完整的多页面静态项目，包含 index.html 入口、pages/ 子页面及必要的 assets/ 共享资源；保留不同页面间的导航。' : '请输出一个**完整的、独立的HTML文件**。'}
 
 要求：
-1. 所有CSS放在<style>标签中
-2. 所有JS放在<script>标签中
+1. ${splitPackage ? 'CSS 可放入 assets/ 共享样式，使用正确的相对路径引用' : '所有CSS放在<style>标签中'}
+2. ${splitPackage ? 'JS 可放入 assets/ 共享脚本，各页面能直接打开运行' : '所有JS放在<script>标签中'}
 3. 使用真实的示例数据（不要Lorem ipsum）
 4. 响应式设计
 5. 直接可在浏览器中打开使用
 
 输出格式：
+${splitPackage ? '按文件路径分别交付各文件，以下为 index.html 入口示例。' : ''}
 \`\`\`html
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-proto-page="home" data-proto-state="default" data-proto-preview="${global.skillId === 'mobile-app' ? 'mobile' : 'web'}">
 ...完整代码...
 </html>
 \`\`\`
@@ -1809,15 +2033,10 @@ ${isPpt ? `# HTML PPT 播放模式要求（必须实现）
 // 收集用户输入数据用于保存记录
 function collectFormData() {
     const global = {
-        primaryColor: $('primaryColor').value,
-        secondaryColor: $('secondaryColor').value,
-        backgroundMode: $('backgroundMode').value,
-        componentStyle: $('componentStyle').value,
-        designSystemId: $('designSystemSelect') ? $('designSystemSelect').value : '',
-        designSystemName: getSelectedDesignSystemName(),
-        skillId: $('skillSelect') ? $('skillSelect').value : 'web-prototype',
-        skillName: getSelectedSkillName()
+        projectName: getProjectNameFromForm(),
+        ...getEffectiveDesignSettings()
     };
+    global.previewType = global.skillId === 'mobile-app' ? 'mobile' : 'web';
 
     const pagesData = pages.map((id, index) => ({
         name: $(`pageName_${id}`).value || `页面${index + 1}`,
@@ -1839,19 +2058,31 @@ function collectFormData() {
 }
 
 function getProjectNameFromForm() {
-    const explicitName = pages.map(id => $(`pageName_${id}`)?.value).filter(Boolean).join(' + ');
-    if (explicitName) return explicitName;
+    return $('projectNameInput')?.value.trim() || getDefaultProjectName();
+}
+
+function getDefaultProjectName() {
+    const pageNames = pages.map(id => $(`pageName_${id}`)?.value.trim()).filter(Boolean).join(' + ');
+    if (pageNames) return pageNames.slice(0, 80);
 
     const skillId = $('skillSelect') ? $('skillSelect').value : 'web-prototype';
-    if (skillId === 'html-ppt') {
-        const firstLayout = pages.map(id => $(`layout_${id}`)?.value?.trim()).find(Boolean);
-        if (firstLayout) {
-            return firstLayout.split('\n')[0].slice(0, 24) || 'HTML PPT';
-        }
-        return 'HTML PPT';
-    }
+    const firstLayout = pages.map(id => $(`layout_${id}`)?.value.trim()).find(Boolean);
+    if (firstLayout) return firstLayout.split(/\r?\n/)[0].slice(0, 24);
 
-    return '未命名项目';
+    const now = new Date();
+    const pad = value => String(value).padStart(2, '0');
+    const time = `${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    return `${skillId === 'html-ppt' ? 'HTML PPT' : '原型项目'} ${time}`;
+}
+
+function fillProjectName() {
+    const name = getProjectNameFromForm();
+    const input = $('projectNameInput');
+    if (input && input.value !== name) {
+        input.value = name;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    return name;
 }
 
 // ==================== 增量更新功能 ====================
@@ -1918,12 +2149,11 @@ function hasAnyInput() {
         (pagePptImages[id] && pagePptImages[id].length > 0)
     );
 
-    // 检查全局配置是否被修改过（这些有默认值，检查是否与默认值不同）
+    // 只检查主动选择；继承的预设值不视为额外输入。
     const globalChanged = (
-        $('primaryColor').value !== '#004fff' ||
-        $('secondaryColor').value !== '#10b981' ||
-        $('backgroundMode').value !== 'light' ||
-        $('componentStyle').value !== 'Ant Design'
+        $('customColorsToggle').checked ||
+        $('backgroundMode').value !== 'inherit' ||
+        !!$('designSystemSelect')?.value
     );
 
     // 只要有任何一项输入就返回true
@@ -1997,7 +2227,11 @@ function detectChanges(original, current, origImgHashes, currImgHashes) {
     }
 
     // 对比全局设置
-    if (JSON.stringify(original.global) !== JSON.stringify(current.global)) {
+    const originalSettings = { ...(original.global || {}) };
+    const currentSettings = { ...(current.global || {}) };
+    delete originalSettings.projectName;
+    delete currentSettings.projectName;
+    if (JSON.stringify(originalSettings) !== JSON.stringify(currentSettings)) {
         changes.globalChanged = true;
         changes.hasChanges = true;
     }
@@ -2064,6 +2298,7 @@ async function generateWithAI() {
     enforceRequestImageLimit();
 
     // 收集当前表单数据
+    const projectName = fillProjectName();
     const formData = collectFormData();
     const currentImageHashes = computeAllImageHashes();
 
@@ -2122,9 +2357,6 @@ async function generateWithAI() {
         showToast(`图片超过模型网关上限，本次仅发送前 ${MAX_AI_IMAGES_PER_REQUEST} 张`, 'warning');
     }
 
-    // 项目名称
-    const projectName = getProjectNameFromForm();
-
     try {
         // 构建请求数据
         const requestData = {
@@ -2163,7 +2395,8 @@ async function generateWithAI() {
             // 立即添加带 generating 状态的项目到列表
             allProjects.unshift(result.project);
             renderProjectList();
-            showToast('🔵 已开始生成 "' + result.project.name + '"，请查看左侧列表');
+            showGeneratedProjects();
+            showToast('已开始生成「' + result.project.name + '」，进度显示在项目列表中');
 
             // 开始轮询状态
             pollGenerationStatus(result.project.id);
@@ -2282,9 +2515,9 @@ async function copyPromptToClipboard() {
         return;
     }
 
+    const projectName = fillProjectName();
     const prompt = generatePrompt();
     const formData = collectFormData();
-    const projectName = getProjectNameFromForm();
 
     // 先生成项目ID（文件夹名），这样可以包含在prompt中
     const projectId = generateProjectIdFromName(projectName);
@@ -2337,7 +2570,8 @@ ${prompt}
                 projectId,
                 projectName,
                 formData,
-                imageFiles
+                imageFiles,
+                prompt: fullPrompt
             })
         });
 
@@ -2347,8 +2581,10 @@ ${prompt}
             allProjects.unshift(result.project);
             renderProjectList();
 
+            showGeneratedProjects();
+
             // 占位项目创建成功后，再复制prompt
-            await navigator.clipboard.writeText(fullPrompt);
+            await navigator.clipboard.writeText(result.instruction || fullPrompt);
             showToast('✅ Prompt已复制！粘贴到Antigravity/Cursor等工具中使用');
         } else {
             showToast('占位项目创建失败', 'error');
@@ -2378,9 +2614,10 @@ async function createAiIdePackage() {
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 打包中...';
     }
 
-    const prompt = generatePrompt();
+    const pageLayout = (document.querySelector('input[name="pageLayout"]:checked') || {}).value || 'auto';
+    const projectName = fillProjectName();
+    const prompt = generatePrompt({ packageLayout: pageLayout });
     const formData = collectFormData();
-    const projectName = getProjectNameFromForm();
     const projectId = generateProjectIdFromName(projectName);
 
     const imageAssets = {};
@@ -2422,7 +2659,8 @@ async function createAiIdePackage() {
                 projectName,
                 formData,
                 imageAssets,
-                prompt
+                prompt,
+                pageLayout
             })
         });
 
@@ -2430,6 +2668,8 @@ async function createAiIdePackage() {
         if (result.success && result.project) {
             allProjects.unshift(result.project);
             renderProjectList();
+
+            showGeneratedProjects();
 
             const instruction = `${result.instruction}\n\n项目目录：${result.projectDir}`;
             try {
@@ -2864,153 +3104,23 @@ function resetModelForm() {
 }
 
 
-// ==================== 导出 & 分享弹窗 ====================
-
-let currentExportProjectId = '';
-let currentExportProjectName = '';
-let currentExportMode = 'preview';
+// ==================== 项目导出与分享 ====================
 
 async function openExportModal(id, name) {
-    currentExportProjectId = id;
-    currentExportProjectName = name;
-    currentExportMode = 'preview';
-
-    // 重置 UI
-    selectExportMode('preview');
-    $('exportModalProjectName').textContent = name;
-    $('githubPublishedInfo').classList.add('hidden');
-    $('githubNotConfigured').classList.add('hidden');
-    $('githubConfigured').classList.add('hidden');
-    if ($('githubUnpublishBtn')) $('githubUnpublishBtn').classList.add('hidden');
-    if ($('githubPublishBtnText')) $('githubPublishBtnText').textContent = '立即发布';
-
-    // 显示弹窗
-    $('exportModal').classList.remove('hidden');
-    $('exportModal').classList.add('flex');
-
-    // 加载 GitHub 配置状态
-    await loadGithubStatus(id);
-}
-
-function closeExportModal() {
-    $('exportModal').classList.add('hidden');
-    $('exportModal').classList.remove('flex');
-}
-
-function selectExportMode(mode) {
-    currentExportMode = mode;
-    ['preview', 'dev', 'embedded'].forEach(m => {
-        const btn = $(`exportMode${m.charAt(0).toUpperCase() + m.slice(1)}`);
-        if (btn) btn.classList.toggle('active', m === mode);
-    });
-}
-
-async function doLocalExport() {
-    const btn = $('localExportBtn');
-    const originalText = btn.innerHTML;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 导出中...';
-    btn.disabled = true;
-
     try {
-        const resp = await fetch('/api/export', {
+        const response = await fetch('/api/projects/workbench', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectId: currentExportProjectId, mode: currentExportMode })
+            body: JSON.stringify({ projectId: id })
         });
-        const data = await resp.json();
-        if (data.success) {
-            showToast(`✅ 导出完成，已打开文件夹`);
-        } else {
-            showToast('导出失败: ' + (data.error || '未知错误'), 'error');
+        const data = await response.json();
+        if (!response.ok || !data.ok || !data.projectId) {
+            throw new Error(data.error || '项目工作台加载失败');
         }
-    } catch (e) {
-        showToast('导出失败: ' + e.message, 'error');
-    } finally {
-        btn.innerHTML = originalText;
-        btn.disabled = false;
+        await openExtPublishModal({ projectId: data.projectId, name: data.name || name });
+    } catch (error) {
+        showToast('打开导出与分享失败：' + error.message, 'error');
     }
-}
-
-async function loadGithubStatus(projectId) {
-    try {
-        const resp = await fetch('/api/github/config');
-        const data = await resp.json();
-
-        if (!data.success || !data.hasToken || !data.username) {
-            $('githubNotConfigured').classList.remove('hidden');
-            return;
-        }
-
-        $('githubConfigured').classList.remove('hidden');
-        $('githubRepoDisplay').textContent = `${data.username}/${data.repo}`;
-
-        // 检查项目是否已发布（从 record.json 读取）
-        try {
-            const recResp = await fetch(`/projects/${projectId}/record.json?t=${Date.now()}`);
-            if (recResp.ok) {
-                const record = await recResp.json();
-                if (record.github_url) {
-                    $('githubPublishedUrl').value = record.github_url;
-                    $('githubPublishedAt').textContent = record.github_published_at || '';
-                    $('githubPublishedInfo').classList.remove('hidden');
-                    $('githubPublishBtnText').textContent = '重新发布 / 更新';
-                    if ($('githubUnpublishBtn')) $('githubUnpublishBtn').classList.remove('hidden');
-
-                    // 如果有记录的模式，尝试恢复选中状态
-                    if (record.github_publish_mode) {
-                        const radio = document.querySelector(`input[name="githubPublishMode"][value="${record.github_publish_mode}"]`);
-                        if (radio) radio.checked = true;
-                    }
-                }
-            }
-        } catch (_) { }
-
-    } catch (e) {
-        $('githubNotConfigured').classList.remove('hidden');
-    }
-}
-
-async function doGitHubPublish() {
-    const btn = $('githubPublishBtn');
-    const btnText = $('githubPublishBtnText');
-    const originalText = btnText ? btnText.textContent : '立即发布';
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>发布中，请稍候...</span>';
-
-    let finalText = originalText;
-
-    const modeRadio = document.querySelector('input[name="githubPublishMode"]:checked');
-    const publishMode = modeRadio ? modeRadio.value : 'preview';
-
-    try {
-        const resp = await fetch('/api/github/publish', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectId: currentExportProjectId, mode: publishMode })
-        });
-        const data = await resp.json();
-
-        if (data.success) {
-            $('githubPublishedUrl').value = data.url;
-            $('githubPublishedAt').textContent = '刚刚';
-            $('githubPublishedInfo').classList.remove('hidden');
-            finalText = '重新发布 / 更新';
-            if ($('githubUnpublishBtn')) $('githubUnpublishBtn').classList.remove('hidden');
-            showToast('🚀 发布成功！约 1-3 分钟后链接生效');
-        } else {
-            showToast('发布失败: ' + (data.error || '未知错误'), 'error');
-        }
-    } catch (e) {
-        showToast('发布失败: ' + e.message, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = `<i class="fab fa-github"></i> <span id="githubPublishBtnText">${finalText}</span>`;
-    }
-}
-
-function doGitHubUnpublish() {
-    $('unpublishConfirmModal').classList.remove('hidden');
-    $('unpublishConfirmModal').classList.add('flex');
 }
 
 function closeUnpublishConfirmModal() {
@@ -3019,55 +3129,165 @@ function closeUnpublishConfirmModal() {
 }
 
 async function executeGitHubUnpublish() {
+    await executeExtGithubUnpublish();
+}
+
+
+// ==================== 统一发布与导出弹窗 ====================
+
+let currentExtPubId = '';
+let currentExtPubName = '';
+let currentExtPubMode = 'pure';
+
+async function openExtPublishModal(item) {
+    currentExtPubId = item.projectId;
+    currentExtPubName = item.name;
+    currentExtPubMode = 'pure';
+
+    // 重置 UI
+    const pureRadio = document.querySelector('input[name="extPubMode"][value="pure"]');
+    if (pureRadio) pureRadio.checked = true;
+    selectExtPubMode('pure');
+    $('extPubProjectName').textContent = item.name;
+    $('extPubPublishedInfo').classList.add('hidden');
+    $('extPubNotConfigured').classList.add('hidden');
+    $('extPubConfigured').classList.add('hidden');
+    $('extPubUnpublishBtn').classList.add('hidden');
+    $('extPubPublishBtnText').textContent = '立即发布';
+
+    $('extPublishModal').classList.remove('hidden');
+    $('extPublishModal').classList.add('flex');
+
+    await loadExtPubStatus();
+}
+
+function closeExtPublishModal() {
+    $('extPublishModal').classList.add('hidden');
+    $('extPublishModal').classList.remove('flex');
+}
+
+function selectExtPubMode(mode) {
+    currentExtPubMode = mode;
+    $('extLocalExportBtnText').textContent = mode === 'pure' ? '导出纯净版' : '导出研发版（ZIP）';
+}
+
+function doExtLocalExport() {
+    if (!currentExtPubId) return;
+    const url = `/api/ext/export?extId=${encodeURIComponent(currentExtPubId)}&mode=${currentExtPubMode}`;
+    window.open(url, '_blank');
+    showToast('开始导出下载，请查看浏览器下载记录');
+}
+
+async function loadExtPubStatus() {
+    try {
+        const resp = await fetch('/api/github/config');
+        const data = await resp.json();
+        if (!data.success || !data.hasToken || !data.username) {
+            $('extPubNotConfigured').classList.remove('hidden');
+            return;
+        }
+        $('extPubConfigured').classList.remove('hidden');
+        $('extPubRepoDisplay').textContent = `${data.username}/${data.repo}`;
+    } catch (e) {
+        $('extPubNotConfigured').classList.remove('hidden');
+        return;
+    }
+    // 查询该项目是否已发布（登记表）
+    try {
+        const resp = await fetch(`/api/ext/publish-status?projectId=${encodeURIComponent(currentExtPubId)}`);
+        const data = await resp.json();
+        if (data.ok && data.published && data.url) {
+            $('extPubPublishedUrl').value = data.url;
+            $('extPubPublishedAt').textContent = data.publishedAt || '';
+            $('extPubPublishedInfo').classList.remove('hidden');
+            $('extPubPublishBtnText').textContent = '重新发布 / 更新';
+            $('extPubUnpublishBtn').classList.remove('hidden');
+        }
+    } catch (_) { }
+}
+
+async function doExtGithubPublish() {
+    const btn = $('extPubPublishBtn');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> <span>发布中，请稍候...</span>';
+    let finalText = '立即发布';
+
+    try {
+        const resp = await fetch('/api/ext/publish', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ extId: currentExtPubId, mode: currentExtPubMode })
+        });
+        const data = await resp.json();
+        if (data.ok) {
+            $('extPubPublishedUrl').value = data.url;
+            $('extPubPublishedAt').textContent = data.publishedAt || '刚刚';
+            $('extPubPublishedInfo').classList.remove('hidden');
+            $('extPubUnpublishBtn').classList.remove('hidden');
+            finalText = '重新发布 / 更新';
+            showToast('🚀 发布成功！约 1-3 分钟后链接生效');
+        } else {
+            showToast('发布失败: ' + (data.error || '未知错误'), 'error');
+            finalText = $('extPubPublishedInfo').classList.contains('hidden') ? '立即发布' : '重新发布 / 更新';
+        }
+    } catch (e) {
+        showToast('发布失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = `<i class="fab fa-github"></i> <span id="extPubPublishBtnText">${finalText}</span>`;
+    }
+}
+
+function doExtGithubUnpublish() {
+    $('unpublishConfirmModal').classList.remove('hidden');
+    $('unpublishConfirmModal').classList.add('flex');
+}
+
+async function executeExtGithubUnpublish() {
     const confirmBtn = $('confirmUnpublishBtn');
     const originalConfirmText = confirmBtn.innerHTML;
     confirmBtn.disabled = true;
     confirmBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 取消中...';
 
-    const btn = $('githubUnpublishBtn');
-    const originalText = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 取消中...';
-
     try {
-        const resp = await fetch('/api/github/unpublish', {
+        const resp = await fetch('/api/ext/unpublish', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ projectId: currentExportProjectId })
+            body: JSON.stringify({ extId: currentExtPubId })
         });
         const data = await resp.json();
-
-        if (data.success) {
+        if (data.ok) {
             showToast('✅ 已取消发布并删除 GitHub 上的文件');
-            // 更新 UI 状态
-            $('githubPublishedInfo').classList.add('hidden');
-            $('githubPublishBtnText').textContent = '立即发布';
-            btn.classList.add('hidden');
-            closeUnpublishConfirmModal(); // 成功后关闭确认弹窗
+            $('extPubPublishedInfo').classList.add('hidden');
+            $('extPubPublishBtnText').textContent = '立即发布';
+            $('extPubUnpublishBtn').classList.add('hidden');
+            closeUnpublishConfirmModal();
         } else {
             showToast('取消发布失败: ' + (data.error || '未知错误'), 'error');
         }
     } catch (e) {
         showToast('请求失败: ' + e.message, 'error');
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalText;
         confirmBtn.disabled = false;
         confirmBtn.innerHTML = originalConfirmText;
     }
 }
 
-
-function copyGithubUrl() {
-    const url = $('githubPublishedUrl').value;
+function copyExtPubUrl() {
+    const url = $('extPubPublishedUrl').value;
     if (!url) return;
     navigator.clipboard.writeText(url).then(() => {
         showToast('✅ 链接已复制到剪贴板');
     }).catch(() => {
-        $('githubPublishedUrl').select();
+        $('extPubPublishedUrl').select();
         document.execCommand('copy');
         showToast('✅ 链接已复制');
     });
+}
+
+function openExtPubUrl() {
+    const url = $('extPubPublishedUrl').value;
+    if (url) window.open(url, '_blank');
 }
 
 
@@ -3098,7 +3318,7 @@ function updateUserUI() {
         const initial = (currentUser.displayName || currentUser.username).charAt(0).toUpperCase();
         btn.textContent = initial;
     } else if (btn) {
-        btn.innerHTML = '<i class="fas fa-user"></i>';
+        btn.innerHTML = HomeUI.icon('user');
     }
     if ($('userDisplayName')) $('userDisplayName').textContent = currentUser ? currentUser.displayName : '离线个人版';
     if ($('userUsername')) $('userUsername').textContent = currentUser ? '@' + currentUser.username : '本地项目无需登录';
@@ -3154,6 +3374,28 @@ async function requireTeamLogin(actionText = '使用团队版') {
     return false;
 }
 
+// ==================== 项目来源切换（本地原型 / AI 项目） ====================
+const SOURCE_TAB_ACTIVE = 'source-tab is-active';
+const SOURCE_TAB_IDLE = 'source-tab';
+
+function switchProjectSource(source) {
+    if (source !== 'ai') source = 'local';
+    try { localStorage.setItem('prototype-home-source', source); } catch (_) { /* 忽略存储异常 */ }
+    const isLocal = source === 'local';
+    const tabLocal = $('tabSourceLocal'), tabAi = $('tabSourceAi');
+    HomeUI.closeMenu();
+    tabLocal.className = (isLocal ? SOURCE_TAB_ACTIVE : SOURCE_TAB_IDLE);
+    tabAi.className = (isLocal ? SOURCE_TAB_IDLE : SOURCE_TAB_ACTIVE);
+    tabLocal.setAttribute('aria-selected', String(isLocal));
+    tabAi.setAttribute('aria-selected', String(!isLocal));
+    tabLocal.tabIndex = isLocal ? 0 : -1; tabAi.tabIndex = isLocal ? -1 : 0;
+    $('sourceLocalPane').classList.toggle('hidden', !isLocal);
+    const aiPane = $('sourceAiPane');
+    aiPane.classList.toggle('hidden', isLocal);
+    HomeUI.updateCounts(isLocal ? 'local' : 'ai', null, null);
+    if (isLocal) loadExternalProjects(); else loadProjects();
+}
+
 async function switchProjectTab(tab) {
     if (tab === 'team' && !(await requireTeamLogin('切换到团队版'))) {
         return;
@@ -3165,33 +3407,29 @@ async function switchProjectTab(tab) {
     const teamSel = $('teamSelector');
 
     if (tab === 'my') {
-        tabMy.className = 'flex-1 text-xs font-medium py-1.5 rounded-md transition-all bg-white text-gray-800 shadow-sm';
-        tabTeam.className = 'flex-1 text-xs font-medium py-1.5 rounded-md transition-all text-gray-500 hover:text-gray-700';
+        tabMy.className = 'scope-tab is-active';
+        tabTeam.className = 'scope-tab';
         teamSel.classList.add('hidden');
     } else {
-        tabTeam.className = 'flex-1 text-xs font-medium py-1.5 rounded-md transition-all bg-white text-gray-800 shadow-sm';
-        tabMy.className = 'flex-1 text-xs font-medium py-1.5 rounded-md transition-all text-gray-500 hover:text-gray-700';
+        tabTeam.className = 'scope-tab is-active';
+        tabMy.className = 'scope-tab';
         teamSel.classList.remove('hidden');
     }
     loadProjects();
 }
 
-function loadTeamProjects() {
-    const sel = $('teamSelect');
-    selectedTeamId = sel ? sel.value : null;
+async function loadTeamProjects() {
+    selectedTeamId = $('teamSelect')?.value || null;
     if (!selectedTeamId) {
-        $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">请选择团队</div>';
+        allProjects = []; HomeUI.updateCounts('ai', 0);
+        HomeUI.empty($('projectList'), '选择一个团队', '选择团队后查看共享项目。', null, null, 'share');
         return;
     }
-    fetch(`/api/projects/team?teamId=${selectedTeamId}&t=${Date.now()}`)
-        .then(res => res.json())
-        .then(data => {
-            allProjects = data.projects || [];
-            renderProjectList();
-        })
-        .catch(() => {
-            $('projectList').innerHTML = '<div class="text-center py-8 text-gray-400 text-sm">加载失败</div>';
-        });
+    try {
+        const response = await fetch(`/api/projects/team?teamId=${encodeURIComponent(selectedTeamId)}&t=${Date.now()}`);
+        if (!response.ok) throw new Error('无法读取团队项目。');
+        const data = await response.json(); allProjects = data.projects || []; renderProjectList();
+    } catch (error) { HomeUI.empty($('projectList'), '项目读取失败', error.message, '重试', loadTeamProjects, 'error'); }
 }
 
 // ==================== 团队管理 ====================
@@ -3448,11 +3686,6 @@ async function unshareProject(projectId, teamId, btn) {
     }
 }
 
-function openGithubUrl() {
-    const url = $('githubPublishedUrl').value;
-    if (url) window.open(url, '_blank');
-}
-
 // ==================== GitHub 配置引导 ====================
 
 function openGithubSetup() {
@@ -3542,7 +3775,9 @@ async function saveGithubConfig() {
             showToast('✅ GitHub 配置已保存');
             closeGithubSetup();
             // 刷新导出弹窗的 GitHub 状态
-            await loadGithubStatus(currentExportProjectId);
+            if (currentExtPubId && !$('extPublishModal').classList.contains('hidden')) {
+                await loadExtPubStatus();
+            }
         } else {
             showToast('保存失败: ' + (data.error || '未知错误'), 'error');
         }

@@ -47,6 +47,25 @@ Thumbs.db
 .agent/
 
 # 编译输出
-dist/
-build/
+/dist/
+/build/
 *.spec
+
+# 本地界面构建记录
+.finesse/
+
+# 本地调试、测试缓存与安装目录
+/tmp/
+*.log
+.pytest_cache/
+node_modules/
+.env
+.env.*
+!.env.example
+
+# 仅供本机使用的旧定制脚本、调试工具和实屏截图
+/batch_generate.py
+/merge_batches.py
+/src/vendor/localize.cjs
+/tests/home_ui_probe.py
+/docs/design-proposals/**/home-live-*

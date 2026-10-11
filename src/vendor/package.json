@@ -1,0 +1,10 @@
+{
+  "name": "prototype-workbench-markdown-vendor",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": { "localize": "node ../localize-markdown.cjs" },
+  "dependencies": {
+    "vditor": "3.11.2",
+    "dompurify": "3.3.1"
+  }
+}

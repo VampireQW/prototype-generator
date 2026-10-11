@@ -5,9 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 原型生成器</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="vendor/home-utilities.css?v=20261004">
+    <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -146,57 +145,6 @@
             font-weight: 500;
         }
 
-        /* 导出弹窗样式 */
-        .export-mode-btn {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 6px;
-            padding: 14px 10px;
-            border-radius: 10px;
-            border: 2px solid #e5e7eb;
-            background: #fff;
-            cursor: pointer;
-            transition: all 0.15s;
-            flex: 1;
-            min-width: 0;
-        }
-
-        .export-mode-btn:hover {
-            border-color: #a5b4fc;
-            background: #fafafa;
-        }
-
-        .export-mode-btn.active {
-            border-color: #6366f1;
-            background: #eef2ff;
-        }
-
-        .export-mode-btn .icon {
-            font-size: 20px;
-        }
-
-        .export-mode-btn .label {
-            font-size: 12px;
-            font-weight: 600;
-            color: #374151;
-        }
-
-        .export-mode-btn .desc {
-            font-size: 11px;
-            color: #9ca3af;
-            text-align: center;
-            line-height: 1.3;
-        }
-
-        .export-mode-btn.active .label {
-            color: #4f46e5;
-        }
-
-        .export-mode-btn.active .desc {
-            color: #818cf8;
-        }
-
         .github-setup-step {
             display: flex;
             align-items: flex-start;
@@ -224,17 +172,20 @@
             margin-top: 1px;
         }
     </style>
+    <link rel="stylesheet" href="home.css?v=20261010-cyan-workspace">
 </head>
 
-<body class="bg-gray-50 text-gray-800 h-screen flex overflow-hidden">
-
-    <!-- 左侧边栏: 项目列表 -->
-    <aside class="w-72 bg-white border-r border-gray-200 flex flex-col">
-        <div class="p-6 border-b border-gray-100 flex items-center gap-3">
-            <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold">AI</div>
-            <h1 class="text-xl font-bold text-gray-900 flex-1">原型生成器</h1>
-            <!-- 用户菜单 -->
-            <div class="relative" id="userMenuContainer">
+<body class="home-app">
+    <header class="app-topbar">
+        <a class="app-brand" href="#projects" onclick="HomeUI.goHome(event)">
+            <span class="app-logo" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></svg></span>
+            <span>原型生成器</span>
+        </a>
+        <span class="app-context">工作空间</span>
+        <div class="app-topbar-actions">
+            <button class="app-icon-button" type="button" onclick="openModelManager()" aria-label="管理模型" title="管理模型"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8M1 12h3M20 12h3"/></svg></button>
+            <button id="homeThemeButton" class="app-icon-button" type="button" onclick="HomeUI.toggleTheme()" aria-label="切换外观" title="切换外观"></button>
+                        <div class="relative" id="userMenuContainer">
                 <button id="userMenuBtn" onclick="toggleUserMenu()" class="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-semibold hover:bg-indigo-200 transition" title="用户菜单">
                     <i class="fas fa-user"></i>
                 </button>
@@ -257,67 +208,77 @@
                 </div>
             </div>
         </div>
+    </header>
 
-        <div class="p-4">
-            <button id="createNewBtn"
-                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 px-4 rounded-lg shadow-sm transition-all flex items-center justify-center gap-2">
-                <i class="fas fa-plus text-sm"></i>
-                <span>新建项目</span>
-            </button>
-        </div>
-
-        <!-- 项目标签页：我的项目 / 团队项目 -->
-        <div class="px-4 pb-2">
-            <div class="flex items-center gap-1 mb-2 bg-gray-100 rounded-lg p-0.5">
-                <button id="tabMy" onclick="switchProjectTab('my')"
-                    class="flex-1 text-xs font-medium py-1.5 rounded-md transition-all bg-white text-gray-800 shadow-sm">
-                    我的项目
-                </button>
-                <button id="tabTeam" onclick="switchProjectTab('team')"
-                    class="flex-1 text-xs font-medium py-1.5 rounded-md transition-all text-gray-500 hover:text-gray-700">
-                    团队项目
-                </button>
+    <main id="projectsView" class="projects-view" aria-label="项目列表">
+        <div class="workspace-content">
+            <div class="workspace-tabs-row">
+            <nav class="workspace-tabs" role="tablist" aria-label="项目来源">
+                <button id="tabSourceLocal" type="button" onclick="switchProjectSource('local')" role="tab" aria-selected="true" aria-controls="sourceLocalPane" class="source-tab is-active"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3V7Z"/></svg>本地原型<span id="localProjectCount" class="tab-count">—</span></button>
+                <button id="tabSourceAi" type="button" onclick="switchProjectSource('ai')" role="tab" aria-selected="false" aria-controls="sourceAiPane" class="source-tab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></svg>AI 项目<span id="aiProjectCount" class="tab-count">—</span></button>
+            </nav>
+                <button id="createNewBtn" type="button" class="app-button app-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>新建项目</button>
             </div>
-            <!-- 团队选择器（团队标签页下显示）-->
-            <div id="teamSelector" class="hidden mb-2">
-                <select id="teamSelect" onchange="loadTeamProjects()"
-                    class="w-full text-xs border border-gray-200 rounded-md py-1.5 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-50">
-                    <option value="">请选择团队</option>
-                </select>
-            </div>
-            <div class="flex items-center justify-between">
-                <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">生成的原型</h3>
-                <button id="recycleBinBtn"
-                    class="text-xs text-gray-400 hover:text-indigo-600 flex items-center gap-1 transition-colors"
-                    title="回收站">
-                    <i class="fas fa-trash-restore"></i>回收站
-                </button>
-            </div>
-            <div class="mt-2 relative">
-                <input type="text" id="projectSearch" placeholder="搜索项目..."
-                    class="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-50">
-                <i class="fas fa-search absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-            </div>
+
+            <section id="sourceLocalPane" role="tabpanel" aria-labelledby="tabSourceLocal" class="library-pane">
+                <div class="library-toolbar">
+                    <label class="library-search" for="externalSearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input type="search" id="externalSearch" placeholder="搜索项目名称或路径" aria-label="搜索本地原型项目" aria-controls="externalList" autocomplete="off"></label>
+                    <div class="library-select"><select id="externalFilter" class="library-filter" aria-label="筛选本地项目状态"><option value="all">全部项目</option><option value="connected">已连接</option><option value="discovered">新发现</option><option value="missing">目录失效</option></select><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></div>
+                    <div class="library-toolbar-spacer"></div>
+                    <button id="extAddPanelToggle" type="button" class="app-button app-secondary" onclick="toggleExternalAddPanel()" aria-expanded="false" aria-controls="externalAddPanel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10H3V7Z"/><path d="M12 10v6M9 13h6"/></svg>添加本地项目</button>
+                    <button type="button" class="app-icon-button" onclick="loadExternalProjects()" aria-label="刷新本地项目" title="刷新本地项目"><span data-home-icon="refresh" aria-hidden="true"></span></button>
+                </div>
+                <div class="local-add-panel">
+                    <div id="externalAddPanel" class="hidden">
+                        <div class="local-add-heading"><h2>添加本地项目</h2><button type="button" class="app-icon-button" onclick="collapseExternalAddPanel()" aria-label="关闭添加本地项目"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button></div>
+                        <div class="local-add-actions">
+                            <button id="externalPickBtn" type="button" class="app-button app-secondary" onclick="pickExternalFolder()">选择文件夹</button>
+                            <button id="extAddToggleBtn" type="button" class="app-button app-secondary" onclick="toggleExternalAdd()" aria-expanded="false" aria-controls="externalAddBox">粘贴路径</button>
+                        </div>
+                        <div id="externalAddBox" class="local-path-entry hidden">
+                            <label for="externalPathInput">项目或项目集合目录</label>
+                            <div class="local-path-row">
+                                <input type="text" id="externalPathInput" placeholder="D:\项目\独立项目" autocomplete="off" onkeydown="if(event.key==='Enter'&&!event.isComposing)addExternalProject()">
+                                <button id="externalPathAddBtn" type="button" class="app-button app-primary" onclick="addExternalProject()">添加目录</button>
+                            </div>
+                        </div>
+                        <div class="local-roots-section">
+                            <h3>项目目录</h3>
+                            <div id="externalRoots" aria-label="监视根目录"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="library-results-line"><span id="externalSearchStatus" role="status" hidden></span><span id="localResultCount">正在读取项目…</span><span class="library-sort"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 4v16m-4-4 4 4 4-4M14 6h6M14 11h4"/></svg>最近创建</span></div>
+                <div id="externalStatus" class="library-status" role="status"></div>
+                <div id="externalList" class="project-grid" aria-label="本地原型项目"><div class="library-loading">正在读取项目…</div></div>
+            </section>
+
+            <section id="sourceAiPane" role="tabpanel" aria-labelledby="tabSourceAi" class="library-pane hidden">
+                <div class="library-toolbar">
+                    <label class="library-search" for="projectSearch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input type="search" id="projectSearch" placeholder="搜索 AI 项目" aria-label="搜索 AI 项目" autocomplete="off"></label>
+                    <div class="project-scope" role="group" aria-label="项目归属"><button id="tabMy" type="button" onclick="switchProjectTab('my')" class="scope-tab is-active">我的项目</button><button id="tabTeam" type="button" onclick="switchProjectTab('team')" class="scope-tab">团队项目</button></div>
+                    <div class="library-toolbar-spacer"></div>
+                    <button id="recycleBinBtn" type="button" class="app-button app-secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/></svg>回收站</button>
+                    <button type="button" class="app-icon-button" onclick="loadProjects()" aria-label="刷新 AI 项目" title="刷新 AI 项目"><span data-home-icon="refresh" aria-hidden="true"></span></button>
+                </div>
+                                <div id="teamSelector" class="hidden mb-2">
+                    <select id="teamSelect" onchange="loadTeamProjects()"
+                        class="w-full text-xs border border-gray-200 rounded-md py-1.5 px-2 focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-50">
+                        <option value="">请选择团队</option>
+                    </select>
+                </div>
+
+                <div class="library-results-line"><span id="aiResultCount">正在读取项目…</span><span class="library-sort">最近创建</span></div>
+                <div id="projectList" class="project-grid" aria-label="AI 项目"><div class="library-loading">正在读取项目…</div></div>
+            </section>
         </div>
+    </main>
 
-        <div id="projectList" class="flex-1 overflow-y-auto px-3 space-y-3 pb-4 scrollbar-thin">
-            <div class="text-center py-8 text-gray-400 text-sm">加载中...</div>
-        </div>
-
-        <div class="p-4 border-t border-gray-100 bg-gray-50 text-xs text-gray-500 text-center">
-            点击项目名称可预览
-        </div>
-    </aside>
-
-    <!-- 主内容区 -->
-    <main class="flex-1 flex flex-col min-w-0 overflow-hidden">
-
-        <!-- 顶栏 -->
-        <header class="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-8">
-            <h2 id="headerTitle" class="text-lg font-medium text-gray-900">请输入您的设计灵感</h2>
-            <div class="flex items-center gap-3">
-                <!-- 模型选择器 -->
-                <div class="model-selector" id="modelSelector">
+    <main id="createView" class="create-view" hidden>
+        <div class="create-header">
+            <div class="create-title"><button type="button" class="app-icon-button" onclick="HomeUI.goHome()" aria-label="返回项目列表" title="返回项目列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m14 6-6 6 6 6"/></svg></button><h1 id="headerTitle" tabindex="-1">新建项目</h1></div>
+            <div class="creation-actions">
+                                <div class="model-selector" id="modelSelector">
                     <button class="model-selector-btn" id="modelSelectorBtn" onclick="toggleModelDropdown(event)">
                         <i class="fas fa-robot"></i>
                         <span id="currentModelName">加载中...</span>
@@ -335,83 +296,74 @@
                         </div>
                     </div>
                 </div>
-                <button id="aiGenerateBtn"
-                    class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-6 py-2 rounded-lg text-sm font-medium shadow-md hover:shadow-lg transition-all flex items-center gap-2">
-                    <i class="fas fa-magic"></i> AI 生成原型
-                </button>
-                <button id="externalAiBtn"
-                    class="bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 px-6 py-2 rounded-lg text-sm font-medium shadow-sm hover:shadow-md transition-all flex items-center gap-2">
-                    <i class="fas fa-arrow-up-right-from-square"></i> 外部 AI 生成
-                </button>
+
+                <button id="externalAiBtn" type="button" class="app-button app-secondary"><i class="fas fa-arrow-up-right-from-square"></i>外部 AI 生成</button>
+                <button id="aiGenerateBtn" type="button" class="app-button app-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5L12 3Z"/></svg>AI 生成原型</button>
             </div>
-        </header>
-
-        <!-- 工作区 -->
-        <div class="flex-1 overflow-y-auto px-4 py-6">
-            <div class="max-w-5xl mx-auto space-y-6">
-
-                <!-- 全局设置 -->
-                <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                    <h3 class="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                        <i class="fas fa-palette text-indigo-500"></i> 全局设置
-                    </h3>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+        </div>
+        <div class="creation-workspace"><div class="creation-layout"><div class="creation-form">
+                            <!-- 设计设置 -->
+                <section class="creation-settings" id="creationSettings">
+                    <div class="settings-heading">
+                        <h3><i class="fas fa-palette" aria-hidden="true"></i>设计设置</h3>
+                        <div id="designSystemSwatches" class="settings-swatches" role="img" aria-label="最终生效配色"></div>
+                    </div>
+                    <div class="settings-project-name">
+                        <label for="projectNameInput">项目名称</label>
+                        <input type="text" id="projectNameInput" maxlength="80" placeholder="留空自动命名" autocomplete="off">
+                    </div>
+                    <div class="creation-settings-grid">
                         <div>
-                            <label class="text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                                产物类型
+                            <label for="skillSelect" class="settings-label">
+                                类型
                                 <span id="skillModeHelp" class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-100 text-gray-400 text-[10px] cursor-help" data-help="不同产物会使用不同的生成工作流。HTML PPT 支持导入 PPTX 美化和逐页描述生成。">?</span>
                             </label>
-                            <select id="skillSelect" class="w-full rounded-lg border-gray-200 border p-2 text-sm">
+                            <div class="library-select settings-select"><select id="skillSelect">
                                 <option value="web-prototype">Web 原型</option>
-                            </select>
+                            </select><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></div>
                         </div>
                         <div>
-                            <label class="text-sm font-medium text-gray-700 mb-1 flex items-center gap-1">
-                                设计系统
-                                <span id="designSystemHelp" class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-100 text-gray-400 text-[10px] cursor-help" data-help="选择后会优先遵守该品牌的色彩、字体和组件语言；主色和强调色只作为微调偏好。">?</span>
+                            <label for="designSystemPickerBtn" class="settings-label">
+                                视觉风格
+                                <span id="designSystemHelp" class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-100 text-gray-400 text-[10px] cursor-help" data-help="配色、字体和组件语言跟随视觉风格；自定义配色和主题模式可以覆盖预设。">?</span>
                             </label>
                             <select id="designSystemSelect" class="hidden">
                                 <option value="">默认风格</option>
                             </select>
                             <div id="designSystemPicker" class="relative">
-                                <button id="designSystemPickerBtn" type="button" class="w-full rounded-lg border border-gray-200 bg-white p-2 text-sm flex items-center justify-between gap-2 hover:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-100">
+                                <button id="designSystemPickerBtn" type="button" class="settings-design-button">
                                     <span id="designSystemPickerLabel" class="truncate text-left">默认风格</span>
                                     <i class="fas fa-chevron-down text-xs text-gray-400 flex-shrink-0"></i>
                                 </button>
                                 <div id="designSystemMenu" class="hidden absolute left-0 top-full z-50 mt-2 w-80 max-h-80 overflow-y-auto rounded-xl border border-gray-200 bg-white p-1 shadow-xl"></div>
                             </div>
-                            <div id="designSystemSwatches" class="mt-2 flex h-5 items-center gap-1"></div>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">背景模式</label>
-                            <select id="backgroundMode" class="w-full rounded-lg border-gray-200 border p-2 text-sm">
+                            <label for="backgroundMode" class="settings-label">主题模式</label>
+                            <div class="library-select settings-select"><select id="backgroundMode">
+                                <option value="inherit">跟随风格</option>
                                 <option value="light">浅色</option>
                                 <option value="dark">深色</option>
-                            </select>
+                            </select><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></div>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">组件风格</label>
-                            <select id="componentStyle" class="w-full rounded-lg border-gray-200 border p-2 text-sm">
-                                <option value="Ant Design">Ant Design</option>
-                                <option value="Material Design">Material Design</option>
-                                <option value="Tailwind UI">Tailwind UI</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">主题色</label>
-                            <div class="flex items-center gap-2">
-                                <input type="color" id="primaryColor" value="#004fff"
-                                    class="h-9 w-12 rounded border cursor-pointer">
-                                <span id="primaryColorValue" class="text-sm font-mono">#004fff</span>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">辅助色</label>
-                            <div class="flex items-center gap-2">
-                                <input type="color" id="secondaryColor" value="#10B981"
-                                    class="h-9 w-12 rounded border cursor-pointer">
-                                <span id="secondaryColorValue" class="text-sm font-mono">#10B981</span>
-                            </div>
+                    </div>
+                    <div class="settings-footer">
+                        <label class="settings-custom-toggle" for="customColorsToggle"><input type="checkbox" id="customColorsToggle" aria-controls="customColorsPanel" aria-expanded="false"><span>自定义配色</span></label>
+                        <div class="settings-page-layout" role="group" aria-label="页面组织">
+                        <span class="settings-layout-label">
+                            页面
+                            <span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gray-100 text-gray-400 text-[10px] cursor-help"
+                                data-help="≤3 页推荐单文件（页面即状态，单个 index.html）；≥4 页推荐拆分多页（index.html + pages/*.html）。两种形态的产物都会被标注功能管理。">?</span>
+                        </span>
+                        <label title="自动推荐文件组织方式">
+                            <input type="radio" name="pageLayout" value="auto" checked class="accent-indigo-600"> 自动
+                        </label>
+                        <label>
+                            <input type="radio" name="pageLayout" value="single" class="accent-indigo-600"> 单文件
+                        </label>
+                        <label title="拆分为多个页面文件">
+                            <input type="radio" name="pageLayout" value="split" class="accent-indigo-600"> 多文件
+                        </label>
                         </div>
                     </div>
                     <div id="pptModeControls" class="hidden mt-4 flex flex-wrap gap-2">
@@ -422,21 +374,31 @@
                             逐页描述生成
                         </button>
                     </div>
+                    <div id="customColorsPanel" class="settings-custom-panel" hidden>
+                        <div class="settings-colors">
+                            <div class="settings-color"><label for="primaryColor">主色</label><input type="color" id="primaryColor"><span id="primaryColorValue"></span></div>
+                            <div class="settings-color"><label for="secondaryColor">辅色</label><input type="color" id="secondaryColor"><span id="secondaryColorValue"></span></div>
+                        </div>
+                    </div>
                 </section>
 
                 <!-- 页面列表 -->
-                <div id="pageCardsContainer" class="space-y-6">
+                <div id="pageCardsContainer" class="creation-pages">
                     <!-- 页面卡片将在这里动态添加 -->
                 </div>
 
                 <!-- 添加页面按钮 -->
                 <button id="addPageBtn"
-                    class="w-full border-2 border-dashed border-gray-300 text-gray-500 hover:border-indigo-500 hover:text-indigo-600 py-4 rounded-xl transition-all flex items-center justify-center gap-2">
+                    class="add-page-button">
                     <i class="fas fa-plus"></i> 添加新页面
                 </button>
 
-            </div>
-        </div>
+        </div><aside class="creation-summary">
+            <h2>项目概览</h2>
+            <dl><div><dt>项目名称</dt><dd id="summaryProjectName">—</dd></div><div><dt>产物类型</dt><dd id="summarySkill">Web 原型</dd></div><div><dt>视觉风格</dt><dd id="summaryDesign">默认风格</dd></div><div><dt>页面数量</dt><dd id="summaryPageCount">1 页</dd></div><div><dt>参考图片</dt><dd id="summaryImageCount">0 张</dd></div></dl>
+            <div class="summary-pages"><h3>页面</h3><ol id="summaryPages"></ol></div>
+            <div class="summary-model"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"/></svg><span id="summaryModel">正在读取模型…</span></div>
+        </aside></div></div>
     </main>
 
     <!-- 加载中弹窗 -->
@@ -482,7 +444,7 @@
                 </button>
                 <button id="regenerateFromRecord"
                     class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition flex items-center gap-2">
-                    <i class="fas fa-redo"></i> 加载并重新生成
+                    <span data-home-icon="refresh" aria-hidden="true"></span> 加载并重新生成
                 </button>
             </div>
         </div>
@@ -624,54 +586,68 @@
         </div>
     </div>
 
-    <!-- 导出 & 分享弹窗 -->
-    <div id="exportModal" class="fixed inset-0 z-50 hidden items-center justify-center">
-        <div id="exportModalOverlay" class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm"
-            onclick="closeExportModal()"></div>
+    <!-- 项目导出与分享弹窗 -->
+    <div id="extPublishModal" class="fixed inset-0 z-50 hidden items-center justify-center">
+        <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="closeExtPublishModal()"></div>
         <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
             <!-- 头部 -->
             <div
                 class="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-purple-50">
                 <div>
                     <h3 class="font-bold text-lg text-gray-900 flex items-center gap-2">
-                        <i class="fas fa-paper-plane text-indigo-500"></i> 导出 & 分享
+                        <i class="fas fa-rocket text-indigo-500"></i> 发布 & 导出
                     </h3>
-                    <p id="exportModalProjectName" class="text-sm text-gray-500 mt-0.5"></p>
+                    <p id="extPubProjectName" class="text-sm text-gray-500 mt-0.5"></p>
                 </div>
-                <button onclick="closeExportModal()"
-                    class="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-white/60 transition">
+                <button onclick="closeExtPublishModal()"
+                    class="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-white/60 transition" aria-label="关闭发布与导出">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
 
             <div class="p-5 space-y-5">
+                <!-- 版本选择（发布与导出共用） -->
+                <div>
+                    <h4 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                        <i class="fas fa-layer-group text-indigo-500"></i> 版本
+                        <span class="text-xs text-gray-400 font-normal">发布与本地导出共用此选择</span>
+                    </h4>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="cursor-pointer">
+                            <input type="radio" name="extPubMode" value="pure" class="peer sr-only" checked
+                                onchange="selectExtPubMode('pure')">
+                            <div
+                                class="rounded-xl border-2 border-gray-200 peer-checked:border-indigo-500 peer-checked:bg-indigo-50/50 px-3 py-2.5 transition h-full">
+                                <p class="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+                                    <i class="fas fa-file-code text-indigo-500"></i>纯净版
+                                </p>
+                                <p class="text-xs text-gray-400 mt-1 leading-relaxed">纯 HTML 原型，打开即用，适合演示与体验</p>
+                            </div>
+                        </label>
+                        <label class="cursor-pointer">
+                            <input type="radio" name="extPubMode" value="review" class="peer sr-only"
+                                onchange="selectExtPubMode('review')">
+                            <div
+                                class="rounded-xl border-2 border-gray-200 peer-checked:border-indigo-500 peer-checked:bg-indigo-50/50 px-3 py-2.5 transition h-full">
+                                <p class="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+                                    <i class="fas fa-clipboard-list text-indigo-500"></i>研发版
+                                </p>
+                                <p class="text-xs text-gray-400 mt-1 leading-relaxed">含左侧页面列表、PRD 文档与标注气泡</p>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
                 <!-- 本地导出区 -->
                 <div>
                     <h4 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
                         <i class="fas fa-download text-blue-500"></i> 本地导出
                     </h4>
-                    <div class="flex gap-2 mb-3">
-                        <div class="export-mode-btn active" id="exportModePreview"
-                            onclick="selectExportMode('preview')">
-                            <span class="icon">🖼️</span>
-                            <span class="label">纯净版</span>
-                            <span class="desc">直接在浏览器<br>打开查看</span>
-                        </div>
-                        <div class="export-mode-btn" id="exportModeDev" onclick="selectExportMode('dev')">
-                            <span class="icon">🔬</span>
-                            <span class="label">研发版</span>
-                            <span class="desc">含PRD文档<br>和页面流程图</span>
-                        </div>
-                        <div class="export-mode-btn" id="exportModeEmbedded" onclick="selectExportMode('embedded')">
-                            <span class="icon">📦</span>
-                            <span class="label">内嵌版</span>
-                            <span class="desc">单文件分享<br>图片内嵌其中</span>
-                        </div>
-                    </div>
-                    <button onclick="doLocalExport()" id="localExportBtn"
+                    <button onclick="doExtLocalExport()" id="extLocalExportBtn"
                         class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
-                        <i class="fas fa-folder-open"></i> 导出到本地文件夹
+                        <i class="fas fa-download"></i> <span id="extLocalExportBtnText">导出纯净版</span>
                     </button>
+                    <p class="text-xs text-gray-400 mt-1.5 text-center">多页面项目打包为 ZIP；单页面纯净版直接导出单个 HTML（研发版始终为 ZIP）</p>
                 </div>
 
                 <div class="border-t border-gray-100"></div>
@@ -679,12 +655,12 @@
                 <!-- GitHub Pages 发布区 -->
                 <div>
                     <h4 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                        <i class="fab fa-github text-gray-800"></i> 在线分享 (GitHub Pages)
+                        <i class="fab fa-github text-gray-800"></i> 发布到 GitHub Pages
                         <span class="text-xs text-gray-400 font-normal">发布后可分享链接给任何人</span>
                     </h4>
 
                     <!-- 未配置 GitHub 时显示 -->
-                    <div id="githubNotConfigured" class="hidden">
+                    <div id="extPubNotConfigured" class="hidden">
                         <div
                             class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 flex items-start gap-2 text-sm text-amber-700">
                             <i class="fas fa-exclamation-triangle mt-0.5 flex-shrink-0"></i>
@@ -697,34 +673,33 @@
                     </div>
 
                     <!-- 已配置 GitHub 时显示 -->
-                    <div id="githubConfigured" class="hidden space-y-3">
-                        <div id="githubConfigInfo"
-                            class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
+                    <div id="extPubConfigured" class="hidden space-y-3">
+                        <div class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
                             <span class="text-gray-600 flex items-center gap-1.5">
                                 <i class="fab fa-github text-gray-500"></i>
-                                <span id="githubRepoDisplay" class="font-mono text-xs"></span>
+                                <span id="extPubRepoDisplay" class="font-mono text-xs"></span>
                             </span>
                             <button onclick="openGithubSetup()"
                                 class="text-xs text-indigo-500 hover:text-indigo-700 transition">修改配置</button>
                         </div>
 
                         <!-- 发布链接（已发布时显示） -->
-                        <div id="githubPublishedInfo" class="hidden bg-green-50 border border-green-200 rounded-lg p-3">
+                        <div id="extPubPublishedInfo" class="hidden bg-green-50 border border-green-200 rounded-lg p-3">
                             <div class="flex items-center gap-2 mb-2">
                                 <i class="fas fa-check-circle text-green-500"></i>
                                 <span class="text-sm font-medium text-green-700">已发布</span>
-                                <span class="text-xs text-green-500" id="githubPublishedAt"></span>
+                                <span class="text-xs text-green-500" id="extPubPublishedAt"></span>
                             </div>
                             <div class="flex items-center gap-2">
-                                <input id="githubPublishedUrl" type="text" readonly
+                                <input id="extPubPublishedUrl" type="text" readonly aria-label="发布链接"
                                     class="flex-1 text-xs bg-white border border-green-200 rounded px-2 py-1.5 text-gray-700 font-mono truncate cursor-pointer"
                                     onclick="this.select()">
-                                <button onclick="copyGithubUrl()"
+                                <button onclick="copyExtPubUrl()"
                                     class="flex-shrink-0 px-2 py-1.5 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition"
                                     title="复制链接">
                                     <i class="fas fa-copy"></i>
                                 </button>
-                                <button onclick="openGithubUrl()"
+                                <button onclick="openExtPubUrl()"
                                     class="flex-shrink-0 px-2 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 transition"
                                     title="在浏览器打开">
                                     <i class="fas fa-external-link-alt"></i>
@@ -732,44 +707,18 @@
                             </div>
                         </div>
 
-                        <!-- 发布模式选择 -->
-                        <div class="mb-3">
-                            <label class="block text-xs font-medium text-gray-700 mb-1.5">发布模式</label>
-                            <div class="flex bg-gray-100 rounded-lg p-1 gap-1">
-                                <label class="flex-1 text-center cursor-pointer">
-                                    <input type="radio" name="githubPublishMode" value="preview" class="peer sr-only"
-                                        checked>
-                                    <div
-                                        class="py-1.5 text-xs font-medium text-gray-500 rounded-md peer-checked:bg-white peer-checked:text-indigo-600 peer-checked:shadow-sm transition">
-                                        纯净版</div>
-                                </label>
-                                <label class="flex-1 text-center cursor-pointer">
-                                    <input type="radio" name="githubPublishMode" value="dev" class="peer sr-only">
-                                    <div
-                                        class="py-1.5 text-xs font-medium text-gray-500 rounded-md peer-checked:bg-white peer-checked:text-indigo-600 peer-checked:shadow-sm transition">
-                                        研发版</div>
-                                </label>
-                                <label class="flex-1 text-center cursor-pointer">
-                                    <input type="radio" name="githubPublishMode" value="embedded" class="peer sr-only">
-                                    <div
-                                        class="py-1.5 text-xs font-medium text-gray-500 rounded-md peer-checked:bg-white peer-checked:text-indigo-600 peer-checked:shadow-sm transition">
-                                        内嵌版</div>
-                                </label>
-                            </div>
-                        </div>
-
                         <div class="flex gap-2">
-                            <button onclick="doGitHubPublish()" id="githubPublishBtn"
+                            <button onclick="doExtGithubPublish()" id="extPubPublishBtn"
                                 class="flex-1 bg-gray-900 hover:bg-gray-700 text-white py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
-                                <i class="fab fa-github"></i> <span id="githubPublishBtnText">立即发布</span>
+                                <i class="fab fa-github"></i> <span id="extPubPublishBtnText">立即发布</span>
                             </button>
-                            <button onclick="doGitHubUnpublish()" id="githubUnpublishBtn"
+                            <button onclick="doExtGithubUnpublish()" id="extPubUnpublishBtn"
                                 class="hidden px-4 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2"
                                 title="取消发布并删除 GitHub 上的文件">
                                 <i class="fas fa-trash-alt"></i> <span class="hidden sm:inline">取消发布</span>
                             </button>
                         </div>
-                        <p class="text-xs text-center text-gray-400 mt-2">发布后约 1-3 分钟链接生效 · 更新内容可重新发布</p>
+                        <p class="text-xs text-center text-gray-400 mt-2">发布按当前所选版本进行 · 约 1-3 分钟链接生效 · 更新内容可重新发布</p>
                     </div>
                 </div>
             </div>
@@ -1020,7 +969,9 @@
         <span id="toastMessage">操作成功</span>
     </div>
 
-    <script src="script.js?v=20260509-design-swatches-clean"></script>
+    <script src="home-ui.js?v=20261010-cyan-workspace"></script>
+    <script src="design-settings.js?v=20261005-visual-presets"></script>
+    <script src="script.js?v=20261010-cyan-workspace"></script>
 </body>
 
 </html>

@@ -1,0 +1,4 @@
+# 可选：首页真实项目封面（安装后还需安装 Chromium）
+-r requirements.txt
+playwright==1.59.0
+Pillow==12.2.0

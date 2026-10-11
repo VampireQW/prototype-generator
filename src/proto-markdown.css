@@ -1,0 +1,154 @@
+/* 继承 DESIGN_MASTER 与工作台色板；作用域限制在 Markdown 区，不改原型样式。 */
+.proto-md, .markdown-editor, .proto-md-toolbar, .proto-md-handle {
+    --md-surface: #ffffff; --md-alt: #f1f2f4; --md-text: #1a1d23; --md-muted: #4e5560;
+    --md-border: #d8dee3; --md-control: #808790; --md-accent: #1d4ed8; --md-error: #b42318; --md-on: #ffffff;
+    --md-font: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+    --md-mono: Consolas, "Cascadia Mono", monospace;
+    font: 14px/1.8 var(--md-font); letter-spacing: .02em; color: var(--md-text); min-width: 0;
+}
+.proto-md[data-theme="dark"], .markdown-editor[data-theme="dark"], .proto-md-toolbar[data-theme="dark"], .proto-md-handle[data-theme="dark"] {
+    --md-surface: #212326; --md-alt: #363c44; --md-text: #f2f4f7; --md-muted: #a8b0ba;
+    --md-border: #626a78; --md-control: #808790; --md-accent: #91b5ff; --md-error: #ffb4ab; --md-on: #212326;
+}
+.proto-md { white-space: normal; overflow-wrap: anywhere; border-radius: 6px; cursor: text; position: relative; }
+.proto-md.is-editing { background: var(--md-surface); }
+.proto-md-frame { display: block; border: 0; width: 100%; height: 120px; background: var(--md-surface); }
+.proto-md-frame.proto-md-cover { position: absolute; inset: 0; height: 100%; z-index: 2; }
+.proto-md-draft { display: block; color: var(--md-muted); font-size: 12px; padding: 8px 0; }
+.proto-md-body, .markdown-editor .vditor-reset { font: 14px/1.8 var(--md-font); letter-spacing: .02em; color: var(--md-text); overflow-wrap: anywhere; }
+/* 两边都用 flow-root 包容子块外边距：嵌套列表末项的 margin-bottom 否则会在阅读态穿透到容器外、在编辑器里却被包住，两者量高差 12px。 */
+.proto-md-body, .markdown-editor .vditor-ir pre.vditor-reset { display: flow-root; }
+.proto-md-body > :first-child, .markdown-editor .vditor-reset > :first-child { margin-top: 0; }
+.proto-md-body > :last-child, .markdown-editor .vditor-reset > :last-child { margin-bottom: 0; }
+/* 段落间距为 0：Enter 换出的新段与自然折行的行间距一致（用户点定），段距只靠 line-height 1.8 撑开；标题 / 列表 / 表格仍保留自己的外边距 */
+.proto-md-body p, .markdown-editor .vditor-reset p { margin: 0; }
+.proto-md-body :is(h1,h2,h3,h4,h5,h6), .markdown-editor .vditor-reset :is(h1,h2,h3,h4,h5,h6) { margin: 24px 0 12px; padding: 0; border: 0; font-weight: 600; line-height: 1.7; }
+.proto-md-body h1, .markdown-editor .vditor-reset h1 { font-size: 22px; }
+.proto-md-body h2, .markdown-editor .vditor-reset h2 { font-size: 18px; }
+.proto-md-body h3, .markdown-editor .vditor-reset h3 { font-size: 16px; }
+.proto-md-body :is(ul,ol), .markdown-editor .vditor-reset :is(ul,ol) { padding-left: 24px; margin: 8px 0 12px; }
+.proto-md-body ul { list-style: disc; } .proto-md-body ol { list-style: decimal; }
+.proto-md-body blockquote, .markdown-editor .vditor-reset blockquote { margin: 12px 0; padding: 0 12px; border-left: 3px solid var(--md-control); color: var(--md-muted); }
+.proto-md-body code, .markdown-editor .vditor-reset code { font: 13px/1.7 var(--md-mono); background: var(--md-alt); color: var(--md-text); border-radius: 6px; padding: 0 4px; }
+.proto-md-body pre, .markdown-editor .vditor-reset pre { padding: 12px; background: var(--md-alt); white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 6px; }
+.proto-md-body table, .markdown-editor .vditor-reset table { display: table; width: 100%; table-layout: fixed; border-collapse: collapse; margin: 12px 0; }
+.proto-md-body :is(th,td), .markdown-editor .vditor-reset :is(th,td) { border: 1px solid var(--md-border); padding: 8px; text-align: left; background: var(--md-surface); white-space: normal; overflow-wrap: anywhere; }
+/* 空单元格也撑出一行：Vditor 会在空格内填一个空格便于点入，阅读态若无行盒则该行矮 25px，接管时表格跳高。 */
+.proto-md-body :is(th,td):empty::before { content: "\200b"; }
+/* 分隔线两边同一口径：浏览器默认 1px 双线边框 vs Vditor 2px 实块 + 24px 外距，不统一则接管时上下文整体下沉。 */
+.proto-md-body hr, .markdown-editor .vditor-reset hr { display: block; height: 1px; padding: 0; margin: 16px 0; border: 0; background: var(--md-border); }
+.proto-md-body a, .markdown-editor .vditor-reset a { color: var(--md-accent); text-decoration: underline; text-underline-offset: 3px; }
+.proto-md-body input { accent-color: var(--md-accent); }
+.proto-md:focus-visible, .proto-md :focus-visible, .markdown-editor :focus-visible { outline: 2px solid var(--md-accent); outline-offset: 2px; }
+/* 竖向 hidden：高度由父层按内容同步跟随，永不需要内部滚动；否则 ceil 与视口取整的亚像素差会偶发一根滚动条。 */
+.markdown-editor { margin: 0; padding: 0; overflow-x: clip; overflow-y: hidden; background: var(--md-surface); scrollbar-width: thin; scrollbar-color: var(--md-control) transparent; }
+.markdown-editor::-webkit-scrollbar, .markdown-editor *::-webkit-scrollbar { width: 8px; height: 8px; }
+.markdown-editor::-webkit-scrollbar-track, .markdown-editor *::-webkit-scrollbar-track { background: transparent; }
+.markdown-editor::-webkit-scrollbar-thumb, .markdown-editor *::-webkit-scrollbar-thumb { background: var(--md-control); border-radius: 4px; }
+.markdown-editor body { margin: 0; padding: 0; min-width: 0; overflow: visible; }
+.markdown-editor *, .markdown-editor *::before { box-sizing: border-box; }
+.markdown-editor .vditor { border: 0; background: var(--md-surface); font-family: var(--md-font); }
+.markdown-editor .vditor-toolbar { display: none; }
+.proto-md-toolbar { position: fixed; z-index: 2147483001; display: flex; align-items: center; flex-wrap: wrap; width: max-content; box-sizing: border-box; max-width: calc(100vw - 8px); gap: 2px; padding: 4px 6px; border: 1px solid var(--md-border); border-radius: 8px; background: var(--md-surface); color: var(--md-text); box-shadow: 0 4px 12px rgba(16,24,40,.12); font: 12px/1.6 var(--md-font); letter-spacing: .02em; }
+.proto-md-tools-group { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0; max-width: 100%; }
+/* margin: 0 必须显式声明：工具条注入在原型页面文档内，原型自身的 button { margin } 全局规则会套上来撑乱布局。 */
+:is(.proto-md-toolbar, .proto-md-handle) button { width: 28px; height: 28px; min-width: 28px; min-height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; display: grid; place-items: center; background: transparent; color: var(--md-text); font: inherit; cursor: pointer; }
+:is(.proto-md-toolbar, .proto-md-handle) button svg { width: 15px; height: 15px; display: block; }
+.proto-md-grip { margin: 0; padding: 0 4px; color: var(--md-muted); cursor: grab; touch-action: none; user-select: none; }
+.proto-md-grip:active { cursor: grabbing; }
+.proto-md-grip:focus-visible { outline: 2px solid var(--md-accent); outline-offset: 2px; border-radius: 3px; }
+.proto-md-sep { width: 1px; height: 16px; margin: 0 4px; background: var(--md-border); }
+@media(hover:hover) { :is(.proto-md-toolbar, .proto-md-handle) button:hover { background: var(--md-alt); } }
+@media(pointer:coarse) { .proto-md-toolbar button { width: 44px; height: 44px; min-width: 44px; min-height: 44px; } .proto-md-toolbar button svg { width: 19px; height: 19px; } }
+/* 光标所在块的按钮点亮（正文 / 标题 / 列表 / 任务；表格按钮在表内点亮） */
+.proto-md-toolbar button[aria-pressed="true"] { background: var(--md-alt); color: var(--md-accent); box-shadow: inset 0 0 0 1px var(--md-border); }
+/* 表格角标：光标在表格内时钉在表格左上角（中心对角），点开行列操作；挂父页文档，和工具条同层 */
+.proto-md-handle { position: fixed; z-index: 2147483001; width: 22px; height: 22px; font: 12px/1.6 var(--md-font); letter-spacing: .02em; }
+.proto-md-handle > button { width: 22px; height: 22px; min-width: 22px; min-height: 22px; border: 1px solid var(--md-border); border-radius: 6px; background: var(--md-surface); color: var(--md-muted); box-shadow: 0 2px 6px rgba(16,24,40,.14); }
+.proto-md-handle > button svg { width: 13px; height: 13px; }
+.proto-md-handle > button[aria-expanded="true"] { color: var(--md-accent); border-color: var(--md-accent); }
+@media(pointer:coarse) { .proto-md-handle, .proto-md-handle > button { width: 32px; height: 32px; min-width: 32px; min-height: 32px; } .proto-md-handle > button svg { width: 17px; height: 17px; } }
+/* 工具条弹层：色板 / 表格行列网格 / 表内行列增删。挂在工具条或表格角标内，按钮左对齐；底部放不下时加 is-above 翻到上方。
+   width: max-content 必须有：绝对定位的收缩宽度受包含块限制，挂在 22px 的表格角标里会被压成一条、按钮叠成一团 */
+.proto-md-pop { position: absolute; top: 100%; left: 0; width: max-content; margin-top: 4px; padding: 6px; border: 1px solid var(--md-border); border-radius: 8px; background: var(--md-surface); color: var(--md-text); box-shadow: 0 8px 24px rgba(16,24,40,.16); z-index: 1; }
+.proto-md-pop.is-above { top: auto; bottom: 100%; margin: 0 0 4px; }
+.proto-md-pop-color { padding: 4px; }
+.proto-md-swatches { display: grid; grid-template-columns: repeat(4, 24px); gap: 8px; padding: 4px; }
+.proto-md-pop .proto-md-swatch { display: block; position: relative; box-sizing: border-box; width: 24px; height: 24px; min-width: 24px; min-height: 24px; border: 1px solid var(--md-control); border-radius: 50%; background: var(--swatch, var(--md-surface)); cursor: pointer; }
+.proto-md-custom { --wheel-red: #ec4954; --wheel-yellow: #fdd143; --wheel-green: #54d691; --wheel-cyan: #38cde7; --wheel-blue: #1684fc; --wheel-purple: #8a38f5; background: conic-gradient(var(--wheel-red),var(--wheel-yellow),var(--wheel-green),var(--wheel-cyan),var(--wheel-blue),var(--wheel-purple),var(--wheel-red)) !important; }
+.proto-md-custom input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.proto-md-pop .proto-md-swatch[aria-pressed="true"], .proto-md-custom:focus-within { outline: 2px solid var(--md-accent); outline-offset: 2px; }
+.proto-md-pop .proto-md-color-reset { width: 100%; margin-top: 4px; height: 28px; min-height: 28px; color: var(--md-text); }
+/* 默认色（去色）：白底一道红斜线 */
+.proto-md-pop .proto-md-swatch[data-color=""] { background: linear-gradient(135deg, var(--md-surface) 44%, var(--md-error) 44%, var(--md-error) 56%, var(--md-surface) 56%); }
+.proto-md-grid { display: grid; grid-template-columns: repeat(var(--cols, 8), 18px); gap: 2px; }
+.proto-md-pop .proto-md-grid button { width: 18px; height: 18px; min-width: 18px; min-height: 18px; border: 1px solid var(--md-border); border-radius: 3px; background: var(--md-surface); }
+.proto-md-pop .proto-md-grid button.is-on { background: var(--md-accent); border-color: var(--md-accent); }
+.proto-md-grid-hint { margin-top: 6px; font-size: 12px; line-height: 1.4; color: var(--md-muted); text-align: center; white-space: nowrap; }
+/* 行操作一行、列操作一行（上 / 下 / 删 → 左 / 右 / 删），删整表独占末行 */
+.proto-md-ops { display: grid; grid-template-columns: repeat(3, auto); gap: 4px; }
+.proto-md-pop .proto-md-ops button { width: auto; height: 28px; min-width: 0; padding: 0 10px; white-space: nowrap; border: 1px solid var(--md-border); border-radius: 6px; background: var(--md-surface); color: var(--md-text); }
+/* 删整表：独占一行、警示色，与行列增删拉开距离 */
+.proto-md-pop .proto-md-ops button[data-op="table-del"] { grid-column: 1 / -1; color: var(--md-error); border-color: color-mix(in srgb, var(--md-error) 45%, var(--md-border)); }
+@media(hover:hover) { .proto-md-pop .proto-md-swatch:hover, .proto-md-pop .proto-md-ops button:hover { box-shadow: 0 0 0 2px var(--md-accent); } }
+@media(pointer:coarse) {
+    .proto-md-swatches { grid-template-columns: repeat(4,44px); }
+    .proto-md-pop .proto-md-swatch { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+    .proto-md-pop .proto-md-color-reset { height: 44px; min-height: 44px; }
+    .proto-md-grid { grid-template-columns: repeat(var(--cols, 8), 24px); } .proto-md-pop .proto-md-grid button { width: 24px; height: 24px; min-width: 24px; min-height: 24px; }
+    .proto-md-pop .proto-md-ops button { height: 44px; min-height: 44px; }
+}
+.markdown-editor .vditor-toolbar__item { padding: 0; }
+.markdown-editor .vditor-toolbar__item > button { min-width: 32px; min-height: 32px; padding: 8px; color: var(--md-muted); }
+.markdown-editor .vditor-content, .markdown-editor .vditor-ir { overflow: visible; min-height: 0; }
+.markdown-editor .vditor-ir__node { padding: 0 !important; min-height: 0 !important; }
+/* 编辑面内边距归零：让 Vditor 编辑态文字与阅读态（.proto-md-body，无内边距）从同一起点开始，
+   双击进入编辑时零位移零跳变、无缝接管；pre 的 margin 仍保持 0，避免 margin 穿透容器链逸出高度量算。 */
+.markdown-editor .vditor-ir { padding: 0; }
+/* 编辑面始终白底：Vditor 默认未聚焦时用灰色 panel 底、:focus 才变白，接管瞬间会先灰后白。一律按阅读态白底。
+   white-space 保持 Vditor 默认 pre-wrap：阅读态把软换行渲染为 <br>，编辑态若改 normal 会把同一段的换行合并成空格，行数变少、接管时高度跳变。 */
+.markdown-editor .vditor-ir pre.vditor-reset, .markdown-editor .vditor-ir pre.vditor-reset:focus { background: var(--md-surface); margin: 0; padding: 0 !important; }
+.markdown-editor .vditor-ir__marker { color: var(--md-muted); }
+/* 与阅读态逐块等高，双击接管零跳变：
+   ① Vditor 默认 li + li 多 .25em 上距，阅读态为 0；
+   ② 行内原始 HTML（如 <br />）阅读态按安全策略显为 code 文本，IR 默认折叠标记使它消失、行高变短——编辑态改为常显同样的 code。 */
+.markdown-editor .vditor-reset li + li { margin-top: 0; }
+.markdown-editor .vditor-ir__node[data-type="html-inline"] .vditor-ir__marker { display: inline; width: auto; height: auto; overflow: visible; transition: none; font: 13px/1.7 var(--md-mono); background: var(--md-alt); color: var(--md-text); border-radius: 6px; padding: 0 4px !important; }
+/* 文字颜色：编辑态由 markdown-editor.js 把成对的 <span style="color"> 开闭标签藏掉，中间文字包进 .proto-md-color 直接显色，与阅读态同样所见即所得 */
+.markdown-editor .vditor-ir__node[data-type="html-inline"].proto-md-color-tag { display: none !important; }
+/* 暗色主题：正文里存的是浅色 token（白底 ≥ 4.5:1），暗底按 DESIGN_MASTER 暗色对应色映射（#212326 底均 ≥ 4.5:1） */
+.proto-md[data-theme="dark"] .proto-md-body [style="color:#b42318"], .markdown-editor[data-theme="dark"] .proto-md-color[data-color="#b42318"] { color: #ff8a8a !important; }
+.proto-md[data-theme="dark"] .proto-md-body [style="color:#b45309"], .markdown-editor[data-theme="dark"] .proto-md-color[data-color="#b45309"] { color: #f0a35e !important; }
+.proto-md[data-theme="dark"] .proto-md-body [style="color:#046c4e"], .markdown-editor[data-theme="dark"] .proto-md-color[data-color="#046c4e"] { color: #5fd39b !important; }
+.proto-md[data-theme="dark"] .proto-md-body [style="color:#1d4ed8"], .markdown-editor[data-theme="dark"] .proto-md-color[data-color="#1d4ed8"] { color: #7ba2ff !important; }
+.proto-md[data-theme="dark"] .proto-md-body [style="color:#0f766e"], .markdown-editor[data-theme="dark"] .proto-md-color[data-color="#0f766e"] { color: #4fd1c5 !important; }
+.proto-md[data-theme="dark"] .proto-md-body [style="color:#626b78"], .markdown-editor[data-theme="dark"] .proto-md-color[data-color="#626b78"] { color: #a8b0ba !important; }
+/* 空段落/标题/列表项在 IR 编辑器里会塌成 0 高度（没有行盒）——回车后光标无处安放，看不见换行图标。
+   给空块补一个零宽字符行盒撑出一行高度，光标即可见；一旦键入元素不再 :empty，伪元素自动消失。 */
+.markdown-editor .vditor-ir [contenteditable="true"] p:empty::before,
+.markdown-editor .vditor-ir [contenteditable="true"] h1:empty::before,
+.markdown-editor .vditor-ir [contenteditable="true"] h2:empty::before,
+.markdown-editor .vditor-ir [contenteditable="true"] h3:empty::before,
+.markdown-editor .vditor-ir [contenteditable="true"] h4:empty::before,
+.markdown-editor .vditor-ir [contenteditable="true"] h5:empty::before,
+.markdown-editor .vditor-ir [contenteditable="true"] h6:empty::before,
+.markdown-editor .vditor-ir [contenteditable="true"] li:empty::before,
+.markdown-editor .vditor-ir [contenteditable="true"] blockquote:empty::before { content: "\200b"; }
+.proto-md-body img, .markdown-editor .vditor-ir img { display: block; max-width: 100%; height: auto; margin: 8px 0; border-radius: 6px; }
+.markdown-editor .vditor-ir img { cursor: pointer; }
+.proto-md-image-resize { position: absolute; z-index: 5; border: 1px solid var(--md-accent); border-radius: 6px; pointer-events: none; }
+.proto-md-image-resize[hidden] { display: none; }
+.proto-md-image-grip { position: absolute; right: 0; bottom: 0; width: 28px; height: 28px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 6px 0 5px 0; background: var(--md-accent); color: var(--md-on); pointer-events: auto; cursor: nwse-resize; touch-action: none; }
+.proto-md-image-grip svg { width: 16px; height: 16px; }
+.proto-md-image-grip:active { filter: brightness(.9); }
+@media(hover:hover) { .proto-md-image-grip:hover { filter: brightness(.95); } }
+.proto-md-image-size { position: absolute; left: 4px; top: 4px; border-radius: 6px; padding: 1px 6px; background: var(--md-surface); color: var(--md-text); font: 11px/1.8 var(--md-font); font-variant-numeric: tabular-nums; }
+.markdown-editor.is-image-resizing, .markdown-editor.is-image-resizing * { cursor: nwse-resize !important; user-select: none !important; }
+@media(pointer:coarse) { .proto-md-image-grip { width: 44px; height: 44px; } }
+.markdown-editor .vditor-ir video, .markdown-editor .vditor-ir audio { display: none; }
+.markdown-editor #status { position: fixed; left: 50%; bottom: 8px; transform: translateX(-50%); max-width: calc(100% - 24px); padding: 4px 10px; border-radius: 6px; background: var(--md-alt); color: var(--md-text); font-size: 12px; opacity: 0; pointer-events: none; transition: opacity .15s ease-out; z-index: 10; }
+.markdown-editor #status.show { opacity: 1; }
+.markdown-editor #status.error { background: var(--md-error); color: var(--md-surface); }
+/* 阅读态悬停不加任何描边（曾有 1px 虚线 outline，用户要求去掉）：cursor: text 已提示可编辑，选中态由外层蓝框承担。 */
+@media(pointer:coarse) { .markdown-editor .vditor-toolbar__item > button { min-height: 44px; min-width: 44px; } }
+@media(prefers-reduced-motion:reduce) { .proto-md *, .markdown-editor * { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }

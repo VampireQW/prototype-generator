@@ -29,7 +29,7 @@
 - [x] AI 接口调用成功
 
 ### 测试截图
-![Inspector Active](C:/Users/qky/.gemini/antigravity/brain/537ad22a-816f-4e13-a5a7-48e6a3ffb464/inspector_mode_active_1769178604594.png)
+验收截图仅保存在本机，不随仓库发布。
 
 ## 4. 修改文件列表
 - `src/viewer.html`

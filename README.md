@@ -1,35 +1,63 @@
 # 🎨 原型生成器 (Prototype Generator)
 
-> AI 驱动的高保真原型设计工具 - 通过自然语言描述快速生成交互式 HTML 原型
+> 把页面需求、参考图和提示词组织成资料包，交给本地 Agent 制作原型，再接入工作台完成 PRD 标注与交付。
 
-![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
+![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)
+
+## 为什么做原型生成器
+
+最初做这个工具，就是想在原型阶段，把给 AI 的提示词和参考资料组织得更清楚一点。
+
+项目稍微大一点，往往就会有很多页面、截图、参考图，以及每张图对应的说明。这些内容全部塞进一个对话框，跟 Codex、Claude Code 等 Agent 沟通时，容易说不清楚：这张图参考什么？对应哪个页面？哪些地方需要改？
+
+所以，我希望有一个工具，能把页面结构、图片、需求说明和视觉要求放在一起，形成一份有结构的资料包。给 Agent 的上下文更完整，制作和后续调整原型时，也更容易对齐需求。
+
+**本次更新的重心，是围绕本地 Agent 来完善这套流程。** 第三方 API 直接生成原型的功能仍然保留，但项目接下来会更多聚焦于 Codex、Claude Code 等工具的协作，让资料组织、原型制作和评审交付衔接起来。
+
+实际用起来，可以分成两步：
+
+1. **组织资料，交给 Agent 制作。** 在原型生成器里整理页面需求、参考图和设计设置，复制完整 Prompt，或导出 AI IDE 项目包，交给本地 Agent。你也可以直接在 Agent 工具里完成原型制作，再把项目添加到这里。
+2. **接入原型，整理 PRD 和标注。** 配合你在 Agent 中使用的协作 skill，让 Agent 按项目的接入与 PRD 导入约定整理草稿，再通过项目提供的导入工具落库。页面需求和对应元素的标注，就能在工作台里统一查看、修改和交付。具体格式见 [PRD 草稿导入说明](docs/features.md#prd-草稿落库-proto_importpy2026-09-30)。
+
+我也希望原型做完之后，需求说明能一起留下来。这里的 PRD 和序号标注都支持 Markdown，可以继续补充文字、表格和图片；整理好的内容还能随研发版一起导出，或发布到 GitHub Pages，方便大家评审和沟通。
+
+欢迎大家试试看，也欢迎分享自己的使用方式和建议。
 
 ## ✨ 功能特性
 
-- 🤖 **AI 生成原型** - 输入设计需求，AI 自动生成高保真 HTML 原型
+- 🗂️ **统一项目库** - 全屏管理本地 / AI 项目，支持名称与路径搜索、状态筛选、最新创建优先、真实项目封面和浅深主题
+- 🚀 **本地 Agent 协作** - 组织页面需求与参考图，复制完整 Prompt 或导出 AI IDE 项目包，交给 Codex、Claude Code 等本地 Agent 制作
 - 🖼️ **参考图驱动** - 支持上传参考图，AI 会模仿布局和风格
+- 🤖 **内置 AI 生成（可选）** - 配置模型 API 后，输入设计需求生成 HTML 原型
 - 🎞️ **HTML PPT 生成** - 支持导入 PPTX 美化或逐页描述生成，产物自带概览和全屏播放模式
-- 🎨 **设计系统增强** - 内置中文化设计系统选择、色卡预览，并参考 OpenDesign 的 skills 及资产组织生成上下文
-- 🚀 **外部 AI 生成** - 不调用内置大模型，支持一键复制完整 prompt，或生成 Cursor / Codex 可直接读取的 AI IDE 项目包
+- 🎨 **视觉风格与自定义** - 内置 138 份视觉风格，主题支持跟随风格 / 浅色 / 深色；可按需覆盖主色、辅色，生效配色实时同步
 - 📋 **剪切板粘贴** - 直接 Ctrl+V 粘贴截图作为参考图
 - 🔄 **异步生成** - 点击生成后立即在列表显示，后台完成后自动更新
-- 🔀 **多模型切换** - 顶栏模型选择器，支持添加/编辑/删除多个 AI 模型配置
-- 📝 **微调模式** - 可视化点选元素进行 AI 微调修改，支持整页面修改
-- 📱 **真机外壳预览** - iPhone 写实外壳，含灵动岛、状态栏、物理按键，可开关
-- 📄 **PRD 文档** - 内置 Markdown 编辑器撰写需求文档
+- 🔀 **多模型切换** - 创建页模型选择器与顶栏模型管理，支持添加/编辑/删除多个 AI 模型配置
+- 📝 **统一预览 / 微调 / 标注** - 本地与 AI 项目使用同一工作台，支持页面与状态导航、元素点选、修改任务 Prompt 和 PRD 联动
+- 📱 **真机外壳预览** - App 原型支持开关真机外壳，切换保留输入和业务状态；Web 视图自动隐藏外壳选项
+- 📄 **所见即所得 PRD** - 页面需求与序号标注支持 Markdown、表格、文字颜色和自动保存；图片支持上传 / 粘贴 / 拖放、等比拖拽缩放与撤销
+- 🔢 **可定制序号标注** - 支持序号配色、锚点重新绑定、隐藏标注引导和需求定位；编辑工具条放在编辑框外侧，可拖动和归位
+- 🟠 **真实交互热区提示** - 点击原型空白处时，以短暂的透明橙色呼吸提示真实可操作区域，排除无事件的静态按钮
 - 👥 **团队协作** - 支持账号登录、创建/加入团队、邀请码邀请成员，并将个人项目分享给团队查看
-- ☁️ **一键发布分享** - 支持发布到 GitHub Pages 并自动生成项目作品集主页，提供纯净预览、研发交付、内嵌等多种模式
-- 📦 **项目导出** - 导出为独立 HTML，无需服务器即可运行
+- ☁️ **GitHub Pages 发布** - 本地与 AI 共用发布入口，提供纯净版和研发版；研发版包含 PRD、图片、彩色序号与页面 / 状态导航
+- 📦 **独立交付包** - 本地下载与 Pages 发布采用同一版本选择，纯净版保留原型资源，研发版提供可离线打开的评审壳
 
-新增 HTML PPT 生成、设计系统和外部 AI 生成模式。外部 AI 生成可将结构化原型需求交给 Cursor、Codex 等 AI 编程工具继续生成和精修，减少额外大模型调用成本。
+## 本次更新：2026.10 工作台升级
+
+这次更新更聚焦本地 Agent 协作，围绕「结构化资料 → Agent 制作 → 接入评审 → PRD 标注 → 发布交付」完善工作流：全新的项目库首页、本地与 AI 统一工作台、可插图与拖拽缩放的 PRD 编辑器，以及统一的纯净 / 研发交付路径。
+
+完整功能亮点、升级步骤与验证范围见 [本次更新说明](docs/releases/2026-10-11.md)，逐次变更见 [更新日志](docs/changelog.md)。
+
+首页样式与图标本地加载，无需访问 Tailwind CDN 或字体服务。修改首页工具类后，开发环境安装 Playwright 并运行 `python tools/build_home_css.py` 重新生成 `src/vendor/home-utilities.css`；日常启动服务无需构建。工具类使用 Tailwind CSS 3.4.17，图标使用 Font Awesome Free 6.4.0，新界面语义样式在 `src/home.css`，设计约定见 `DESIGN.md`。
 
 ## 📋 系统要求
 
 - **操作系统**: Windows 10/11, macOS, Linux
-- **Python**: 3.8 或更高版本
+- **Python**: 3.10 或更高版本，推荐 3.11+
 - **浏览器**: Chrome, Edge, Firefox (推荐 Chrome)
-- **网络**: 需要能访问 AI API 服务
+- **网络**: AI 生成与 GitHub Pages 发布需要对应服务可用；本地项目管理与 PRD 编辑可在本机使用
 
 ## 🚀 快速开始
 
@@ -37,7 +65,7 @@
 
 #### Windows
 1. 访问 [Python 官网](https://www.python.org/downloads/)
-2. 下载 Python 3.8+ 安装包
+2. 下载 Python 3.10+ 安装包
 3. 运行安装程序，**务必勾选 "Add Python to PATH"**
 4. 打开命令提示符，验证安装：
    ```bash
@@ -72,10 +100,17 @@ cd prototype-generator
 ### 3. 安装依赖
 
 ```bash
-pip install requests
+python -m pip install -r requirements.txt
 ```
 
-> 💡 如果提示权限问题，可以使用 `pip install --user requests`
+首页真实项目封面是可选能力。如需启用：
+
+```bash
+python -m pip install -r requirements-preview.txt
+python -m playwright install chromium
+```
+
+未安装可选依赖或某个原型无法离线渲染时，项目卡片使用名称封面，预览、标注和导出继续可用。首次封面生成在后台排队，后续复用本机缓存。
 
 ---
 
@@ -83,6 +118,8 @@ pip install requests
 
 #### Windows
 双击 `启动项目.bat`
+
+更新后端功能后，先关闭旧服务，再重新启动，使新增接口生效。Windows 上重复启动会提示端口已被占用。
 
 #### macOS/Linux
 ```bash
@@ -161,14 +198,27 @@ python server.py
 ├── server.py              # 后端服务 (Python)
 ├── db.py                  # 团队协作数据库层 (SQLite)
 ├── migrate.py             # 旧项目归属迁移脚本
-├── config.json            # 服务器和 AI 参数配置
+├── proto_meta.py          # 本地项目、页面 / 状态与标注元数据
+├── proto_import.py        # PRD 草稿校验与导入
+├── review_export.py       # 纯净版 / 研发版导出构建
+├── design_settings.py     # 视觉预设与主动覆盖规则
+├── home_thumbnails.py     # 首页封面离线生成与缓存
+├── requirements*.txt      # 核心、封面和开发依赖
+├── config.json            # 本机配置（不纳入 Git）
 ├── src/
 │   ├── index.html         # 主界面（含模型管理）
 │   ├── login.html         # 登录 / 注册页面
 │   ├── script.js          # 前端逻辑
-│   └── viewer.html        # 预览器/微调模式/真机外壳
+│   ├── viewer.html        # 本地 / AI 共用预览、微调、标注工作台
+│   ├── home.css / home-ui.js # 首页主题与公共界面组件
+│   ├── markdown-editor.*  # PRD 图片、表格与富文本编辑器
+│   ├── proto-*.js         # 标注、导航、热区等共享模块
+│   ├── review_shell.html  # 导出 / Pages 研发版评审壳
+│   └── vendor/            # 随仓库提供的前端依赖及许可证
 ├── projects/              # 生成的项目存放目录
 ├── docs/                  # 项目文档
+├── tests/                 # 隔离回归测试
+├── tools/                 # 首页 CSS 构建工具
 ├── design-systems/        # 中文化设计系统资产（DESIGN.md）
 ├── skills/                # 按产物类型拆分的生成 skills
 ├── craft/                 # 色彩、字体、反 AI 味等通用设计规范
@@ -182,7 +232,7 @@ python server.py
 
 ### 生成原型
 
-1. 先选择**产物类型**，再选择设计系统、背景模式、组件风格和主题色
+1. 点击**新建项目**，填写项目名称（留空自动命名），选择**产物类型、视觉风格、主题模式**；需要时展开自定义配色
 2. 填写**页面名称**（如：登录页、首页）
 3. 描述**布局结构**（如：顶部导航栏、左侧菜单、右侧内容区）
 4. 上传**参考图**（可选，支持拖拽或 Ctrl+V 粘贴）
@@ -195,7 +245,23 @@ python server.py
 1. **仅复制完整prompt（1-2页面）**：适合少量页面，系统会创建待外部生成项目并复制完整 prompt，可直接粘贴到聊天式 AI 或 AI IDE。
 2. **AI IDE 项目包（多页面）**：适合多页面、多参考图、需要持续迭代的原型，系统会生成 `AGENTS.md`、`TASK.md`、`DESIGN.md`、`pages/` 和 `reference/manifest.json`，并复制启动指令。
 
-AI IDE 项目包会保留当前选择的设计系统、组件风格、背景模式、主题色、页面描述和参考图信息，方便外部 AI 工具按同一套设计约束生成 `index.html`。
+AI 生成、复制完整 Prompt 与 AI IDE 项目包采用相同规则：**用户明确需求 > 主动自定义配色 / 主题模式 > 视觉风格预设 > 产物类型规则 > 通用设计规则**。组件语言随视觉风格，未主动修改的颜色不作为额外覆盖指令；工程包同时包含页面 / 状态、稳定元素锚点和工作台通信约定。
+
+### 管理本地原型与撰写 PRD
+
+1. 在**本地原型**中添加原型目录或项目集合，按名称 / 路径搜索，最新创建的项目排在前面
+2. 打开预览后切换**标注模式**，在元素上放置序号，双击需求正文进入编辑
+3. 使用工具条插图，或直接粘贴截图 / 拖放图片；单击图片后拖动右下角调整大小
+4. 正文与图片宽度自动保存；修改后下载或重新发布**研发版**即可携带 PRD、图片及标注
+
+### 发布与导出
+
+从项目卡片或工作台进入**发布 / 导出**，选择：
+
+- **纯净版**：交付原型页面及业务资源
+- **研发版**：包含页面 / 状态导航、PRD、图片和序号联动的评审站；支持 HTTP、GitHub Pages 子路径和 `file://` 阅读
+
+两类项目共用同一套发布和下载流程。GitHub Token 在本机配置；Windows 下须由保存凭据的同一账户启动服务。
 
 ### 生成 HTML PPT
 
@@ -240,7 +306,7 @@ GitHub 发布功能不再把 Token 写入 `config.json`。推荐在启动前设�
 PROTOTYPE_GITHUB_TOKEN=你的_GitHub_Token python server.py
 ```
 
-也可以在界面里临时填写 Token；它只会保存到当前服务进程的环境变量中，重启后需要重新设置。
+也可以在界面填写并保存 Token；它会持久化到本机 `data/github_token.bin`，Windows 使用 DPAPI 按当前用户加密，重启后可继续读取，不写入项目或导出物。服务须由保存 Token 的同一 Windows 账户启动；使用其他账户或自动化沙箱运行时，界面会提示已有凭据无法读取，请以原账户启动 `启动项目.bat`。
 
 ---
 
@@ -265,7 +331,17 @@ PROTOTYPE_GITHUB_TOKEN=你的_GitHub_Token python server.py
 
 ## 📝 更新日志
 
-查看 [docs/changelog.md](docs/changelog.md)
+查看 [本次更新说明](docs/releases/2026-10-11.md) 或 [完整更新日志](docs/changelog.md)。
+
+## 开发验证
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m playwright install chromium
+python -m pytest tests -q
+```
+
+部分前端语法测试需要 Node.js。测试使用隔离项目与模拟接口，不向真实 AI 或 GitHub 提交生成、发布请求。
 
 ---
 
