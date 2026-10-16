@@ -38,8 +38,10 @@
 | [API 参考 (api.md)](api.md) | 后端 API 接口定义 |
 | [开发规范 (best_practices.md)](best_practices.md) | **开发必读**：各种规约、注意事项、防 Bug 指南 |
 | [更新日志 (changelog.md)](changelog.md) | 版本迭代记录 |
-| [2026.10 更新说明](releases/2026-10-11.md) | 本次更新亮点与升级方式 |
+| [2026.10 工作台与 Agent 协作更新](releases/2026-10-16.md) | 最新更新亮点与迁移方式 |
+| [上一版工作台升级](releases/2026-10-11.md) | 首轮更新亮点与升级方式 |
 | [Agent 协作 skill](agent-skill.md) | prototype-flow 的安装、使用与 PRD 落库 |
+| [多端项目与工具迁移](multi-client.md) | 演示入口判断、统一导航、接入清单与其他 AI 工具迁移 |
 | [任务归档 (archive/)](archive/) | 历史开发任务记录 |
 
 ## 目录结构速览

@@ -375,3 +375,15 @@ def delete_project_ownership(project_id):
     conn.execute("DELETE FROM project_ownership WHERE project_id = ?", (project_id,))
     conn.execute("DELETE FROM project_shares WHERE project_id = ?", (project_id,))
     conn.commit()
+
+
+def rename_project_identity(old_id, new_id):
+    """随 AI 文件夹改名保留归属与团队分享；冲突则整笔回滚。"""
+    if old_id == new_id:
+        return
+    conn = get_conn()
+    with conn:
+        if conn.execute('SELECT 1 FROM project_ownership WHERE project_id = ? UNION SELECT 1 FROM project_shares WHERE project_id = ?', (new_id, new_id)).fetchone():
+            raise ValueError('目标项目名称已存在归属或分享记录')
+        conn.execute('UPDATE project_ownership SET project_id = ? WHERE project_id = ?', (new_id, old_id))
+        conn.execute('UPDATE project_shares SET project_id = ? WHERE project_id = ?', (new_id, old_id))

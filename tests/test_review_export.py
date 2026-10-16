@@ -148,6 +148,15 @@ def test_inject_bundle_position_and_idempotent():
     assert inject(text, bundle).encode('utf-8', errors='surrogateescape').startswith(b'<html><body>\xff\xfe')
 
 
+def test_review_data_keeps_hint_scope_but_excludes_deletion_history():
+    bundle = make_bundle()
+    bundle['project']['pages'][0]['states'][0]['interactionHints'] = {'mode': 'targets', 'protoIds': ['new-filter']}
+    bundle['prd']['deletedAnnotations'] = [{'pageId': 'home', 'stateId': 'default', 'protoId': 'old-filter'}]
+    data = review_export.review_data(bundle, '2026-10-15')
+    assert data['pages'][0]['states'][0]['interactionHints'] == {'mode': 'targets', 'protoIds': ['new-filter']}
+    assert 'deletedAnnotations' not in data and 'old-filter' not in json.dumps(data)
+
+
 def test_hotspot_bootstrap_before_business_scripts():
     original = '<!doctype html><html><head><meta charset="utf-8"><title>订单</title><script>window.business=1</script></head><body>内容</body></html>'
     result = review_export.inject_hotspot_bootstrap(original)

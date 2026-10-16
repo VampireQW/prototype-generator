@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>原型预览器</title>
-    <link rel="stylesheet" href="/src/proto-markdown.css?v=20261008-outside-toolbar">
+    <link rel="stylesheet" href="/src/proto-markdown.css?v=20261015-vercel-workbench">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -35,14 +35,18 @@
         .prd-sidebar {
             transition: width 0.3s ease;
             position: relative;
+            flex: none;
+            min-width: 0;
         }
 
         .prd-sidebar.collapsed {
-            width: 48px;
+            width: 0;
+            border-left-width: 0;
         }
 
         .prd-sidebar.expanded {
             width: 420px;
+            max-width: 100vw;
         }
 
 #prdResizer { position: absolute; left: -3px; top: 0; bottom: 0; width: 6px; cursor: col-resize; z-index: 25; touch-action: none; }
@@ -618,6 +622,20 @@
             z-index: 1000;
         }
 
+        #prdFloatingToggle { position: fixed; top: calc(var(--viewer-floating-inset) * 2 + var(--viewer-floating-size)); right: var(--viewer-floating-inset); z-index: 900; }
+        #prdFloatingToggle, #prdToggle { display: grid; place-items: center; flex: none; box-sizing: border-box; padding: 0; border: 1px solid var(--ext-border); border-radius: 6px; color: var(--ext-text); background: var(--ext-surface); cursor: pointer; }
+        #prdFloatingToggle { width: var(--viewer-floating-size); height: var(--viewer-floating-size); box-shadow: var(--ext-shadow); }
+        #prdFloatingToggle.hidden { display: none; }
+        #prdFloatingToggle svg, #prdToggle svg { width: var(--viewer-floating-icon-size); height: var(--viewer-floating-icon-size); }
+        #prdToggle { width: 28px; height: 28px; border-color: transparent; background: transparent; }
+        #prdFloatingToggle:hover, #prdToggle:hover { background: var(--ext-hover); }
+        #prdFloatingToggle:focus-visible, #prdToggle:focus-visible { outline: 2px solid var(--ext-accent); outline-offset: 2px; }
+        .prd-header { display: flex; align-items: center; gap: 8px; flex: none; min-height: 52px; padding: 10px 12px; padding-right: calc(var(--viewer-floating-size) + var(--viewer-floating-inset) * 2); border-bottom: 1px solid var(--ext-border); }
+        #prdPanelTitle { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ext-text); font-size: 15px; font-weight: 600; }
+        .prd-header-tools { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+        .prd-header-tools:has(> .hidden):not(:has(> :not(.hidden))) { display: none; }
+        @media(pointer:coarse) { .prd-header { min-height: 60px; padding: 8px; padding-right: calc(var(--viewer-floating-size) + var(--viewer-floating-inset) * 2); gap: 4px; } #prdToggle, .prd-header-tools .ext-icon-action { width: 44px; height: 44px; } .prd-header-tools { gap: 0; } #prdPanelTitle { font-size: 14px; } }
+
         /* 小图标触发器 */
         .preview-toolbar-trigger {
             width: var(--viewer-floating-size);
@@ -1054,7 +1072,7 @@
         .app-dialog {
             position: fixed;
             inset: 0;
-            z-index: 10000;
+            z-index: 10060;
             display: none;
             align-items: center;
             justify-content: center;
@@ -1204,25 +1222,24 @@
             }
         }
 
-        /* 标注区继承全局中文排版与色彩基线；水滴轮廓和深色评论浮层按参考图。 */
+        /* 工作台基础 token；水滴编号颜色由 proto-appearance 独立维护。 */
         :root {
-            --ext-accent: #2563eb; --ext-soft: #eef2ff; --ext-surface: #ffffff;
-            --ext-hover: #f1f2f4; --ext-text: #1a1d23; --ext-muted: #626b78;
-            --ext-border: #d8dee3; --ext-control: #808790; --ext-danger: #b42318;
+            --ext-accent: #2563eb; --ext-soft: #f5f5f5; --ext-surface: #ffffff;
+            --ext-hover: #f5f5f5; --ext-text: #171717; --ext-muted: #666666;
+            --ext-border: #ebebeb; --ext-control: #888888; --ext-danger: #c50000;
             --ext-note-divider: color-mix(in srgb, var(--ext-border) 60%, var(--ext-surface));
-            /* 蓝底上的字 / 面上的蓝字要分开：暗色下面上的蓝要提亮（#91b5ff / #212326 ≈ 7.6:1），蓝底上的白不变 */
+            /* 编号填色与界面链接前景分别维护，确保两种主题下可读。 */
             --ext-on-accent: #ffffff; --ext-accent-text: #2563eb;
-            --ext-scroll: #cbd5e1;
-            --ext-shadow: 0 4px 12px rgba(16,24,40,.12);
-            --ext-font: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+            --ext-scroll: #a1a1a1;
+            --ext-shadow: 0 1px 1px #00000005, 0 8px 16px -4px #0000000a, 0 24px 32px -8px #0000000f;
+            --ext-font: Geist, Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
         }
-        /* 外观设置（跟随系统 / 浅色 / 暗色）只作用于右栏与其弹出菜单，色板与 iframe 内标注卡（proto-annotate）、Markdown（proto-markdown.css）同一套：
-           #212326 / #363c44 / #f2f4f7（14:1） / #a8b0ba（7.3:1） / #91b5ff（7.6:1）。左栏与预览工具栏不受影响。 */
+        /* 外观偏好同步工作台导航、悬浮工具、PRD 与编辑卡片，原型 iframe 保留自身主题。 */
         :root[data-ext-theme="dark"] #prdSidebar, :root[data-ext-theme="dark"] .ext-note-menu {
-            --ext-soft: #2a3444; --ext-surface: #212326; --ext-hover: #363c44; --ext-text: #f2f4f7; --ext-muted: #a8b0ba;
-            --ext-border: #626a78; --ext-control: #808790; --ext-danger: #ffb4ab; --ext-accent-text: #91b5ff; --ext-scroll: #626a78;
+            --ext-soft: #1a1a1a; --ext-surface: #111111; --ext-hover: #1f1f1f; --ext-text: #ededed; --ext-muted: #a1a1a1;
+            --ext-border: #2e2e2e; --ext-control: #666666; --ext-danger: #ff6166; --ext-accent-text: #52a8ff; --ext-scroll: #666666;
             --ext-note-divider: color-mix(in srgb, var(--ext-border) 60%, var(--ext-surface));
-            --ext-shadow: 0 8px 24px rgba(0,0,0,.4);
+            --ext-shadow: 0 1px 1px #0000000f, 0 8px 16px -4px #00000033, 0 24px 32px -8px #00000033;
             color-scheme: dark;
         }
         /* 右栏骨架用的是 Tailwind 工具类，暗色下按 token 覆盖（选择器限定在 #prdSidebar 内，不碰别处的同名类） */
@@ -1231,7 +1248,6 @@
         :root[data-ext-theme="dark"] #prdSidebar .text-gray-800, :root[data-ext-theme="dark"] #prdSidebar .text-gray-700 { color: var(--ext-text); }
         :root[data-ext-theme="dark"] #prdSidebar .text-gray-500, :root[data-ext-theme="dark"] #prdSidebar .text-gray-400 { color: var(--ext-muted); }
         :root[data-ext-theme="dark"] #prdSidebar .text-indigo-500 { color: var(--ext-accent-text); }
-        :root[data-ext-theme="dark"] #prdCollapsedLabel:hover { background: var(--ext-hover); }
         :root[data-ext-theme="dark"] #prdSidebar .ext-task-badge[data-status="pending"] { background: var(--ext-hover); }
         :root[data-ext-theme="dark"] #prdSidebar .ext-task-badge[data-status="applied"] { background: #4a3a12; color: #fcd34d; }
         :root[data-ext-theme="dark"] #prdSidebar .ext-task-badge[data-status="verified"] { background: #14392a; color: #6ee7b7; }
@@ -1262,10 +1278,10 @@
         .ext-nav-anchor { border: 0; background: none; margin: 0; padding: 4px 6px; border-radius: 6px; color: var(--ext-muted); font-size: 12px; line-height: 1.5; cursor: pointer; }
         .ext-nav-anchor:hover { color: var(--ext-text); background: var(--ext-hover); }
         .ext-nav-anchor .ext-count { display: inline-block; margin-left: 2px; padding: 0 6px; border-radius: 999px; background: var(--ext-hover); color: var(--ext-muted); font-size: 11px; line-height: 18px; }
-        .ext-nav-spacer { flex: 1; }
         .ext-icon-action { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--ext-muted); cursor: pointer; }
         .ext-icon-action:hover { background: var(--ext-hover); color: var(--ext-text); }
         .ext-icon-action[aria-pressed="true"] { background: var(--ext-accent); color: var(--ext-on-accent); }
+        .prd-header-tools button:focus-visible { outline: 2px solid var(--ext-accent); outline-offset: 2px; }
         .ext-shortcut-card { display: flex; flex-direction: column; padding: 4px 12px 6px; border-bottom: 1px solid var(--ext-border); background: var(--ext-soft); }
         /* 外观三选一：与「发布 / 导出」同款 segmented，但全部走 --ext-* token，暗色下随右栏一起变 */
         .ext-theme-seg { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--ext-border); border-radius: 8px; background: var(--ext-surface); }
@@ -1333,6 +1349,11 @@
         .device-screen-bare { border-radius: 6px; background: var(--ext-surface); }
         .device-frame-web { display: contents; }
         .device-screen-web { width: 100%; height: 100%; border-radius: 0; }
+        #previewContainer { min-height: 0; }
+        .device-frame-pad { position: relative; flex: none; box-sizing: border-box; width: 1220px; height: 860px; padding: 20px; border-radius: 34px; background: linear-gradient(145deg,#303139,#191a1f); box-shadow: 0 0 0 1px #42434a,0 0 0 3px #111216,0 20px 60px -12px #0005; }
+        .device-frame-pad::before { content: ''; position: absolute; top: 7px; left: calc(50% - 3px); width: 6px; height: 6px; border-radius: 50%; background: radial-gradient(circle at 35% 35%,#243c57,#060810 70%); box-shadow: 0 0 0 1px #111; }
+        .device-frame-pad .device-screen { border-radius: 16px; background: #fff; }
+        .device-frame-pad-bare { flex: none; width: 1180px; height: 820px; }
         .device-toggle { color: var(--ext-muted); min-height: 32px; }
         .device-toggle input[type="checkbox"] { border: 1px solid var(--ext-control); background: var(--ext-border); }
         .device-toggle input[type="checkbox"]:checked { background: var(--ext-accent); border-color: var(--ext-accent); }
@@ -1383,6 +1404,9 @@
         .github-setup-step .step-num { width: 22px; height: 22px; border-radius: 50%; background: #6366f1; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
         @media(prefers-reduced-motion:reduce) { .ext-mode .prd-sidebar { transition: none; } }
     </style>
+    <link rel="stylesheet" href="/agent-skills/prototype-flow/assets/project-navigation.css?v=20261016-compact-nav">
+    <script src="/agent-skills/prototype-flow/assets/project-navigation.js?v=20261015-page-tree"></script>
+    <link rel="stylesheet" href="/src/workbench.css?v=20261016-project-name-hover">
 </head>
 
 <body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
@@ -1401,6 +1425,7 @@
                     <button class="view-btn active" data-view="auto">Auto</button>
                     <button class="view-btn" data-view="web">Web</button>
                     <button class="view-btn" data-view="mobile">App</button>
+                    <button class="view-btn" data-view="pad">Pad</button>
                 </div>
             </div>
             <!-- 真机外壳开关 -->
@@ -1577,6 +1602,7 @@
                     <button class="view-btn active" data-view="auto">Auto</button>
                     <button class="view-btn" data-view="web">Web</button>
                     <button class="view-btn" data-view="mobile">App</button>
+                    <button class="view-btn" data-view="pad">Pad</button>
                 </div>
             </div>
 
@@ -1619,10 +1645,14 @@
         </div>
     </header>
 
+    <button id="prdFloatingToggle" type="button" class="hidden" aria-label="展开 PRD 面板" title="展开 PRD 面板" aria-controls="prdSidebar" aria-expanded="false">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16M7 9h4M7 13h4"/></svg>
+    </button>
+
     <!-- 主内容区 -->
     <div class="flex-1 flex overflow-hidden">
         <!-- 左侧边栏 (编辑/研发模式) -->
-        <aside id="devSidebar" class="bg-white border-r border-gray-200 flex-col hidden relative" data-expanded="false">
+        <aside id="devSidebar" class="ppn-nav-panel bg-white border-r border-gray-200 flex-col hidden relative" data-expanded="false">
             <!-- 展开/收起按钮 -->
             <button id="devSidebarToggle" type="button" onclick="toggleDevSidebar()" aria-label="展开页面列表" title="展开页面列表" aria-expanded="false" aria-controls="devSidebarContent">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M13 9h4M13 13h4"/></svg>
@@ -1630,8 +1660,9 @@
 
             <!-- 展开时的内容 -->
             <div id="devSidebarContent" class="flex-col hidden overflow-hidden" style="width: 256px;">
-                <div class="p-4 border-b border-gray-100">
-                    <h3 class="text-sm font-semibold text-gray-500 uppercase tracking-wider">页面导航</h3>
+                <div class="wb-project-header border-b border-gray-100">
+                    <div class="wb-project-heading"><h2 id="navProjectName" title="项目名称">页面导航</h2><button id="renameProjectButton" type="button" onclick="openProjectRename()" aria-label="修改项目名称" title="修改项目名称" hidden><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m16 3 5 5L8 21H3v-5L16 3Z M13 6l5 5"/></svg></button></div>
+                    <span id="navProjectCaption" hidden>页面导航</span>
                 </div>
 
                 <!-- 流程图入口 -->
@@ -1720,27 +1751,18 @@
         <aside id="prdSidebar"
             class="prd-sidebar collapsed hidden-mode bg-white border-l border-gray-200 flex flex-col">
             <div id="prdResizer" aria-hidden="true"></div>
-            <!-- 展开/收起按钮 - 固定在侧边栏内部左边缘 -->
-            <button id="prdToggle"
-                class="absolute left-0 top-1/2 -translate-y-1/2 w-4 h-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-l-md flex items-center justify-center cursor-pointer z-20 shadow-sm"
-                style="transform: translateX(-100%) translateY(-50%);">
-                <i class="fas fa-chevron-left" style="font-size: 9px;"></i>
-            </button>
-
-            <!-- 收起时的标签 -->
-            <div id="prdCollapsedLabel" class="flex-1 flex items-center justify-center cursor-pointer hover:bg-gray-50"
-                onclick="togglePrdSidebar()">
-                <span class="text-gray-500 text-sm font-medium"
-                    style="writing-mode: vertical-lr; transform: rotate(180deg);">PRD 文档</span>
-            </div>
-
             <!-- 展开时的内容 -->
             <div id="prdContent" class="flex-1 flex-col hidden overflow-hidden">
                 <!-- 头部 -->
-                <div class="p-4 border-b border-gray-100 flex items-center justify-between flex-none">
-                    <div class="flex items-center gap-2">
-                        <i class="fas fa-file-alt text-indigo-500"></i>
-                        <span class="font-semibold text-gray-800">PRD 文档</span>
+                <div class="prd-header">
+                    <button id="prdToggle" type="button" aria-label="收起 PRD 面板" title="收起 PRD 面板" aria-controls="prdSidebar" aria-expanded="false">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+                    </button>
+                    <span id="prdPanelTitle">PRD 文档</span>
+                    <div class="prd-header-tools" role="group" aria-label="PRD 工具">
+                        <button id="extPickToggle" type="button" class="ext-icon-action hidden" aria-pressed="false" aria-keyshortcuts="Alt+Shift+A" aria-label="添加标注" title="添加标注（Alt+Shift+A）"><i class="fas fa-comment-medical" aria-hidden="true"></i></button>
+                        <button id="extShortcutBtn" type="button" class="ext-icon-action hidden" aria-expanded="false" aria-controls="extShortcutCard" aria-label="自定义标注快捷键" title="自定义标注快捷键"><i class="fas fa-keyboard" aria-hidden="true"></i></button>
+                        <button id="extThemeBtn" type="button" class="ext-icon-action hidden" aria-expanded="false" aria-controls="extThemeCard" aria-label="外观设置" title="外观：跟随系统 / 浅色 / 暗色"><i class="fas fa-circle-half-stroke" aria-hidden="true"></i></button>
                     </div>
                 </div>
 
@@ -1749,10 +1771,6 @@
                     <nav class="ext-reading-nav" aria-label="PRD 段落跳转">
                         <button id="extDocTab" type="button" class="ext-nav-anchor">页面需求</button>
                         <button id="extAnnotTab" type="button" class="ext-nav-anchor">标注明细 <span id="extAnnotCount" class="ext-count"></span></button>
-                        <span class="ext-nav-spacer"></span>
-                        <button id="extPickToggle" type="button" class="ext-icon-action hidden" aria-pressed="false" aria-keyshortcuts="Alt+Shift+A" aria-label="添加标注" title="添加标注（Alt+Shift+A）"><i class="fas fa-comment-medical"></i></button>
-                        <button id="extShortcutBtn" type="button" class="ext-icon-action hidden" aria-label="自定义标注快捷键" title="自定义标注快捷键"><i class="fas fa-keyboard"></i></button>
-                        <button id="extThemeBtn" type="button" class="ext-icon-action hidden" aria-expanded="false" aria-controls="extThemeCard" aria-label="外观设置" title="外观：跟随系统 / 浅色 / 暗色"><i class="fas fa-circle-half-stroke"></i></button>
                     </nav>
                     <div id="extShortcutCard" class="ext-shortcut-card hidden" aria-label="标注快捷键设置">
                         <div id="extShortcutView" class="ext-shortcut-row">
@@ -1940,7 +1958,7 @@
     <script src="/src/vendor/vditor/dist/js/lute/lute.min.js"></script>
     <script src="/src/vendor/vditor/dist/index.min.js"></script>
     <script src="/src/vendor/dompurify/dist/purify.min.js"></script>
-    <script src="/src/proto-markdown.js?v=20261008-outside-toolbar"></script>
+    <script src="/src/proto-markdown.js?v=20261015-pad"></script>
     <script>
         console.log('%c[MAIN VIEWER] Script 开始加载', 'background: blue; color: white; font-weight: bold');
         // ==================== 状态管理 ====================
@@ -1951,7 +1969,7 @@
         let pages = [];
         let saveTimer = null;
         let prdContent = {};
-        let previewType = 'auto'; // 'auto' | 'mobile' | 'web'
+        let previewType = 'auto'; // 'auto' | 'mobile' | 'web' | 'pad'
         let projectsDir = ''; // 由服务端动态提供，避免硬编码路径
 
         // ==================== 外部项目标注模式状态 ====================
@@ -1959,6 +1977,7 @@
         let extBundle = null;        // .prototype 元数据 bundle
         let extPage = '';            // 当前页 pageId
         let extStateId = 'default';  // 当前状态（PrototypeBridge data-proto-state）
+        let extInitialLocation = null;
         let extStateWatcher = null;
         let extSelectedNoteId = null;
         let extNoteMenu = null;
@@ -2043,7 +2062,7 @@
         const previewWrapper = $('previewWrapper');
         const prdSidebar = $('prdSidebar');
         const prdToggle = $('prdToggle');
-        const prdCollapsedLabel = $('prdCollapsedLabel');
+        const prdFloatingToggle = $('prdFloatingToggle');
         const prdContentEl = $('prdContent');
         const prdTextarea = $('prdTextarea');
         const prdPreviewContent = $('prdPreviewContent');
@@ -2090,6 +2109,7 @@
         function setupEventListeners() {
             // PRD 侧边栏切换
             prdToggle.onclick = togglePrdSidebar;
+            prdFloatingToggle.onclick = event => { togglePrdSidebar(); if (prdExpanded && event.detail === 0) prdToggle.focus({preventScroll:true}); };
 
             // PRD 编辑/预览切换
             $('prdEditTab').onclick = () => switchPrdTab('edit');
@@ -2122,8 +2142,9 @@
             if (previewType !== 'auto') return;
             let sourceType = '';
             try { sourceType = previewFrame.contentDocument?.documentElement.dataset.protoPreview || ''; } catch (_) { /* 非同源页面 */ }
-            const declared = sourceType || extPageRecord()?.previewType || extBundle?.project.previewType;
-            if (declared === 'mobile' || declared === 'web') {
+            const page = extPageRecord();
+            const declared = page?.states?.find(s => s.id === extStateId)?.previewType || page?.previewType || extBundle?.project.clients?.find(c=>c.id===page?.clientId)?.previewType || sourceType || extBundle?.project.previewType;
+            if (['mobile','web','pad'].includes(declared)) {
                 setPreviewMode(declared);
                 return;
             }
@@ -2248,28 +2269,33 @@
 
         let currentPreviewMode = 'mobile';
         let showDeviceFrame = true;
+        let padPreviewFit = null;
 
         function setPreviewMode(mode) {
+            padPreviewFit?.destroy();padPreviewFit=null;
             currentPreviewMode = mode;
             const mobile = mode === 'mobile';
-            const framed = mobile && showDeviceFrame;
+            const pad = mode === 'pad';
+            const device = mobile || pad;
+            const framed = device && showDeviceFrame;
             const deviceFrame = $('deviceFrameWrapper');
             const screen = $('deviceScreen');
             const container = $('previewContainer');
-            document.querySelectorAll('#floatingDeviceToggle, #headerDeviceToggle').forEach(el => { el.style.display = mobile ? '' : 'none'; });
+            document.querySelectorAll('#floatingDeviceToggle, #headerDeviceToggle').forEach(el => { el.style.display = device ? '' : 'none'; });
             document.querySelectorAll('#floatingDeviceFrameToggle, #headerDeviceFrameToggle').forEach(el => { el.checked = showDeviceFrame; });
-            deviceFrame.className = framed ? 'device-frame' : (mobile ? 'device-frame-bare' : 'device-frame-web');
+            deviceFrame.className = pad ? (framed ? 'device-frame-pad' : 'device-frame-pad-bare') : framed ? 'device-frame' : (mobile ? 'device-frame-bare' : 'device-frame-web');
             deviceFrame.style.cssText = '';
-            screen.className = 'device-screen' + (framed ? '' : (mobile ? ' device-screen-bare' : ' device-screen-web'));
+            screen.className = 'device-screen' + (framed ? '' : (device ? ' device-screen-bare' : ' device-screen-web'));
             screen.style.cssText = '';
-            previewWrapper.className = 'bg-white overflow-hidden' + (mobile ? '' : ' preview-frame-web');
+            previewWrapper.className = 'bg-white overflow-hidden' + (device ? '' : ' preview-frame-web');
             previewWrapper.style.cssText = '';
-            deviceFrame.querySelectorAll('.device-notch, .device-status-bar, .device-home-bar, .device-btn').forEach(el => { el.style.display = framed ? '' : 'none'; });
-            container.classList.toggle('web-mode', !mobile);
-            container.style.padding = mobile ? '' : '0';
+            deviceFrame.querySelectorAll('.device-notch, .device-status-bar, .device-home-bar, .device-btn').forEach(el => { el.style.display = framed && mobile ? '' : 'none'; });
+            container.classList.toggle('web-mode', !device);
+            container.style.padding = device ? '' : '0';
             container.dataset.previewMode = mode;
             container.dataset.deviceFrame = framed ? 'visible' : 'hidden';
-            injectHideScrollbar(mobile);
+            injectHideScrollbar(device);
+            if(pad)padPreviewFit=ProtoProjectNavigation.fitDevice(deviceFrame,container,framed?1220:1180,framed?860:820);
         }
 
         function injectHideScrollbar(inject) {
@@ -2300,8 +2326,8 @@
             // 同步所有开关
             document.querySelectorAll('#floatingDeviceFrameToggle, #headerDeviceFrameToggle').forEach(el => el.checked = checked);
             // 重新应用当前模式
-            if (currentPreviewMode === 'mobile') {
-                setPreviewMode('mobile');
+            if (['mobile','pad'].includes(currentPreviewMode)) {
+                setPreviewMode(currentPreviewMode);
             }
         }
 
@@ -2313,8 +2339,8 @@
 
             if (previewType === 'auto') {
                 detectPreviewType();
-            } else if (previewType === 'mobile') {
-                setPreviewMode('mobile');
+            } else if (['mobile','pad'].includes(previewType)) {
+                setPreviewMode(previewType);
             } else {
                 setPreviewMode('web');
             }
@@ -2340,16 +2366,24 @@
         }
 
         // ==================== PRD 侧边栏 ====================
+        function syncPrdControls() {
+            const available = !prdSidebar.classList.contains('hidden-mode');
+            prdFloatingToggle.classList.toggle('hidden', !available);
+            prdFloatingToggle.setAttribute('aria-expanded', String(prdExpanded));
+            prdToggle.setAttribute('aria-expanded', String(prdExpanded));
+            const label = prdExpanded ? '收起 PRD 面板' : '展开 PRD 面板';
+            prdFloatingToggle.setAttribute('aria-label', label); prdFloatingToggle.title = label;
+            prdSidebar.setAttribute('aria-hidden', String(!available || !prdExpanded));
+        }
         function togglePrdSidebar() {
+            const restoreFloatingFocus = prdSidebar.contains(document.activeElement);
             prdExpanded = !prdExpanded;
             if (prdExpanded) {
                 prdSidebar.classList.remove('collapsed');
                 prdSidebar.classList.add('expanded');
                 try { const w = parseInt(localStorage.getItem('prototype-prd-width') || '0', 10); if (w >= 320) prdSidebar.style.width = Math.min(w, 720) + 'px'; } catch (_) { /* 忽略存储异常 */ }
-                prdCollapsedLabel.classList.add('hidden');
                 prdContentEl.classList.remove('hidden');
                 prdContentEl.classList.add('flex');
-                prdToggle.innerHTML = '<i class="fas fa-chevron-right" style="font-size: 9px;"></i>';
                 // 加载当前页面的 PRD（外部项目改刷标注面板）
                 if (extId) {
                     extRefreshSidebar();
@@ -2367,11 +2401,11 @@
                 prdSidebar.classList.remove('expanded');
                 prdSidebar.classList.add('collapsed');
                 prdSidebar.style.width = '';
-                prdCollapsedLabel.classList.remove('hidden');
                 prdContentEl.classList.add('hidden');
                 prdContentEl.classList.remove('flex');
-                prdToggle.innerHTML = '<i class="fas fa-chevron-left" style="font-size: 9px;"></i>';
             }
+            syncPrdControls();
+            if (!prdExpanded && restoreFloatingFocus) prdFloatingToggle.focus({preventScroll:true});
         }
 
         const prdResizer = $('prdResizer');
@@ -2468,12 +2502,14 @@
 
         // ==================== 模式切换 ====================
         function switchMode(mode) {
+            if(extId && extBundle && !extPage && mode!=='preview'){showToast('请先从回收站恢复页面','warning');return;}
             if (extId && !['preview', 'inspector', 'annotate'].includes(mode)) mode = 'annotate';
             // 在函数内获取 DOM 元素，确保 DOM 已加载
             const mainHeader = $('mainHeader');
             const previewToolbar = $('previewToolbar');
 
             currentMode = mode;
+            syncExtLocation();
             try { previewFrame.contentWindow.ProtoHotspots?.hide(); } catch (_) { /* 原型载入中 */ }
 
             // 更新下拉菜单选中状态
@@ -2524,8 +2560,9 @@
                 // 预览模式：隐藏 header，显示悬浮工具栏
                 mainHeader.style.display = 'none';
                 previewToolbar.style.display = 'block';
-                devSidebar.classList.add('hidden');
-                devSidebar.classList.remove('flex');
+                devSidebar.classList.toggle('hidden', !extId);
+                devSidebar.classList.toggle('flex', !!extId);
+                if (extId) renderDevSidebar();
                 prdSidebar.classList.add('hidden-mode');
                 flowchartView.classList.add('hidden');
                 previewContainer.classList.remove('hidden');
@@ -2606,6 +2643,7 @@
                 }
                 extUpdatePickButton();
             }
+            syncPrdControls();
             // 模式决定序号层显隐（预览 / 微调收起），切模式后立即同步到 iframe
             extRenderPins();
         }
@@ -2916,11 +2954,14 @@
             setupViewSelector();
             setupEventListeners();
             // iframe 每次载入（含翻页）后重新注入标注脚本
-            previewFrame.onload = () => {
+            previewFrame.onload = async () => {
+                if(!extPage)return;
+                const loadedDocument=previewFrame.contentDocument;
                 extAnnotateDeactivate();
                 if (inspectorActive) disableInspector();
                 try {
                     const w = previewFrame.contentWindow;
+                    w.document.documentElement.dataset.protoHost = 'workbench';
                     const file = decodeURIComponent(w.location.pathname).replace(`/ext/${extId}/`, '');
                     const page = extBundle?.project.pages.find(p => p.file === file && p.id === w.document.documentElement.dataset.protoPage)
                         || extBundle?.project.pages.find(p => p.file === file);
@@ -2932,12 +2973,20 @@
                 } catch (_) { /* 非同源导航不注入 */ }
                 extSelectedNoteId = null;
                 extDisplayNotes = [];
+                renderExtPageList();
                 applyPreviewType();
-                injectExtAnnotateScripts();
+                await injectExtAnnotateScripts();
+                if(previewFrame.contentDocument!==loadedDocument)return;
+                if(extInitialLocation?.pageId===extPage){
+                    const requested=extInitialLocation;extInitialLocation=null;
+                    if(requested.stateId!==extStateId&&!await extEnterState(requested.stateId))showToast('页面未能进入链接指定状态，已显示当前状态','warning');
+                    renderExtPageList();extProjectNavigation?.reveal(extPage);
+                }
                 extRefreshSidebar();
             };
             await loadProto();
-            requestAnimationFrame(() => switchMode('preview'));
+            const requestedMode=new URLSearchParams(location.search).get('mode');
+            requestAnimationFrame(() => switchMode(['preview','inspector','annotate'].includes(requestedMode)?requestedMode:'preview'));
         }
 
         async function loadProto() {
@@ -2949,11 +2998,13 @@
                     return;
                 }
                 extBundle = data.bundle;
-                document.title = `${extBundle.project.name} - 标注`;
-                $('projectTitle').textContent = extBundle.project.name;
-                const pages = extBundle.project.pages;
-                if (!pages?.length) throw new Error('项目中没有可预览的页面');
-                extPage = ((pages.find(p => p.id === 'home')) || pages[0]).id;
+                renderProjectName();
+                const link=new URLSearchParams(location.search);
+                const requested=extBundle.project.pages.find(page=>page.id===link.get('page')&&!page.trashedAt);
+                extPage = requested?.id || ProtoProjectNavigation.defaultPage(extBundle.project)?.id || '';
+                if(!extPage){showExtEmptyPages();return;}
+                if(requested)extInitialLocation={pageId:requested.id,stateId:requested.states.find(s=>s.id===link.get('state'))?.id || requested.states[0]?.id || 'default'};
+                else if(link.get('page'))showToast('链接中的页面已移除，已打开默认页面','warning');
                 applyPreviewType();
                 openExtPage(extPage);
             } catch (e) {
@@ -2966,9 +3017,56 @@
             return (extBundle && extBundle.project.pages.find(p => p.id === extPage)) || null;
         }
 
+        function renderProjectName() {
+            const name = extBundle?.project.name || '原型项目';
+            document.title = `${name} - 标注`;
+            $('projectTitle').textContent = name;
+            $('navProjectName').textContent = name;
+            $('navProjectName').title = name;
+            $('navProjectCaption').hidden = false;
+            $('renameProjectButton').hidden = false;
+        }
+
+        function openProjectRename() {
+            if (!extBundle || $('projectRenamePopover')) return;
+            const panel = document.createElement('div');
+            panel.id = 'projectRenamePopover'; panel.className = 'wb-project-rename';
+            panel.setAttribute('popover', 'auto'); panel.setAttribute('role', 'dialog');
+            panel.setAttribute('aria-labelledby', 'projectRenameTitle');
+            panel.innerHTML = `<form><h3 id="projectRenameTitle">修改项目名称</h3><label for="projectRenameInput">项目名称</label><input id="projectRenameInput" type="text" maxlength="100" required autocomplete="off"><p class="wb-rename-hint">本地文件夹将同步更名，原有标注和项目链接保留。</p><p id="projectRenameError" role="alert" hidden></p><footer><button type="button" data-cancel>取消</button><button type="submit" class="wb-rename-save">保存</button></footer></form>`;
+            document.body.append(panel);
+            const trigger = $('renameProjectButton'), input = panel.querySelector('input'), submit = panel.querySelector('[type="submit"]'), cancel = panel.querySelector('[data-cancel]'), error = $('projectRenameError');
+            input.value = extBundle.project.name;
+            let saving = false;
+            const position = () => { const rect = trigger.getBoundingClientRect(); panel.style.left = Math.max(12, Math.min(rect.left, innerWidth - panel.offsetWidth - 12)) + 'px'; panel.style.top = Math.max(12, Math.min(rect.bottom + 10, innerHeight - panel.offsetHeight - 12)) + 'px'; };
+            const close = () => { if (!saving) panel.hidePopover(); };
+            cancel.onclick = close;
+            panel.addEventListener('beforetoggle', event => { if (event.newState === 'closed' && saving) event.preventDefault(); });
+            panel.addEventListener('toggle', event => { if (event.newState !== 'closed') return; panel.remove(); window.removeEventListener('resize', position); trigger.setAttribute('aria-expanded', 'false'); trigger.focus(); });
+            panel.querySelector('form').onsubmit = async event => {
+                event.preventDefault(); if (saving) return;
+                if (!input.value.trim()) { input.setCustomValidity('请填写项目名称'); input.reportValidity(); return; }
+                saving = true; input.readOnly = true; submit.disabled = cancel.disabled = true; submit.textContent = '保存中…'; error.hidden = true;
+                const run = extSaveQueue.then(async () => {
+                    const res = await fetch('/api/proto/rename-project', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projectId: extId, name: input.value.trim(), expectedRevision: extBundle.revision }) });
+                    const data = await res.json();
+                    if (!res.ok || !data.ok) throw new Error(data.error || '改名失败，请重试');
+                    extBundle = data.bundle; renderProjectName();
+                    showToast('项目及本地文件夹已更名');
+                });
+                extSaveQueue = run.catch(() => false);
+                try { await run; saving = false; close(); }
+                catch (reason) { error.textContent = reason.message || '改名失败，请重试'; error.hidden = false; position(); input.focus(); }
+                finally { saving = false; input.readOnly = false; submit.disabled = cancel.disabled = false; submit.textContent = '保存'; }
+            };
+            input.oninput = () => { input.setCustomValidity(''); error.hidden = true; };
+            trigger.setAttribute('aria-expanded', 'true'); trigger.setAttribute('aria-controls', panel.id);
+            panel.showPopover(); position(); window.addEventListener('resize', position); input.focus(); input.select();
+        }
+
         function openExtPage(pageId) {
             const page = extBundle.project.pages.find(p => p.id === pageId);
-            if (!page) return;
+            if (!page || page.trashedAt) return;
             if (previewFrame.contentWindow.ProtoAnnotate?.isBusy() || ProtoMarkdown.isBusy()) { showToast('正在保存，请稍后切页', 'warning'); return; }
             extAnnotateDeactivate();
             extSuspendNoteEdit();
@@ -2976,33 +3074,209 @@
             extSelectedNoteId = null;
             closeExtNoteMenu();
             extPage = pageId;
+            document.getElementById('extEmptyPages')?.remove();
+            $('deviceFrameWrapper').style.display='';
             extStateId = 'default';
             renderExtPageList();
             previewFrame.src = `/ext/${encodeURIComponent(extId)}/${page.file.split('/').map(encodeURIComponent).join('/')}`;
         }
 
+        let extProjectNavigation = null;
+        function syncExtLocation() {
+            if(!extId||!extBundle||!extPage||extInitialLocation)return;
+            const url=new URL(location.href);url.searchParams.set('page',extPage);url.searchParams.set('state',extStateId);url.searchParams.set('mode',currentMode);
+            if(url.href!==location.href)history.replaceState(null,'',url);
+        }
         function renderExtPageList() {
             if (!extBundle) return;
-            pageList.innerHTML = extBundle.project.pages.map(p => {
-                const count = extBundle.prd.annotations.filter(n => n.pageId === p.id).length;
-                return `
-                <button type="button" class="ext-page-button page-item px-4 py-3 cursor-pointer ${p.id === extPage ? 'active' : ''}"
-                     data-page-id="${extEscapeHtml(p.id)}" aria-current="${p.id === extPage}">
-                    <div class="flex items-center gap-3">
-                        <i class="fas fa-file text-gray-400"></i>
-                        <div class="flex-1 min-w-0">
-                            <div class="font-medium text-gray-800 truncate">${extEscapeHtml(p.title || p.id)}</div>
-                            <div class="text-xs text-gray-400 truncate">${extEscapeHtml(p.file)}${count ? ` · ${count} 条标注` : ''}</div>
-                        </div>
-                    </div>
-                </button>${(p.states?.length > 1 || p.aiNavigation === 'legacy') ? `<div class="ext-state-list">${p.states.map(state => `
-                    <button type="button" class="ext-state-button" data-page-id="${extEscapeHtml(p.id)}" data-state-id="${extEscapeHtml(state.id)}" aria-current="${p.id === extPage && state.id === extStateId}">${extEscapeHtml(state.title || state.id)}</button>`).join('')}</div>` : ''}`;
-            }).join('');
-            pageList.querySelectorAll('button[data-page-id]').forEach(button => {
-                button.onclick = () => button.dataset.stateId
-                    ? openExtState(button.dataset.pageId, button.dataset.stateId)
-                    : (button.dataset.pageId !== extPage && openExtPage(button.dataset.pageId));
+            syncExtLocation();
+            const config = { project:extBundle.project,currentPage:extPage,currentState:extStateId,
+                annotations:extBundle.prd.annotations,onEdit:editExtPageNavigation,
+                onTrash:openExtPageTrash,
+                onReorder: async request => {
+                    const ok=await protoSave(draft=>{if(!ProtoProjectNavigation.reorderProject(draft.project,request))throw new Error('页面结构已变化，请重新拖动');},{silent:true});
+                    if(ok){renderExtPageList();applyPreviewType();showToast('页面结构已保存');}return ok;
+                },
+                onSelect:(pageId,stateId) => {
+                    if (previewFrame.contentWindow.ProtoAnnotate?.isBusy() || ProtoMarkdown.isBusy()) {showToast('正在保存，请稍后切换','warning');return false;}
+                    if (pageId !== extPage || stateId !== extStateId) return openExtState(pageId,stateId);
+                }};
+            if (extProjectNavigation) extProjectNavigation.update(config);
+            else extProjectNavigation = ProtoProjectNavigation.mount(pageList,config);
+        }
+
+        function showExtEmptyPages() {
+            extAnnotateDeactivate();extSuspendNoteEdit();
+            if(inspectorActive)disableInspector();
+            padPreviewFit?.destroy();padPreviewFit=null;
+            extPage='';extStateId='default';extSelectedNoteId=null;extDisplayNotes=[];
+            $('deviceFrameWrapper').style.display='none';
+            previewFrame.src='about:blank';
+            document.getElementById('extEmptyPages')?.remove();
+            const empty=document.createElement('div');empty.id='extEmptyPages';empty.className='ext-empty-pages';
+            empty.setAttribute('data-prototype-owned','');
+            empty.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h4"/></svg><h2>暂无可预览页面</h2><p>回收站中的页面可以随时恢复。</p><button type="button">打开回收站</button>';
+            const count=extBundle.project.pages.filter(p=>p.trashedAt).length;
+            empty.querySelector('button').hidden=!count;
+            if(!count)empty.querySelector('p').textContent='该项目暂无页面。';
+            empty.querySelector('button').onclick=openExtPageTrash;
+            $('previewContainer').append(empty);renderExtPageList();extRefreshSidebar();
+        }
+
+        let extPageActionBusy=false;
+        async function runExtPageAction(page,action) {
+            if(extPageActionBusy)return false;
+            if(previewFrame.contentWindow?.ProtoAnnotate?.isBusy() || ProtoMarkdown.isBusy() || ProtoMarkdown.current()){
+                showToast('请先结束 PRD 编辑或等待保存完成','warning');return false;
+            }
+            extPageActionBusy=true;
+            const run=extSaveQueue.then(async()=>{
+                try{
+                    const res=await fetch('/api/proto/page-lifecycle',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projectId:extId,pageId:page.id,action,expectedRevision:extBundle.revision,...(action==='delete'?{confirmFile:page.file}:{})})});
+                    const data=await res.json();
+                    if(!res.ok || !data.ok){
+                        if(data.current){extBundle=data.current;renderExtPageList();}
+                        showToast(data.error || '操作失败，请重试','error',4500);return false;
+                    }
+                    extBundle=data.bundle;
+                    const current=extBundle.project.pages.find(p=>p.id===extPage&&!p.trashedAt);
+                    const next=action==='restore'?extBundle.project.pages.find(p=>p.id===page.id):current || ProtoProjectNavigation.defaultPage(extBundle.project);
+                    if(!next)showExtEmptyPages();
+                    else if(next.id!==extPage){renderExtPageList();openExtPage(next.id);extProjectNavigation?.reveal(next.id);}
+                    else{renderExtPageList();extRefreshSidebar();}
+                    showToast(action==='trash'?'页面已移入回收站':action==='restore'?'页面已恢复':'页面及本地文件已彻底删除');return true;
+                }catch(error){showToast(error.message || '操作失败，请重试','error',4500);return false;}
             });
+            extSaveQueue=run.catch(()=>false);
+            try{return await run;}finally{extPageActionBusy=false;}
+        }
+
+        function openExtPageTrash() {
+            if(document.getElementById('extPageTrashDialog'))return;
+            document.getElementById('extPageNavigationDialog')?.close();
+            const dialog=document.createElement('dialog');dialog.id='extPageTrashDialog';dialog.className='ppn ppn-trash-dialog';
+            dialog.setAttribute('aria-labelledby','extPageTrashTitle');
+            dialog.innerHTML='<header class="ppn-trash-header"><div><h2 id="extPageTrashTitle">回收站</h2><p class="ppn-trash-count"></p></div><button type="button" class="ppn-close" aria-label="关闭回收站"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header><div class="ppn-trash-list"></div><footer class="ppn-trash-footer">恢复页面会保留原有 PRD、标注与排序。</footer>';
+            const list=dialog.querySelector('.ppn-trash-list'),closeButton=dialog.querySelector('.ppn-close');
+            let busy=false,pendingDelete='';
+            function position(){const rect=$('devSidebar').getBoundingClientRect();dialog.style.left=Math.max(12,Math.min(rect.right+12,innerWidth-dialog.offsetWidth-12))+'px';}
+            function actionButton(label,kind,callback){const b=document.createElement('button');b.type='button';b.className='ppn-button '+kind;b.textContent=label;b.disabled=busy;b.onclick=callback;return b;}
+            async function perform(page,action){
+                if(busy)return;busy=true;render();
+                const ok=await runExtPageAction(page,action);busy=false;
+                if(ok)pendingDelete='';render();
+                (list.querySelector('button') || closeButton).focus({preventScroll:true});
+            }
+            function render(){
+                const pages=extBundle.project.pages.filter(p=>p.trashedAt);
+                dialog.querySelector('.ppn-trash-count').textContent=pages.length+' 个页面';
+                closeButton.disabled=busy;dialog.setAttribute('aria-busy',String(busy));list.replaceChildren();
+                if(!pages.length){const empty=document.createElement('div');empty.className='ppn-trash-empty';empty.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg><h3>回收站为空</h3><p>移入回收站的页面会显示在这里。</p>';list.append(empty);return;}
+                for(const page of pages){
+                    const item=document.createElement('article');item.className='ppn-trash-item';
+                    const row=document.createElement('div');row.className='ppn-trash-row';
+                    const text=document.createElement('div');text.className='ppn-trash-info';
+                    const title=document.createElement('h3');title.textContent=page.title || page.id;title.title=title.textContent;
+                    const file=document.createElement('p');file.textContent=page.file;file.title=page.file;
+                    const detail=document.createElement('small'),client=extBundle.project.clients?.find(c=>c.id===page.clientId);
+                    const time=new Date(page.trashedAt);detail.textContent=[client?.title,!Number.isNaN(time.valueOf())?new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(time)+' 移入':''].filter(Boolean).join(' · ');
+                    text.append(title,file,detail);row.append(text);
+                    const actions=document.createElement('div');actions.className='ppn-trash-actions';
+                    const restore=actionButton('恢复','ppn-button-quiet',()=>perform(page,'restore'));restore.setAttribute('aria-label','恢复 '+title.textContent);
+                    const remove=actionButton('彻底删除','ppn-button-danger',()=>{pendingDelete=page.id;render();list.querySelector('[data-confirm-delete]')?.focus();});remove.setAttribute('aria-label','彻底删除 '+title.textContent);
+                    actions.append(restore,remove);row.append(actions);item.append(row);
+                    if(pendingDelete===page.id){
+                        const confirm=document.createElement('div');confirm.className='ppn-trash-confirm';
+                        const message=document.createElement('p');message.id='extTrashDeleteMessage';message.textContent='将永久删除本地文件“'+page.file+'”及该页 PRD、标注和任务，无法恢复。';confirm.append(message);
+                        const buttons=document.createElement('div');buttons.className='ppn-trash-confirm-actions';
+                        buttons.append(actionButton('取消','ppn-button-quiet',()=>{pendingDelete='';render();}),actionButton(busy?'删除中…':'永久删除文件','ppn-button-danger-solid',()=>perform(page,'delete')));
+                        buttons.lastElementChild.dataset.confirmDelete='';buttons.lastElementChild.setAttribute('aria-describedby',message.id);confirm.append(buttons);item.append(confirm);
+                    }
+                    list.append(item);
+                }
+            }
+            closeButton.onclick=()=>{if(!busy)dialog.close();};
+            dialog.addEventListener('cancel',event=>{if(busy){event.preventDefault();return;}if(pendingDelete){event.preventDefault();pendingDelete='';render();}});
+            dialog.addEventListener('click',event=>{if(event.target!==dialog || busy)return;const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close();});
+            dialog.addEventListener('close',()=>{window.removeEventListener('resize',position);dialog.remove();pageList.querySelector('.ppn-trash-entry')?.focus({preventScroll:true});},{once:true});
+            document.body.append(dialog);render();dialog.showModal();position();window.addEventListener('resize',position);closeButton.focus();
+        }
+
+        function editExtPageNavigation(page, anchor) {
+            document.getElementById('extPageNavigationDialog')?.close();
+            if(!anchor?.isConnected)return;
+            const dialog=document.createElement('dialog');dialog.id='extPageNavigationDialog';dialog.className='ppn ppn-settings';
+            dialog.setAttribute('aria-labelledby','extPageNavigationTitle');dialog.setAttribute('aria-modal','false');
+            dialog.innerHTML=`<form><header class="ppn-settings-header"><div><h3 id="extPageNavigationTitle">页面设置</h3><p class="ppn-settings-subtitle"></p></div><button class="ppn-close" type="button" aria-label="关闭页面设置"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+            <div class="ppn-settings-fields"><div class="ppn-settings-field"><label class="ppn-client-label" for="extPageNavigationName">页面名称</label><input id="extPageNavigationName" class="ppn-page-name-input" type="text" maxlength="100" autocomplete="off" aria-describedby="extPageNavigationNameError"><p id="extPageNavigationNameError" class="ppn-client-error" role="alert" hidden></p></div><div class="ppn-settings-field" data-field="role"><span>页面角色</span></div><div class="ppn-settings-field" data-field="clientId"><span>所属端</span><div class="ppn-new-client" hidden><label><span class="ppn-client-label">新分类名称</span><input class="ppn-client-input" aria-label="新分类名称" maxlength="32" placeholder="例如：管理端 Web" autocomplete="off"></label><div data-new-type><span class="ppn-client-label">默认显示方式</span></div><p class="ppn-client-error" role="alert" hidden></p><div class="ppn-client-actions"><button type="button" class="ppn-button ppn-button-quiet" data-new-cancel>取消</button><button type="button" class="ppn-button ppn-button-primary" data-new-add>添加分类</button></div></div></div><div class="ppn-settings-field" data-field="previewType"><span>显示方式</span></div></div>
+            <footer class="ppn-settings-footer"><button type="button" class="ppn-button ppn-button-danger ppn-trash-page" data-trash-page>移入回收站</button><button type="button" class="ppn-button ppn-button-quiet" data-cancel>取消</button><button type="submit" class="ppn-button ppn-button-primary">保存</button></footer></form>`;
+            dialog.querySelector('.ppn-settings-subtitle').textContent=page.file || page.id;
+            const controller=new AbortController(), form=dialog.querySelector('form'), controls={}, pendingClients=[];
+            const nameInput=dialog.querySelector('#extPageNavigationName'), nameError=dialog.querySelector('#extPageNavigationNameError');
+            nameInput.value=page.title || page.id;
+            nameInput.oninput=()=>{nameInput.removeAttribute('aria-invalid');nameError.hidden=true;};
+            dialog.querySelector('[data-trash-page]').onclick=async()=>{
+                if(saving)return;saving=true;
+                form.querySelectorAll('button').forEach(b=>b.disabled=true);
+                const ok=await runExtPageAction(page,'trash');saving=false;
+                if(ok)dialog.close();else{form.querySelectorAll('button').forEach(b=>b.disabled=false);controls.tracking.refresh();}
+            };
+            const trackingHost=document.createElement('div');dialog.querySelector('[data-field="role"]').before(trackingHost);
+            controls.tracking=ProtoProjectNavigation.createPageTracking(trackingHost,page);
+            const create=ProtoProjectNavigation.createSelect, panel=dialog.querySelector('.ppn-new-client'), input=panel.querySelector('input'), error=panel.querySelector('.ppn-client-error');
+            let saving=false, restoreFocus=false, unposition=null;
+            const displayItems=[{value:'web',label:'Web',description:'桌面浏览器预览'},{value:'mobile',label:'App',description:'手机预览与外壳'},{value:'pad',label:'Pad',description:'横向平板预览与外壳'}];
+            const clientItems=()=>[{value:'',label:'未分组'},...(extBundle.project.clients || []).concat(pendingClients).map(c=>({value:c.id,label:c.title,hint:pendingClients.includes(c)?'新建':c.previewType==='mobile'?'App':c.previewType==='pad'?'Pad':'Web'}))];
+            controls.role=create(dialog.querySelector('[data-field="role"]'),{owner:dialog,label:'页面角色',value:page.role || 'page',items:[{value:'page',label:'业务页面',description:'直接预览和标注的页面'},{value:'launcher',label:'演示入口',description:'集中切换项目页面的目录'}]});
+            const clientHost=document.createElement('div');dialog.querySelector('[data-field="clientId"]').insertBefore(clientHost,panel);
+            controls.clientId=create(clientHost,{owner:dialog,label:'所属端',value:page.clientId || '',items:clientItems(),onAdd:()=>{panel.hidden=false;error.hidden=true;input.value='';input.removeAttribute('aria-invalid');controls.newType.setValue(controls.previewType.value);input.focus();}});
+            controls.previewType=create(dialog.querySelector('[data-field="previewType"]'),{owner:dialog,label:'显示方式',value:page.previewType || 'web',items:displayItems});
+            controls.newType=create(panel.querySelector('[data-new-type]'),{owner:dialog,label:'新分类默认显示方式',value:page.previewType || 'web',items:displayItems});
+            function addClient(){
+                const title=input.value.trim();
+                if(!title || (extBundle.project.clients || []).concat(pendingClients).some(c=>c.title.trim().toLocaleLowerCase()===title.toLocaleLowerCase())){
+                    error.textContent=title?'已有同名分类，请直接选择':'请填写分类名称';error.hidden=false;input.setAttribute('aria-invalid','true');input.focus();return false;
+                }
+                const client={id:'client-'+(crypto.randomUUID?.() || Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10)),title,previewType:controls.newType.value,userCreated:true};pendingClients.push(client);
+                controls.clientId.setItems(clientItems());controls.clientId.setValue(client.id);controls.previewType.setValue(client.previewType);panel.hidden=true;controls.clientId.button.focus();return true;
+            }
+            panel.querySelector('[data-new-add]').onclick=addClient;
+            panel.querySelector('[data-new-cancel]').onclick=()=>{panel.hidden=true;controls.clientId.button.focus();};
+            input.oninput=()=>{input.removeAttribute('aria-invalid');error.hidden=true;};
+            const close=restore=>{if(saving)return;restoreFocus=restore;dialog.close();};
+            dialog.querySelector('.ppn-close').onclick=()=>close(true);dialog.querySelector('[data-cancel]').onclick=()=>close(true);
+            dialog.addEventListener('keydown',event=>{if(document.getElementById('appDialog')?.classList.contains('active')){if(['Escape','Enter'].includes(event.key))event.preventDefault();return;}if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(!panel.hidden&&!saving){panel.hidden=true;controls.clientId.button.focus();}else close(true);}},{signal:controller.signal});
+            document.addEventListener('pointerdown',event=>{
+                if(document.getElementById('appDialog')?.classList.contains('active'))return;
+                const menu=event.target.closest('.ppn-menu');
+                if(!dialog.contains(event.target)&&!anchor.contains(event.target)&&menu?.dataset.ppnOwner!==dialog.id)close(false);
+            },{signal:controller.signal});
+            window.addEventListener('blur',()=>{if(document.activeElement?.tagName==='IFRAME'&&!document.getElementById('appDialog')?.classList.contains('active'))close(false);},{signal:controller.signal});
+            dialog.addEventListener('close',()=>{controller.abort();unposition?.();Object.values(controls).forEach(c=>c.destroy());anchor.setAttribute('aria-expanded','false');dialog.remove();
+                if(restoreFocus){const next=anchor.isConnected?anchor:Array.from(pageList.querySelectorAll('.ppn-edit')).find(n=>n.dataset.ppnKey==='edit:'+page.id);next?.focus({preventScroll:true});}
+            },{once:true});
+            form.onsubmit=async event=>{
+                event.preventDefault();if(saving)return;
+                const title=nameInput.value.trim();
+                if(!title || title.length>100){nameError.textContent=title?'页面名称最多 100 个字符':'请填写页面名称';nameError.hidden=false;nameInput.setAttribute('aria-invalid','true');nameInput.focus();return;}
+                if(!panel.hidden&&!addClient())return;
+                saving=true;nameInput.readOnly=true;dialog.setAttribute('aria-busy','true');form.querySelectorAll('button').forEach(b=>b.disabled=true);
+                const submit=form.querySelector('[type="submit"]');submit.textContent='保存中…';
+                const ok=await protoSave(draft=>{
+                    const target=draft.project.pages.find(p=>p.id===page.id);if(!target)throw new Error('页面已移除，请重新打开项目');
+                    target.title=title;
+                    for(const [key,value] of Object.entries(controls.tracking.value)){if(value===null)delete target[key];else target[key]=value;}
+                    draft.project.clients=(draft.project.clients || []).concat(pendingClients.filter(c=>!draft.project.clients?.some(existing=>existing.id===c.id)));
+                    ProtoProjectNavigation.updatePageNavigation(draft.project,page.id,Object.fromEntries(['role','clientId','previewType'].map(key=>[key,controls[key].value])));
+                    if(!draft.project.pages.some(p=>p.role!=='launcher'))throw new Error('至少保留一个业务页面');
+                    if(!draft.project.pages.some(p=>p.id===draft.project.defaultPage&&p.role!=='launcher'))draft.project.defaultPage=draft.project.pages.find(p=>p.role!=='launcher').id;
+                });
+                saving=false;nameInput.readOnly=false;dialog.removeAttribute('aria-busy');
+                if(ok){renderExtPageList();applyPreviewType();close(true);}else{form.querySelectorAll('button').forEach(b=>b.disabled=false);controls.tracking.refresh();submit.textContent='保存';}
+            };
+            anchor.setAttribute('aria-expanded','true');anchor.setAttribute('aria-haspopup','dialog');
+            document.body.append(dialog);dialog.show();unposition=ProtoProjectNavigation.positionPopup(dialog,anchor,{side:'right',gap:12,onDetach:()=>close(false)});
+            nameInput.focus({preventScroll:true});
         }
 
         async function openExtState(pageId, stateId) {
@@ -3064,7 +3338,7 @@
                 if (!w.ProtoHotspots) {
                     if (!w.__protoHotspotsLoad) w.__protoHotspotsLoad = new Promise((resolve, reject) => {
                         const script = d.createElement('script');
-                        script.src = '/src/proto-hotspots.js?v=20261005-real-actions-orange';
+                        script.src = '/src/proto-hotspots.js?v=20261016-exact-hints';
                         script.setAttribute('data-prototype-owned', '');
                         script.onload = resolve; script.onerror = () => { w.__protoHotspotsLoad = null; script.remove(); reject(new Error('热区提示载入失败')); };
                         d.head.appendChild(script);
@@ -3072,7 +3346,8 @@
                     await w.__protoHotspotsLoad;
                 }
                 if (previewFrame.contentDocument !== d) return;
-                w.ProtoHotspots.init({ isEnabled: () => ['preview', 'annotate'].includes(currentMode)
+                w.ProtoHotspots.init({ scope: () => extPageRecord()?.states?.find(state => state.id === extStateId)?.interactionHints,
+                    isEnabled: () => ['preview', 'annotate'].includes(currentMode)
                     && !inspectorActive && !extPickActive && !ProtoMarkdown.current() && !w.ProtoAnnotate?.cardOpen?.() });
             } catch (e) { console.warn('[热区提示]', e.message); }
         }
@@ -3105,16 +3380,17 @@
                     return;
                 }
                 const mdStyle = d.createElement('link');
-                mdStyle.rel = 'stylesheet'; mdStyle.href = '/src/proto-markdown.css?v=20261008-outside-toolbar';
+                mdStyle.rel = 'stylesheet'; mdStyle.href = '/src/proto-markdown.css?v=20261015-vercel-workbench';
                 mdStyle.setAttribute('data-prototype-owned', ''); d.head.appendChild(mdStyle);
+                await new Promise((resolve,reject)=>{
                 const s1 = d.createElement('script');
-                s1.src = '/src/proto-anchors.js';
+                s1.src = '/src/proto-anchors.js?v=20261016-reveal-path';
                 s1.onload = () => {
-                    if (previewFrame.contentDocument !== d) return;
+                    if (previewFrame.contentDocument !== d) {resolve();return;}
                     const s2 = d.createElement('script');
-                    s2.src = '/src/proto-annotate.js';
+                    s2.src = '/src/proto-annotate.js?v=20261016-reveal-path';
                     s2.onload = () => {
-                        if (previewFrame.contentDocument !== d) return;
+                        if (previewFrame.contentDocument !== d) {resolve();return;}
                         extRenderPins();
                         renderExtAnnotList();
                         extWatchState();
@@ -3131,10 +3407,14 @@
                         });
                         if (extPickActive) w.ProtoAnnotate.activate();
                         if (currentMode === 'inspector') enableInspector();
+                        resolve();
                     };
+                    s2.onerror=()=>reject(new Error('标注脚本载入失败'));
                     d.body.appendChild(s2);
                 };
+                s1.onerror=()=>reject(new Error('状态定位脚本载入失败'));
                 d.body.appendChild(s1);
+                });
             } catch (e) {
                 console.warn('[标注] 脚本注入失败:', e);
             }
@@ -3250,6 +3530,7 @@
         function extToggleShortcutCard() {
             const card = $('extShortcutCard');
             card.classList.toggle('hidden');
+            $('extShortcutBtn').setAttribute('aria-expanded', String(!card.classList.contains('hidden')));
             if (card.classList.contains('hidden')) extExitShortcutRecording?.();
             else if (!$('extThemeCard').classList.contains('hidden')) extToggleThemeCard();
             extRefreshShortcutUI();
@@ -3363,10 +3644,7 @@
             $('extThemeBtn').onclick = extToggleThemeCard;
             document.querySelectorAll('#extThemeCard input[name="extTheme"]').forEach(r => { r.onchange = () => { if (r.checked) extSetThemePref(r.value); }; });
             extApplyTheme();
-            const title = document.querySelector('#prdContent .p-4 .font-semibold');
-            if (title) title.textContent = 'PRD · 标注';
-            const collapsedSpan = $('prdCollapsedLabel').querySelector('span');
-            if (collapsedSpan) collapsedSpan.textContent = 'PRD · 标注';
+            $('prdPanelTitle').textContent = 'PRD · 标注';
             $('prdTabs').classList.add('hidden');
             $('prdEditor').classList.add('hidden');
             $('prdEditor').classList.remove('flex');
@@ -3517,7 +3795,7 @@
             extSelectNote(noteId);
             const pa = previewFrame.contentWindow.ProtoAnnotate;
             pa?.closeInputCard(true);
-            const focused = pa?.flashNote(noteId);
+            const focused = await pa?.flashNote(noteId);
             if (focused === false && note) {
                 const A = previewFrame.contentWindow.ProtoAnchors;
                 const el = A?.resolveHidden?.(note.anchor);
@@ -3615,10 +3893,10 @@
             trigger.setAttribute('aria-expanded', 'true');
             const r = trigger.getBoundingClientRect();
             if (trigger.ownerDocument !== document) {
-                const frameRect = previewFrame.getBoundingClientRect();
+                const frameRect = previewFrameGeometry();
                 // DOMRect 的 right/bottom 是只读派生值，使用换算后的坐标单独定位。
-                menu.style.left = Math.max(8, Math.min(frameRect.left + r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8)) + 'px';
-                menu.style.top = Math.max(8, Math.min(frameRect.top + r.bottom + 4, innerHeight - menu.offsetHeight - 8)) + 'px';
+                menu.style.left = Math.max(8, Math.min(frameRect.left + r.right * frameRect.scaleX - menu.offsetWidth, innerWidth - menu.offsetWidth - 8)) + 'px';
+                menu.style.top = Math.max(8, Math.min(frameRect.top + r.bottom * frameRect.scaleY + 4, innerHeight - menu.offsetHeight - 8)) + 'px';
             } else {
             menu.style.left = Math.max(8, Math.min(r.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8)) + 'px';
             menu.style.top = (r.bottom + menu.offsetHeight + 8 < innerHeight ? r.bottom + 4 : Math.max(8, r.top - menu.offsetHeight - 4)) + 'px';
@@ -4321,6 +4599,13 @@ ${JSON.stringify(task.targets || [], null, 2)}
 
         // ==================== Overlay Interaction Logic ====================
 
+        function previewFrameGeometry() {
+            const rect=previewFrame.getBoundingClientRect();
+            const scaleX=rect.width/(previewFrame.offsetWidth || rect.width) || 1;
+            const scaleY=rect.height/(previewFrame.offsetHeight || rect.height) || 1;
+            return {left:rect.left+(previewFrame.clientLeft || 0)*scaleX,top:rect.top+(previewFrame.clientTop || 0)*scaleY,scaleX,scaleY};
+        }
+
         function onOverlayMouseMove(e) {
             if (isBoxSelecting) {
                 onBoxSelectMove(e);
@@ -4338,11 +4623,11 @@ ${JSON.stringify(task.targets || [], null, 2)}
         function highlightElementAtPoint(x, y) {
             try {
                 const iframeDoc = previewFrame.contentDocument;
-                const iframeRect = previewFrame.getBoundingClientRect();
+                const iframeRect = previewFrameGeometry();
 
                 // 计算相对于 iframe 视口的坐标
-                const iframeX = x - iframeRect.left;
-                const iframeY = y - iframeRect.top;
+                const iframeX = (x - iframeRect.left) / iframeRect.scaleX;
+                const iframeY = (y - iframeRect.top) / iframeRect.scaleY;
 
                 // 获取最顶层元素
                 const el = iframeDoc.elementFromPoint(iframeX, iframeY);
@@ -4454,8 +4739,8 @@ ${JSON.stringify(task.targets || [], null, 2)}
         function handleInspectorClick(e) {
             // 获取点击位置元素
             const iframeDoc = previewFrame.contentDocument;
-            const iframeRect = previewFrame.getBoundingClientRect();
-            const el = iframeDoc.elementFromPoint(e.clientX - iframeRect.left, e.clientY - iframeRect.top);
+            const iframeRect = previewFrameGeometry();
+            const el = iframeDoc.elementFromPoint((e.clientX - iframeRect.left) / iframeRect.scaleX, (e.clientY - iframeRect.top) / iframeRect.scaleY);
 
             if (!el || el.tagName === 'HTML' || el.tagName === 'BODY') return;
 
@@ -4487,21 +4772,18 @@ ${JSON.stringify(task.targets || [], null, 2)}
             try {
                 const iframeDoc = previewFrame.contentDocument;
                 // 使用 previewFrame 的位置来转换坐标
-                const iframeRect = previewFrame.getBoundingClientRect();
-
-                // 获取 iframe 的边框宽度，因为 getBoundingClientRect 包含边框，但 elementFromPoint 是从内容区域开始计算的
-                const style = window.getComputedStyle(previewFrame);
-                const borderLeft = parseFloat(style.borderLeftWidth) || 0;
-                const borderTop = parseFloat(style.borderTopWidth) || 0;
+                const iframeRect = previewFrameGeometry();
+                const containerRect = previewContainer.getBoundingClientRect();
 
                 // 将屏幕坐标系的框选区域转换为 iframe 内部坐标系 (减去边框)
+                const left=(containerRect.left+boxRect.left-iframeRect.left)/iframeRect.scaleX;
+                const top=(containerRect.top+boxRect.top-iframeRect.top)/iframeRect.scaleY;
                 const selectionRect = {
-                    left: boxRect.left - iframeRect.left - borderLeft,
-                    top: boxRect.top - iframeRect.top - borderTop,
-                    right: boxRect.right - iframeRect.left - borderLeft,
-                    bottom: boxRect.bottom - iframeRect.top - borderTop,
-                    width: boxRect.width,
-                    height: boxRect.height
+                    left, top,
+                    right: left + boxRect.width / iframeRect.scaleX,
+                    bottom: top + boxRect.height / iframeRect.scaleY,
+                    width: boxRect.width / iframeRect.scaleX,
+                    height: boxRect.height / iframeRect.scaleY
                 };
 
                 // 鲁棒性处理：确保 right/bottom 存在
@@ -5201,7 +5483,7 @@ ${userInput}
     <script>
         // 构建变更检测：标签页长开期间工作台文件被更新时，提示一键刷新（防旧版滞留）
         (() => {
-            const WATCHED = ['viewer.html', 'proto-markdown.js', 'proto-appearance.js', 'proto-annotate.js', 'proto-hotspots.js', 'proto-markdown.css', 'markdown-editor.js'];
+            const WATCHED = ['viewer.html', 'workbench.css', 'proto-markdown.js', 'proto-appearance.js', 'proto-annotate.js', 'proto-hotspots.js', 'proto-markdown.css', 'markdown-editor.js'];
             let stamp = null, banner = null, checking = false;
             async function fetchStamp() {
                 const parts = [];

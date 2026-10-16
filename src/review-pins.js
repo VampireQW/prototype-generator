@@ -163,8 +163,15 @@
     window.addEventListener('scroll', e => {
         if (pop && pop.style.display === 'block' && pop.contains(e.target)) return;
         hidePop();
+        scheduleLayout();
     }, { passive: true, capture: true });
-    window.addEventListener('resize', hidePop, { passive: true });
+    window.addEventListener('resize', () => { hidePop(); scheduleLayout(); }, { passive: true });
+
+    let layoutFrame = 0;
+    function scheduleLayout() {
+        if (layoutFrame) return;
+        layoutFrame = requestAnimationFrame(() => { layoutFrame = 0; layout(); });
+    }
 
     const stateOf = () => document.documentElement.dataset.protoState || 'default';
     let lastState = '', lastX = -1, lastY = -1, lastW = 0, lastH = 0, lastHtml = '';
@@ -181,6 +188,7 @@
             let found = null;
             try { found = window.ProtoAnchors.point(n); } catch (_) { /* 锚定异常按失效处理 */ }
             if (!found?.point) { noPoint.push(n); continue; }
+            if (found.point.visible === false) continue; // 滚出嵌套容器的序号随锚点隐藏，不算失锚。
             const pin = document.createElement('button');
             pin.type = 'button';
             pin.className = '__review_pin';
@@ -240,7 +248,7 @@
                 guide.type = 'button'; guide.className = '__review_guide';
                 guide.__rvTrig = trig;
                 guide.style.setProperty('--g-delay', (-(gi++ % 4) * 0.45) + 's');
-                guide.onclick = e => { e.preventDefault(); e.stopPropagation(); try { window.ProtoAnchors.reveal(guide.__rvTarget); } catch (_) { /* ignore */ } layout(); };
+                guide.onclick = async e => { e.preventDefault(); e.stopPropagation(); try { await window.ProtoAnchors.revealAndWait(guide.__rvTarget); } catch (_) { /* ignore */ } layout(); };
                 glayer.appendChild(guide);
             }
             guide.__rvTarget = g.target;

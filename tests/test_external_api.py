@@ -84,6 +84,35 @@ def test_server_rejects_duplicate_listener(api):
     assert api.request('/api/external/list')[0] == 200
 
 
+def test_page_recycle_api_cas_file_deletion_and_access_guards(api,tmp_path):
+    root=prototype(tmp_path/'lifecycle');(root/'extra.html').write_text('<h1>保留页面</h1>',encoding='utf-8')
+    pid=api.request('/api/external/add',{'path':str(root)})[1]['projectId']
+    bundle=api.request('/api/proto/read?projectId='+pid)[1]['bundle']
+    home=next(p for p in bundle['project']['pages'] if p['file']=='index.html')
+    endpoint='/api/proto/page-lifecycle'
+    request={'projectId':pid,'pageId':home['id'],'action':'trash','expectedRevision':bundle['revision']}
+    status,data=api.request(endpoint,request)
+    assert status==200 and (root/'index.html').exists()
+    assert api.request('/ext/'+pid+'/index.html')[0]==404
+    assert api.request(endpoint,request)[0]==409
+    copy_bundle=json.loads(json.dumps(data['bundle']))
+    next(p for p in copy_bundle['project']['pages'] if p['id']==home['id']).pop('trashedAt')
+    assert api.request('/api/proto/save',{'projectId':pid,'expectedRevision':data['bundle']['revision'],'bundle':copy_bundle})[0]==400
+    request.update(action='restore',expectedRevision=data['bundle']['revision'])
+    status,restored=api.request(endpoint,request);assert status==200
+    assert api.request('/ext/'+pid+'/index.html')[0]==200
+    request.update(action='trash',expectedRevision=restored['bundle']['revision'])
+    _,trashed=api.request(endpoint,request)
+    request.update(action='delete',expectedRevision=trashed['bundle']['revision'],confirmFile='extra.html')
+    assert api.request(endpoint,request)[0]==400 and (root/'index.html').exists()
+    request['confirmFile']='index.html'
+    assert api.request(endpoint,request,{'Origin':'https://evil.example'})[0]==403
+    assert (root/'index.html').exists()
+    assert api.request(endpoint,request)[0]==200 and not (root/'index.html').exists()
+    assert (root/'extra.html').exists()
+    assert api.request(endpoint,{**request,'projectId':'missing'})[0]==404
+
+
 def test_prd_image_upload_serving_and_export(api, tmp_path):
     image_data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII='
     import base64
@@ -225,6 +254,28 @@ def test_parallel_cas_and_confirmed_protection(api, tmp_path):
     bundle['prd']['annotations'][0]['body'] = '试图覆盖'
     assert api.request('/api/proto/save', {'projectId': pid, 'expectedRevision': bundle['revision'], 'bundle': bundle})[0] == 400
     assert proto_meta.load_bundle(child)['prd']['annotations'][0]['body'] == '不可修改'
+
+
+def test_workbench_deletion_records_survive_later_client_saves(api, tmp_path):
+    child = prototype(tmp_path / 'deletion-scope')
+    pid = api.request('/api/external/add', {'path': str(child)})[1]['projectId']
+    bundle = api.request(f'/api/proto/read?projectId={pid}')[1]['bundle']
+    bundle['prd']['annotations'] = [{'id': 'n-deleted', 'pageId': 'home', 'stateId': 'default', 'number': 1,
+        'body': '删除正文不应保留', 'confirmed': False, 'anchor': {'protoId': 'old-export'},
+        'placement': {'kind': 'document', 'x': 20, 'y': 30}}]
+    code, result = api.request('/api/proto/save', {'projectId': pid, 'expectedRevision': bundle['revision'], 'bundle': bundle})
+    assert code == 200
+    bundle = result['bundle']
+    bundle['prd']['annotations'] = []
+    code, result = api.request('/api/proto/save', {'projectId': pid, 'expectedRevision': bundle['revision'], 'bundle': bundle})
+    assert code == 200
+    bundle = result['bundle']
+    records = bundle['prd']['deletedAnnotations']
+    assert records[0]['protoId'] == 'old-export' and '删除正文' not in json.dumps(records, ensure_ascii=False)
+    bundle['prd'].pop('deletedAnnotations')
+    code, result = api.request('/api/proto/save', {'projectId': pid, 'expectedRevision': bundle['revision'], 'bundle': bundle})
+    assert code == 200 and result['bundle']['prd']['deletedAnnotations'] == records
+    assert proto_meta.load_bundle(child)['prd']['deletedAnnotations'] == records
 
 
 def test_external_delete_removes_folder_registration_and_scan_root(api, tmp_path):

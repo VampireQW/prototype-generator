@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN" data-proto-page="home" data-proto-state="default" data-proto-role="launcher">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>__PROJECT_TITLE__</title>
+<link rel="stylesheet" href="assets/prototype-navigation/project-navigation.css">
+<style>
+*{box-sizing:border-box}html,body{margin:0;height:100%;font-family:Geist,Inter,-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei UI','Microsoft YaHei',sans-serif}body{display:flex;background:#fafafa;color:#171717}.launcher-sidebar{width:256px;flex:none;background:white;display:flex;flex-direction:column;border-right:1px solid #d3d3d3}.launcher-header{height:58px;display:flex;align-items:center;gap:8px;padding:0 16px;border-bottom:1px solid #ebebeb;font-size:14px;font-weight:600}.launcher-header span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.launcher-header button,.launcher-tools button{border:0;background:transparent;color:inherit;cursor:pointer;font:inherit;border-radius:5px;padding:7px}.launcher-header button:focus-visible,.launcher-tools button:focus-visible{outline:2px solid #0070f3}#navList{flex:1;overflow:auto}.launcher-main{flex:1;min-width:0;display:flex;flex-direction:column}.launcher-tools{height:42px;background:white;border-bottom:1px solid #ebebeb;display:flex;align-items:center;gap:10px;padding:0 16px;font-size:12px}#scope{flex:1}#pageFrame{border:0;width:100%;flex:1;min-height:0}.launcher-sidebar.closed{width:48px}.launcher-sidebar.closed #navList,.launcher-sidebar.closed .launcher-header span{display:none}#previewCanvas{flex:1;min-height:0;display:flex;flex-direction:column}
+@media(prefers-color-scheme:dark){body{background:#0a0a0a;color:#ededed}.launcher-sidebar,.launcher-tools{background:#111;border-color:#2e2e2e}.launcher-header{border-color:#2e2e2e}}
+@media(max-width:700px){.launcher-sidebar{width:200px}}
+</style></head>
+<body>
+<aside class="launcher-sidebar ppn-nav-panel" data-proto-id="side-nav"><header class="launcher-header"><span title="__PROJECT_TITLE__">__PROJECT_TITLE__</span><button id="toggleNav" aria-label="收起页面导航" aria-expanded="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"></rect><path d="M9 4v16M13 9h4M13 13h4"></path></svg></button></header><div id="navList" data-proto-id="nav-list"></div></aside>
+<main class="launcher-main"><header class="launcher-tools"><span id="scope">__PROJECT_TITLE__</span><button id="shellToggle" hidden aria-pressed="true">真机外壳</button></header><div id="previewCanvas"><iframe id="pageFrame" title="交互原型" data-proto-id="page-frame"></iframe></div></main>
+<script type="application/json" id="navigationData">__NAVIGATION_DATA__</script>
+<script src="assets/prototype-navigation/project-navigation.js"></script>
+<script>
+const project = JSON.parse(document.getElementById('navigationData').textContent);
+project.pages = project.pages.filter(p=>p.role!=='launcher');
+const frame = document.getElementById('pageFrame');
+let current, stateId='default', shell=true, nav;
+function enterState(){try{if(typeof frame.contentWindow.PrototypeBridge?.enter==='function'){frame.contentWindow.PrototypeBridge.enter(stateId);return;}}catch(_){}frame.contentWindow.postMessage({__protoProject:1,type:'enterState',stateId},'*');}
+function previewType(){return current?.states?.find(s=>s.id===stateId)?.previewType || current?.previewType || project.clients?.find(c=>c.id===current?.clientId)?.previewType || 'web';}
+function syncSelection(){
+ document.getElementById('scope').textContent=current.title;
+ document.getElementById('shellToggle').hidden=!['mobile','pad'].includes(previewType());
+ ProtoProjectNavigation.applyPreview(frame,previewType(),shell);
+ nav?.update({project,currentPage:current.id,currentState:stateId,onSelect:choose});
+ history.replaceState(null,'','#'+new URLSearchParams({p:current.id,s:stateId}));
+}
+function choose(id,state='default'){
+ const page=project.pages.find(p=>p.id===id);if(!page)return;
+ const changed=current?.file!==page.file;current=page;stateId=page.states?.some(s=>s.id===state)?state:page.states?.[0]?.id || 'default';
+ syncSelection();
+ if(changed)frame.src=page.file.split('/').map(encodeURIComponent).join('/');else enterState();
+}
+frame.onload=()=>{try{frame.contentDocument.documentElement.dataset.protoHost='launcher';}catch(_){}frame.contentWindow.postMessage({__protoProject:1,type:'host',host:'launcher'},'*');enterState();};
+window.addEventListener('message',e=>{if(e.source!==frame.contentWindow || !e.data?.__protoProject || e.data.type!=='state' || !current?.states?.some(s=>s.id===e.data.stateId))return;stateId=e.data.stateId;syncSelection();});
+nav=ProtoProjectNavigation.mount(document.getElementById('navList'),{project,onSelect:choose});
+const hash=new URLSearchParams(location.hash.slice(1));const legacy=project.pages.find(p=>p.id===location.hash.slice(1));
+choose(project.pages.find(p=>p.id===hash.get('p'))?.id || legacy?.id || ProtoProjectNavigation.defaultPage(project)?.id,hash.get('s') || 'default');
+if(!project.pages.length){document.getElementById('scope').textContent='暂无可预览页面';frame.hidden=true;}
+window.addEventListener('hashchange',()=>{const h=new URLSearchParams(location.hash.slice(1));const p=project.pages.find(p=>p.id===(h.get('p') || location.hash.slice(1)));if(p)choose(p.id,h.get('s') || 'default');});
+document.getElementById('toggleNav').onclick=e=>{const closed=document.querySelector('.launcher-sidebar').classList.toggle('closed');e.currentTarget.setAttribute('aria-expanded',String(!closed));e.currentTarget.setAttribute('aria-label',closed?'展开页面导航':'收起页面导航');};
+document.getElementById('shellToggle').onclick=e=>{shell=!shell;e.currentTarget.setAttribute('aria-pressed',String(shell));ProtoProjectNavigation.applyPreview(frame,previewType(),shell);};
+</script></body></html>

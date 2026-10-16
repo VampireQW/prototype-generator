@@ -2947,13 +2947,13 @@ function renderModelManagerList() {
         return;
     }
     container.innerHTML = modelsList.map(m => `
-        <div class="flex items-center gap-3 p-3 rounded-lg border ${m.id === editingId ? 'border-indigo-300 bg-indigo-50/70 ring-1 ring-indigo-200' : m.id === selectedModelId ? 'border-indigo-200 bg-indigo-50/50' : 'border-gray-100 bg-white'} hover:border-indigo-200 transition cursor-pointer"
+        <div class="model-manager-item${m.id === editingId ? ' is-editing' : ''}${m.id === selectedModelId ? ' is-current' : ''} flex items-center gap-3 p-3 rounded-lg border transition cursor-pointer"
              onclick="editModel('${m.id}')">
             <div class="flex-1 min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
                     <span class="font-medium text-sm text-gray-900 truncate">${m.name}</span>
-                    ${m.id === selectedModelId ? '<span class="text-xs bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded">当前</span>' : ''}
-                    ${m.multimodal ? '<span class="text-xs bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded">多模态</span>' : ''}
+                    ${m.id === selectedModelId ? '<span class="model-current-badge text-xs px-1.5 py-0.5 rounded">当前</span>' : ''}
+                    ${m.multimodal ? '<span class="model-capability-badge text-xs px-1.5 py-0.5 rounded">多模态</span>' : ''}
                 </div>
                 <div class="text-xs text-gray-400 mt-0.5 truncate">${m.provider || '—'} · ${m.model}</div>
             </div>

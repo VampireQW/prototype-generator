@@ -1,5 +1,43 @@
 # API 参考 (API Reference)
 
+## PRD 草稿版本 3（2026-10-16）
+
+本节替代旧版草稿内容格式；工作台三文件元数据 schemaVersion 仍为 2。`scope.requirements[]` 必须有 id、text、sourceQuote；原文引用须来自 scope.request，delta 模式另需非空且不同的 before / after。full 模式另以 fullRequest 引用整页 PRD 授权，“重新落库”不自动开启。可选 exclusions 为本期不涉及内容的字符串数组。
+
+targets 使用 `{protoId,requirementIds:[...]}`。document 不再接受字符串，改为 `{background:[{requirementId,text}],goals:[{requirementId,text}]}`，两部分均可省略；纯文档变更通过页面级 requirementIds 指定需求。annotations 不再接受 body，改用 `{protoId,items:[{section,requirementId,markdown}],action?}`；每个 item 是一个顶层列表项或一张状态表，只引用该 target 的需求，工具合成为普通 Markdown。每个 section 仍可独立选择，不要求填写全部五项。
+
+可选 removals 为 `[{annotationId,reason}]`，须通过 scope.cleanupRequest 引用 scope.request 中的清理授权；限定当前页状态和准确 ID，已确认标注保留，不允许同时删除和重建同一目标。正式保存维护 deletedAnnotations，dry-run 不删除。report 新增 scope / contentRefs / removedAnnotations；contentRefs 表示提交内容的引用，实际是否保存结合 skipped 和操作结果判断。其余 revision CAS、元素唯一、confirmed 与删除保护保持。
+
+版本 1 / 2 草稿会返回明确错误并保留原稿；须由 Agent 根据本期实际需求重写，不能仅改版本数字或回放旧正文。工具校验格式与引用，不独立推断自然语言是否属于本期。完整示例见 [PRD 协议](../agent-skills/prototype-flow/references/prd-import.md)。
+
+## 项目改名（2026-10-16）
+
+`POST /api/proto/rename-project`：请求 `{projectId, name, expectedRevision}`，返回 `{ok:true, projectId, name, root, viewerUrl, bundle}`。项目 ID 保持不变，本地文件夹在原父目录内同步改名，页面 file 不变、file URL 更新；PRD、标注、回收站和 GitHub 发布地址保留。AI 项目同时修改 projects 列表、record 中的项目名 / 身份与归属 / 分享，远端发布 ID 保留。
+
+该端点要求本机同源 JSON 及项目访问权限。名称去除首尾空白后为 1–100 字符，不接受路径、保留目录名、已有目标或与其他项目重叠的根目录；拒绝链接目录。400 为非法名称、冲突或文件系统失败（回滚），404 为登记失效，409 为 revision 冲突并返回 current。首页原 `/rename-project` 与工作台使用同一改名逻辑，不再在文件夹名后追加时间戳。
+
+## PRD 导入与页面直达（2026-10-16）
+
+`proto_import.py` 的新草稿标注须为结构化 Markdown：三级标题按页面显示 / 数据流转 / 业务规则 / 交互说明 / 异常情况选择适用小节，每节至少有列表或状态表，不重复或留空。document 为可选背景说明，含“研发实现”等标题的新增草稿拒绝导入。该校验不追溯修改历史 PRD，也不限制工作台手工编辑。
+
+hotspots 缺省为空清单，不再从 targets 推导。runtime 仅匹配 interactionHints.protoIds 中控件自身的稳定 ID，不沿父元素授权后代。完整 PRD 与全页提示仍各自显式授权。
+
+导入报告新增 projectName / viewerUrl / pages，pages 包含 pageId、pageTitle、file、stateId、stateTitle、viewerUrl；接入脚本也返回项目和页面定位。两脚本的 `--viewer-origin` 默认为工具默认来源 http://localhost:8080，可指定实际来源。页面 URL 支持 ext / page / state / mode=annotate，直接打开已登记状态与标注模式；项目仍需已登记。
+
+## 页面层级（2026-10-15）
+
+`/api/proto/read` 和 `/api/proto/save` 的 bundle 中，`project.pages[]` 支持可选 `parentId`，指向同端业务页面 ID；缺省 / null / 空字符串为顶层。同级顺序沿用 pages 数组。最多三级，端分组和页面状态不计级数；无效父引用、循环、跨端父子或演示入口嵌套返回校验错误。保存仍使用最新 expectedRevision CAS，不改变页面 ID 或 PRD 归属。
+
+跨端移动需要连同整棵子树更新 clientId。回收父页面不回收子页面，读取保留原 parentId，导航 / 导出临时向可见祖先提升；恢复后还原。永久删除父页面将直属子页面接到原父级，不删除子页面文件。
+
+## 页面回收站（2026-10-15）
+
+`POST /api/proto/page-lifecycle`：请求 `{projectId, pageId, action, expectedRevision}`，action 为 `trash`、`restore` 或 `delete`；返回 `{ok:true,bundle}`。仅处理已登记项目，沿用本机、JSON、项目访问权限和 revision CAS 校验。400 表示动作 / 路径 / 文件不符或写入失败，409 表示版本冲突（含 current bundle）。
+
+`trash` 设置该页 `trashedAt`，保留文件和关联数据；`restore` 要求本地文件仍存在，清除回收标记。`delete` 必须先在回收站，额外传 `confirmFile` 为该页准确相对文件名，永久删除该 HTML 及该页 documents / annotations / deletedAnnotations / changes.items；共用资源保留。页面清单同步去掉已删除文件，允许删除最后一页。普通 `/api/proto/save` 不允许移除页面或更改回收标记。
+
+`trashedAt` 是页面对象可选的非空时间字符串，普通读取保持原值。回收站页的 `/ext/` HTML 返回 404；导出排除该文件及关联 PRD，自动补登不恢复已有回收页。删除期间暂存文件并保存事务恢复记录，失败回滚，异常中断后保留现场并停止覆盖元数据。
+
 ## 首页升级（2026-10-10）
 
 ### 获取项目封面
@@ -52,7 +90,7 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 - Body: `{ projectId: "旧 AI 项目 ID" }`
 - Returns: `{ ok: true, connected: true, projectId: "p-xxx", aiProjectId: "旧 AI 项目 ID", name, viewerUrl: "/src/viewer.html?ext=p-xxx", pages, revision }`。
 - 解析项目目录并幂等登记 `.prototype` 元数据，保留原 AI 项目 ID 与首页归属；已有 PRD 合并到共享文档时不覆盖已有需求。Viewer 的 `?project=` 入口与 AI 项目发布 / 导出入口使用此接口，再走 `?ext=` 工作台与 `/api/ext/*` 共享流程。
-- 同文件 Vue / Router 页面登记为首页的 adapter 状态：`aiNavigation: "legacy"`，状态含 `legacyPage`、`legacyType: "currentPage" | "router"` 与可选 `routePath`；多 HTML 项目保持真实文件页。同名现代状态按名称 slug 追加 `-2`、`-3`，迁入的页面需求分别保留。项目 `previewType: "mobile" | "web"` 用作 Auto 预览元数据，原型根元素的显式 `data-proto-preview` 优先。
+- 同文件 Vue / Router 页面登记为首页的 adapter 状态：`aiNavigation: "legacy"`，状态含 `legacyPage`、`legacyType: "currentPage" | "router"` 与可选 `routePath`；多 HTML 项目保持真实文件页。同名现代状态按名称 slug 追加 `-2`、`-3`，迁入的页面需求分别保留。项目 `previewType: "mobile" | "web" | "pad"` 用作 Auto 预览元数据；状态、页面和所属端设置优先，其次读取原型根元素的显式 `data-proto-preview` 与项目默认值。
 - 沿用本机同源、loopback 与 JSON 约束；非法 ID / 越界路径 400，项目不存在 404，当前用户无项目权限 403，损坏元数据 409。错误格式为 `{ ok: false, error }`。
 
 ### 查询生成状态
@@ -343,5 +381,21 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 - Body: `{ token, username, repo }`；空 Token 不清除已有凭据。
 - Returns: `{ success: true, message, tokenStored }`。提交新 Token 时先持久化，失败返回 `{ success: false, error, tokenStored: false }`，不替换进程中的旧 Token 或更新配置；成功后才启用新 Token。
 
+## 10. 多端接入与导航元数据（2026-10-14）
+
+现有 `/api/proto/read` 在补登记页面时读取项目根 `prototype.manifest.json`，校验并登记端、页面角色、预览类型、默认业务页和状态。角色由明确声明决定，没有清单的旧项目沿用原行为。
+
+bundle 的 `project` 增加可选 `clients[{id,title,previewType}]`、`defaultPage`（页面 ID）及清单指纹；pages 增加 `clientId`、`role`（page / launcher）、`previewType`（web / mobile / pad）。端、页面及状态的 previewType 都支持 pad，代表横向平板画布与可关闭的外壳。`POST /api/proto/save` 沿用原 expectedRevision CAS，可通过工作台页面设置纠正字段；校验端引用和至少一个业务页，保存与读回保持这些字段。
+
+页面还支持可选 `priority`（整数 1–6，1 最高）与 `progress`（整数 0–100，100 已完成）。缺省或 null 表示未标记，0% 表示明确未开始；UI 提供 0 / 25 / 50 / 75 / 100% 快捷选择。清除时删除对应字段即可。读取后应保留这些字段，通过原 CAS 保存，不修改页面 ID、排序或 PRD；不符合类型和范围的值返回校验错误。
+
+导入清单不等于首页登记，CLI 入口与格式见 [多端接入与迁移](multi-client.md)。独立入口与两种导出复用共用导航；发布 / 导出 API 仍使用原端点和版本选择。
+
 ### 📝 最近更新 (2026-01-30)
 - 测试自动文档更新功能 - SKILL优化测试
+
+## 本地原型的需求范围元数据（2026-10-15）
+
+`project.pages[].states[].interactionHints` 可选：`{mode:"targets",protoIds:[...]}` 仅提示清单中具体控件自身的真实交互，不继承容器范围，缺省 / 空数组不提示；`{mode:"all"}` 仅用于明确要求的整页提示。`GET /api/proto/read` 和研发导出保留此配置。
+
+`POST /api/proto/save` 在原有 expectedRevision 与已确认保护之后，将被删除标注的 pageId / stateId / protoId 追加到 `prd.deletedAnnotations`，不存正文；以后保存不能移除已有删除定位。PRD 导入版本 3 使用此记录和历史导入定位防止补回，旧草稿不能通过省略范围绕过校验。

@@ -12,6 +12,7 @@
     const post = (msg) => { try { window.parent.postMessage(Object.assign({ __review: 1 }, msg), '*'); } catch (_) { /* 壳未就绪 */ } };
     const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     let asideOpen = true;
+    let hintScopes = [];
 
     // review-pins.js 启动时读取的宿主对象：标注在 init 消息到达后填充，正文 HTML 由壳预渲染（气泡层无 Markdown 渲染器）。
     window.__REVIEW__ = {
@@ -21,7 +22,10 @@
         onFocus: (noteId) => post({ type: 'focus', noteId }),
         renderBody: (note) => note.bodyHtml || '<p>' + esc(note.body || '') + '</p>',
     };
-    window.ProtoHotspots?.init();
+    window.ProtoHotspots?.init({ scope: () => {
+        const state = window.ProtoAnchors.currentIds?.().stateId || 'default';
+        return hintScopes.find(item => item.id === state)?.interactionHints;
+    } });
 
     // 气泡层在本文件之后加载；init 早到时等它就位再重排（最多等 5s）。
     function relayout(tries) {
@@ -29,13 +33,13 @@
         if ((tries || 0) < 50) setTimeout(() => relayout((tries || 0) + 1), 100);
     }
 
-    function reveal(note) {
+    async function reveal(note) {
         const A = window.ProtoAnchors;
         let found = null;
         try { found = A.point(note); } catch (_) { /* 锚定异常 */ }
         if (!found?.element && !found?.point) {
             // 目标被折叠/隐藏：先联动展开对应折叠区，再重新定位与重排气泡
-            try { A.reveal?.(note.anchor); } catch (_) { /* ignore */ }
+            try { await (A.revealAndWait?.(note.anchor) ?? A.reveal?.(note.anchor)); } catch (_) { /* ignore */ }
             try { window.__reviewRelayout?.(); } catch (_) { /* ignore */ }
             try { found = A.point(note); } catch (_) { /* ignore */ }
         }
@@ -48,6 +52,9 @@
         const m = e.data;
         switch (m.type) {
             case 'init':
+                hintScopes = Array.isArray(m.hintScopes) ? m.hintScopes : [];
+                window.ProtoHotspots?.hide();
+                document.documentElement.dataset.protoHost = 'review';
                 window.__REVIEW__.notes = Array.isArray(m.notes) ? m.notes : [];
                 asideOpen = m.asideOpen !== false;
                 if (m.enterState) { try { window.ProtoAnchors.enterState?.(m.enterState)?.catch?.(() => {}); } catch (_) { /* ignore */ } }

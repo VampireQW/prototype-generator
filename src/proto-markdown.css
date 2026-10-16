@@ -1,21 +1,21 @@
-/* 继承 DESIGN_MASTER 与工作台色板；作用域限制在 Markdown 区，不改原型样式。 */
+/* Markdown 编辑与阅读使用工作台中性主题，内容自选颜色另行保留。 */
 .proto-md, .markdown-editor, .proto-md-toolbar, .proto-md-handle {
-    --md-surface: #ffffff; --md-alt: #f1f2f4; --md-text: #1a1d23; --md-muted: #4e5560;
-    --md-border: #d8dee3; --md-control: #808790; --md-accent: #1d4ed8; --md-error: #b42318; --md-on: #ffffff;
-    --md-font: "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+    --md-surface: #ffffff; --md-alt: #f5f5f5; --md-text: #171717; --md-muted: #666666;
+    --md-border: #ebebeb; --md-control: #888888; --md-accent: #0070f3; --md-error: #c50000; --md-on: #ffffff;
+    --md-font: Geist, Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
     --md-mono: Consolas, "Cascadia Mono", monospace;
-    font: 14px/1.8 var(--md-font); letter-spacing: .02em; color: var(--md-text); min-width: 0;
+    font: 14px/1.8 var(--md-font); letter-spacing: 0; color: var(--md-text); min-width: 0;
 }
 .proto-md[data-theme="dark"], .markdown-editor[data-theme="dark"], .proto-md-toolbar[data-theme="dark"], .proto-md-handle[data-theme="dark"] {
-    --md-surface: #212326; --md-alt: #363c44; --md-text: #f2f4f7; --md-muted: #a8b0ba;
-    --md-border: #626a78; --md-control: #808790; --md-accent: #91b5ff; --md-error: #ffb4ab; --md-on: #212326;
+    --md-surface: #111111; --md-alt: #1a1a1a; --md-text: #ededed; --md-muted: #a1a1a1;
+    --md-border: #2e2e2e; --md-control: #666666; --md-accent: #52a8ff; --md-error: #ff6166; --md-on: #111111;
 }
 .proto-md { white-space: normal; overflow-wrap: anywhere; border-radius: 6px; cursor: text; position: relative; }
 .proto-md.is-editing { background: var(--md-surface); }
 .proto-md-frame { display: block; border: 0; width: 100%; height: 120px; background: var(--md-surface); }
 .proto-md-frame.proto-md-cover { position: absolute; inset: 0; height: 100%; z-index: 2; }
 .proto-md-draft { display: block; color: var(--md-muted); font-size: 12px; padding: 8px 0; }
-.proto-md-body, .markdown-editor .vditor-reset { font: 14px/1.8 var(--md-font); letter-spacing: .02em; color: var(--md-text); overflow-wrap: anywhere; }
+.proto-md-body, .markdown-editor .vditor-reset { font: 14px/1.8 var(--md-font); letter-spacing: 0; color: var(--md-text); overflow-wrap: anywhere; }
 /* 两边都用 flow-root 包容子块外边距：嵌套列表末项的 margin-bottom 否则会在阅读态穿透到容器外、在编辑器里却被包住，两者量高差 12px。 */
 .proto-md-body, .markdown-editor .vditor-ir pre.vditor-reset { display: flow-root; }
 .proto-md-body > :first-child, .markdown-editor .vditor-reset > :first-child { margin-top: 0; }
@@ -49,7 +49,7 @@
 .markdown-editor *, .markdown-editor *::before { box-sizing: border-box; }
 .markdown-editor .vditor { border: 0; background: var(--md-surface); font-family: var(--md-font); }
 .markdown-editor .vditor-toolbar { display: none; }
-.proto-md-toolbar { position: fixed; z-index: 2147483001; display: flex; align-items: center; flex-wrap: wrap; width: max-content; box-sizing: border-box; max-width: calc(100vw - 8px); gap: 2px; padding: 4px 6px; border: 1px solid var(--md-border); border-radius: 8px; background: var(--md-surface); color: var(--md-text); box-shadow: 0 4px 12px rgba(16,24,40,.12); font: 12px/1.6 var(--md-font); letter-spacing: .02em; }
+.proto-md-toolbar { position: fixed; z-index: 2147483001; display: flex; align-items: center; flex-wrap: wrap; width: max-content; box-sizing: border-box; max-width: calc(100vw - 8px); gap: 2px; padding: 4px 6px; border: 1px solid var(--md-border); border-radius: 8px; background: var(--md-surface); color: var(--md-text); box-shadow: 0 4px 12px rgba(16,24,40,.12); font: 12px/1.6 var(--md-font); letter-spacing: 0; }
 .proto-md-tools-group { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0; max-width: 100%; }
 /* margin: 0 必须显式声明：工具条注入在原型页面文档内，原型自身的 button { margin } 全局规则会套上来撑乱布局。 */
 :is(.proto-md-toolbar, .proto-md-handle) button { width: 28px; height: 28px; min-width: 28px; min-height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; display: grid; place-items: center; background: transparent; color: var(--md-text); font: inherit; cursor: pointer; }
@@ -63,7 +63,7 @@
 /* 光标所在块的按钮点亮（正文 / 标题 / 列表 / 任务；表格按钮在表内点亮） */
 .proto-md-toolbar button[aria-pressed="true"] { background: var(--md-alt); color: var(--md-accent); box-shadow: inset 0 0 0 1px var(--md-border); }
 /* 表格角标：光标在表格内时钉在表格左上角（中心对角），点开行列操作；挂父页文档，和工具条同层 */
-.proto-md-handle { position: fixed; z-index: 2147483001; width: 22px; height: 22px; font: 12px/1.6 var(--md-font); letter-spacing: .02em; }
+.proto-md-handle { position: fixed; z-index: 2147483001; width: 22px; height: 22px; font: 12px/1.6 var(--md-font); letter-spacing: 0; }
 .proto-md-handle > button { width: 22px; height: 22px; min-width: 22px; min-height: 22px; border: 1px solid var(--md-border); border-radius: 6px; background: var(--md-surface); color: var(--md-muted); box-shadow: 0 2px 6px rgba(16,24,40,.14); }
 .proto-md-handle > button svg { width: 13px; height: 13px; }
 .proto-md-handle > button[aria-expanded="true"] { color: var(--md-accent); border-color: var(--md-accent); }
@@ -116,7 +116,7 @@
 .markdown-editor .vditor-ir__node[data-type="html-inline"] .vditor-ir__marker { display: inline; width: auto; height: auto; overflow: visible; transition: none; font: 13px/1.7 var(--md-mono); background: var(--md-alt); color: var(--md-text); border-radius: 6px; padding: 0 4px !important; }
 /* 文字颜色：编辑态由 markdown-editor.js 把成对的 <span style="color"> 开闭标签藏掉，中间文字包进 .proto-md-color 直接显色，与阅读态同样所见即所得 */
 .markdown-editor .vditor-ir__node[data-type="html-inline"].proto-md-color-tag { display: none !important; }
-/* 暗色主题：正文里存的是浅色 token（白底 ≥ 4.5:1），暗底按 DESIGN_MASTER 暗色对应色映射（#212326 底均 ≥ 4.5:1） */
+/* 兼容历史正文颜色：深色主题使用较浅的对应色，提高阅读对比度。 */
 .proto-md[data-theme="dark"] .proto-md-body [style="color:#b42318"], .markdown-editor[data-theme="dark"] .proto-md-color[data-color="#b42318"] { color: #ff8a8a !important; }
 .proto-md[data-theme="dark"] .proto-md-body [style="color:#b45309"], .markdown-editor[data-theme="dark"] .proto-md-color[data-color="#b45309"] { color: #f0a35e !important; }
 .proto-md[data-theme="dark"] .proto-md-body [style="color:#046c4e"], .markdown-editor[data-theme="dark"] .proto-md-color[data-color="#046c4e"] { color: #5fd39b !important; }

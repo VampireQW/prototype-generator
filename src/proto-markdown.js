@@ -350,11 +350,11 @@
         const card = s.region.closest('.pa-card'), panel = !card && s.region.closest('#prdSidebar, aside');
         const anchor = card || s.region, rect = anchor.getBoundingClientRect();
         const avoid = [];
-        const collect = (d, ox = 0, oy = 0, clip) => {
+        const collect = (d, ox = 0, oy = 0, clip, sx = 1, sy = 1) => {
             for (const node of d.querySelectorAll('[data-proto-toolbar-avoid]')) {
                 const r = node.getBoundingClientRect();
                 if (!r.width || !r.height) continue;
-                const box = { left: r.left + ox, top: r.top + oy, right: r.right + ox, bottom: r.bottom + oy };
+                const box = { left: r.left * sx + ox, top: r.top * sy + oy, right: r.right * sx + ox, bottom: r.bottom * sy + oy };
                 if (clip) {
                     box.left = Math.max(box.left, clip.left); box.top = Math.max(box.top, clip.top);
                     box.right = Math.min(box.right, clip.right); box.bottom = Math.min(box.bottom, clip.bottom);
@@ -365,7 +365,7 @@
         collect(doc);
         for (const frame of doc.querySelectorAll('iframe')) {
             if (frame === s.frame) continue;
-            try { if (frame.contentDocument) { const r = frame.getBoundingClientRect(); collect(frame.contentDocument, r.left, r.top, r); } }
+            try { if (frame.contentDocument) { const r = frame.getBoundingClientRect(), sx=r.width/(frame.offsetWidth || r.width) || 1, sy=r.height/(frame.offsetHeight || r.height) || 1; collect(frame.contentDocument,r.left+(frame.clientLeft || 0)*sx,r.top+(frame.clientTop || 0)*sy,r,sx,sy); } }
             catch (_) { /* 跨源原型不读取内部序号。 */ }
         }
         // 气泡工具条同时避开右侧 PRD 面板，避免跨到另一处正文上。

@@ -172,7 +172,8 @@
             margin-top: 1px;
         }
     </style>
-    <link rel="stylesheet" href="home.css?v=20261010-cyan-workspace">
+    <link rel="stylesheet" href="/agent-skills/prototype-flow/assets/project-navigation.css?v=20261015-vercel-workbench">
+    <link rel="stylesheet" href="home.css?v=20261015-model-manager-theme">
 </head>
 
 <body class="home-app">
@@ -497,7 +498,7 @@
     <div id="modelManagerModal" class="fixed inset-0 z-50 hidden items-center justify-center">
         <div id="modelManagerOverlay" class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm"
             onclick="closeModelManager()"></div>
-        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[80vh] overflow-hidden mx-4">
+        <div class="model-manager-card relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[80vh] overflow-hidden mx-4">
             <!-- 头部 -->
             <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gray-50">
                 <h3 class="font-bold text-lg text-gray-900 flex items-center gap-2">
@@ -525,7 +526,7 @@
                 </div>
 
                 <!-- 右侧：添加/编辑表单 -->
-                <div class="w-1/2 flex flex-col bg-gray-50/50">
+                <div class="model-manager-form w-1/2 flex flex-col">
                     <div class="px-5 pt-4 pb-3">
                         <h4 id="modelFormTitle" class="text-sm font-semibold text-gray-700">添加新模型</h4>
                     </div>
@@ -571,8 +572,7 @@
                             </label>
                         </div>
                         <div class="flex gap-2">
-                            <button onclick="saveModelForm()"
-                                class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm font-medium transition">
+                            <button onclick="saveModelForm()" class="model-manager-save flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded-lg text-sm font-medium transition">
                                 <i class="fas fa-save"></i> 保存
                             </button>
                             <button onclick="resetModelForm()"
@@ -969,9 +969,10 @@
         <span id="toastMessage">操作成功</span>
     </div>
 
-    <script src="home-ui.js?v=20261010-cyan-workspace"></script>
+    <script src="/agent-skills/prototype-flow/assets/project-navigation.js?v=20261015-vercel-workbench"></script>
+    <script src="home-ui.js?v=20261015-thumbnail-badges"></script>
     <script src="design-settings.js?v=20261005-visual-presets"></script>
-    <script src="script.js?v=20261010-cyan-workspace"></script>
+    <script src="script.js?v=20261015-model-manager-theme"></script>
 </body>
 
 </html>

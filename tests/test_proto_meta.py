@@ -26,6 +26,34 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import proto_meta
 
 
+def test_ai_connection_does_not_turn_layout_and_interactions_into_page_requirements(tmp_path):
+    (tmp_path / 'index.html').write_text('<html data-proto-page="home"><h1>订单</h1></html>', encoding='utf-8')
+    record = {'pages': [{'name': '订单', 'layout': '卡片布局', 'features': '查询', 'content': '订单列表', 'interaction': '点击重批', 'description': '实现细节'}]}
+    saved = proto_meta.ensure_ai_project_bundle(tmp_path, record, [])
+    assert saved['prd']['documents'] == []
+    assert saved['prd']['annotations'] == []
+
+
+def test_ai_connection_only_seeds_explicit_background_and_goals_once(tmp_path):
+    (tmp_path / 'index.html').write_text('<html><h1>订单</h1></html>', encoding='utf-8')
+    record = {'pages': [{'name': '订单', 'background': '查找订单费时。', 'goals': '缩短查找时间。', 'interaction': '点击查询'}]}
+    saved = proto_meta.ensure_ai_project_bundle(tmp_path, record, [])
+    body = saved['prd']['documents'][0]['markdown']
+    assert body == '## 需求背景\n\n查找订单费时。\n\n## 需求目标\n\n缩短查找时间。'
+    record['pages'][0]['background'] = '后来的不同输入'
+    assert proto_meta.ensure_ai_project_bundle(tmp_path, record, [])['prd']['documents'] == saved['prd']['documents']
+
+
+def test_ai_connection_preserves_legacy_prd_content(tmp_path):
+    (tmp_path / 'index.html').write_text('<html><h1>订单</h1></html>', encoding='utf-8')
+    (tmp_path / 'prd').mkdir()
+    original = '# 历史 PRD\n\n保留已有需求与手工内容。'
+    (tmp_path / 'prd' / 'home.md').write_text(original, encoding='utf-8')
+    saved = proto_meta.ensure_ai_project_bundle(tmp_path, {'pages': [{'name': '订单'}]}, [])
+    assert saved['prd']['documents'][0]['markdown'] == original
+    assert (tmp_path / 'prd' / 'home.md').read_text(encoding='utf-8') == original
+
+
 @pytest.fixture
 def proj(tmp_path):
     """最小原型项目：index.html + pages/detail.html + 一份 CSS"""
@@ -43,6 +71,33 @@ def fresh_bundle(root):
     pages = proto_meta.discover_pages(root)
     assert pages, 'fixture 应至少发现一页'
     return proto_meta.default_bundle(root, pages[0]['url'], pages[0]['title'])
+
+
+@pytest.mark.parametrize('policy', [{'mode': 'auto'}, {'mode': 'targets', 'protoIds': 'all'}, {'mode': 'targets', 'protoIds': ['same', 'same']}, {'mode': 'targets', 'protoIds': ['']}])
+def test_interaction_hints_reject_invalid_policies(proj, policy):
+    bundle = fresh_bundle(proj)
+    bundle['project']['pages'][0]['states'][0]['interactionHints'] = policy
+    with pytest.raises(ValueError, match='interactionHints'):
+        proto_meta.validate_bundle(bundle)
+
+
+def test_deletion_records_preserve_identity_but_never_deleted_body(proj):
+    from copy import deepcopy
+    before = fresh_bundle(proj)
+    page = before['project']['pages'][0]
+    before['prd']['annotations'] = [make_note(page['id'], 1, body='删除后的正文不留存')]
+    after = deepcopy(before)
+    after['prd']['annotations'] = []
+    proto_meta.remember_annotation_deletions(before, after)
+    records = after['prd']['deletedAnnotations']
+    assert len(records) == 1 and records[0]['protoId'] == 'btn'
+    assert '删除后的正文' not in json.dumps(records, ensure_ascii=False)
+    stale_client = deepcopy(after)
+    stale_client['prd'].pop('deletedAnnotations')
+    proto_meta.remember_annotation_deletions(after, stale_client)
+    assert stale_client['prd']['deletedAnnotations'] == records
+    proto_meta.save_bundle(proj, stale_client)
+    assert proto_meta.load_bundle(proj)['prd']['deletedAnnotations'] == records
 
 
 def make_note(page_id, number, **over):
@@ -93,6 +148,33 @@ class TestPersistence:
 
 
 # ---------- validate_bundle 校验 ----------
+
+@pytest.mark.parametrize('priority,progress', [(1,0),(3,50),(6,100),(None,None)])
+def test_page_tracking_round_trip_and_clear_preserves_annotations(proj, priority, progress):
+    bundle = fresh_bundle(proj)
+    page = bundle['project']['pages'][0]
+    bundle['prd']['annotations'] = [make_note(page['id'], 1)]
+    before_prd = json.dumps(bundle['prd'], sort_keys=True)
+    page.update(priority=priority, progress=progress)
+    proto_meta.save_bundle(proj, bundle)
+    loaded = proto_meta.load_bundle(proj)
+    assert loaded['project']['pages'][0] == page
+    assert json.dumps(loaded['prd'], sort_keys=True) == before_prd
+    del loaded['project']['pages'][0]['priority']
+    del loaded['project']['pages'][0]['progress']
+    proto_meta.save_bundle(proj, loaded)
+    cleared = proto_meta.load_bundle(proj)
+    assert 'priority' not in cleared['project']['pages'][0] and 'progress' not in cleared['project']['pages'][0]
+    assert json.dumps(cleared['prd'], sort_keys=True) == before_prd
+
+
+@pytest.mark.parametrize('key,value', [('priority',0),('priority',7),('priority',True),('priority','1'),
+    ('progress',-1),('progress',101),('progress',True),('progress','50'),('progress',50.5)])
+def test_invalid_page_tracking_is_rejected(proj, key, value):
+    bundle = fresh_bundle(proj)
+    bundle['project']['pages'][0][key] = value
+    with pytest.raises(ValueError, match='页面.*(优先级|进度)'):
+        proto_meta.validate_bundle(bundle)
 
 class TestValidate:
     def test_rejects_bad_schema_version(self, proj):

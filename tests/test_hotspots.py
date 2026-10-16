@@ -70,7 +70,7 @@ def page(browser):
     errors = []
     page.on('pageerror', lambda error: errors.append(str(error)))
     page.set_content(review_export.inject_hotspot_bootstrap(HTML, inline=True))
-    page.evaluate('ProtoHotspots.init()')
+    page.evaluate('ProtoHotspots.init({scope:{mode:"all"}})')
     yield page
     context.close()
     assert not errors, errors
@@ -139,7 +139,7 @@ def test_dynamic_controls_clip_and_lifecycle(page):
     page.evaluate('ProtoHotspots.init({enabled:false})')
     page.locator('#blank').click()
     assert not targets(page)
-    page.evaluate('ProtoHotspots.init();ProtoHotspots.init()')
+    page.evaluate('ProtoHotspots.init({scope:{mode:"all"}});ProtoHotspots.init({scope:{mode:"all"}})')
     assert page.locator('.ph-layer').count() == 1
     page.locator('#blank').click()
     assert targets(page)
@@ -202,7 +202,7 @@ def test_export_over_http_and_file(browser, tmp_path):
     project.mkdir()
     (project / 'index.html').write_text(HTML, encoding='utf-8')
     bundle = {'revision': 1, 'project': {'id': 'fixture', 'name': '热区验收', 'pages': [
-        {'id': 'home', 'title': '首页', 'file': 'index.html', 'states': [{'id': 'default', 'title': '默认'}]}]},
+        {'id': 'home', 'title': '首页', 'file': 'index.html', 'states': [{'id': 'default', 'title': '默认', 'interactionHints': {'mode': 'all'}}]}]},
         'prd': {'documents': [], 'annotations': []}}
     review_export.build_review_export(project, bundle, tmp_path / 'review')
     review_export.build_pure_export(project, bundle, tmp_path / 'pure')
@@ -248,3 +248,28 @@ def test_javascript_syntax():
                    '\n'.join(re.findall(r'<script>([\s\S]*?)</script>', (SRC / 'review_shell.html').read_text(encoding='utf-8')))]:
         result = subprocess.run([node, '--check'], input=source, text=True, encoding='utf-8', capture_output=True)
         assert result.returncode == 0, result.stderr
+
+
+def test_exact_hotspot_scope_never_inherits_container_authorization():
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('需要 Node.js')
+    script = r'''
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const context={EventTarget:class{addEventListener(){}removeEventListener(){}}};context.window=context;
+vm.createContext(context);
+const source=fs.readFileSync(process.argv[1],'utf8').replace('window.ProtoHotspots = { init, show, hide, destroy }','window.ProtoHotspots = { init, show, hide, destroy, inScope }');
+vm.runInContext(source,context);
+const table={getAttribute:()=> 'rs-table'},regrade={parentElement:table,getAttribute:()=> 'regrade'},reason={parentElement:table,getAttribute:()=> 'reason'};
+const scoped=context.ProtoHotspots.inScope;
+assert.equal(scoped(regrade,{mode:'targets',protoIds:['rs-table']}),false);
+assert.equal(scoped(reason,{mode:'targets',protoIds:['rs-table']}),false);
+assert.equal(scoped(table,{mode:'targets',protoIds:['rs-table']}),true);
+assert.equal(scoped(reason,{mode:'targets',protoIds:['reason']}),true);
+assert.equal(scoped(regrade,{mode:'targets',protoIds:['reason']}),false);
+assert.equal(scoped(regrade,{mode:'targets',protoIds:[]}),false);
+assert.equal(scoped(regrade,null),false);
+assert.equal(scoped(regrade,{mode:'all'}),true);
+'''
+    result = subprocess.run([node, '-e', script, str(SRC / 'proto-hotspots.js')], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

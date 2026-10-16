@@ -519,7 +519,7 @@ def get_minimal_skill_rules(skill_id):
     return MINIMAL_SKILL_RULES.get(sid) or MINIMAL_SKILL_RULES[DEFAULT_SKILL_ID]
 
 
-def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', craft_sections=None, global_settings=None):
+def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', craft_sections=None, global_settings=None, agent_workflow=False):
     """将 Open Design 的资产层按需注入现有生成任务。
 
     默认风格使用精简规范与默认 DESIGN.md；具体风格注入对应资产。
@@ -577,7 +577,26 @@ def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', cra
             parts.append(f"\n## Craft Rules（按需）\n\n{craft}")
 
     parts.append('\n## 继承与主动覆盖\n\n' + design_settings.prompt_rules(global_settings or {}))
+    parts.append("\n## 多端与演示导航\n"
+                 "多端不等于 index.html 是演示入口。只有主要为页面目录、加载其他可独立打开的业务文件时才声明 role=launcher；真实业务首页保留 role=page。"
+                 "跨端/跨页面的演示目录必须使用 prototype-flow 配套 project-navigation.css/js；业务菜单遵循项目设计。"
+                 "独立业务页按自身类型声明 data-proto-preview=web/mobile/pad；Pad 为平板横屏预览与外壳，同文件状态遵循 PrototypeBridge。")
+    if not agent_workflow and re.search(r'多端|混合|教师端|学生端|演示导航|左侧导航', user_prompt or ''):
+        asset_root = Path(proto_meta.__file__).resolve().parent / 'agent-skills' / 'prototype-flow' / 'assets'
+        parts.append('\n## 共用演示导航组件（需要演示目录时内嵌，避免远程依赖）\n' +
+                     (asset_root / 'project-navigation.css').read_text(encoding='utf-8') + '\n' +
+                     (asset_root / 'project-navigation.js').read_text(encoding='utf-8'))
     parts.append(f"\n# 用户原始需求\n\n{user_prompt}")
+    if agent_workflow:
+        parts.append('\n## Agent 接入交付\n读取 agent-skills/prototype-flow/SKILL.md 与 references/multi-client.md。'
+                     '多端业务页面优先独立文件，编写 prototype.manifest.json；按 skill 提供的组件生成演示入口，保留业务页面 ID。'
+                     '工具仓库路径由用户提供，使用 scripts/connect_project.py 校验并登记；PRD 草稿用 proto_import.py 导入。'
+                     '读取 references/prd-import.md，使用版本 3 草稿与当前 baseRevision；背景、目标和每条标注只描述本期实际改造。scope.requirements 引用需求原文并写 before / after，items 每条关联 requirementId；重新落库不等于整页补全。'
+                     '标注按本次 targets 限定；点击提示必须单独列在 hotspots，省略即无提示，不能由表格容器扩散到旧交互。'
+                     '页面需求用 background / goals 逐条关联本期需求；标注用 items 选择页面显示、数据流转、业务规则、交互说明、异常情况中适用的小节，工具生成 Markdown 标题和列表，不凑齐五项，不接受整段 body。'
+                     '不补回用户删除的标注；全量需求与整页提示分别需要明确要求。落库完成必须回复项目和页面名称，并附报告的页面直达 viewerUrl。'
+                     '完成实际文件，不仅返回代码块；页内业务导航不能当作演示壳隐藏。')
+        return '\n\n'.join(parts)
     parts.append(
         "\n# 最终输出约束\n"
         "- 输出一个完整、独立、可直接预览的 HTML 文件。\n"
@@ -1439,6 +1458,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_root_remove()
         elif path == '/api/proto/save':
             self.handle_proto_save()
+        elif path == '/api/proto/page-lifecycle':
+            self.handle_proto_page_lifecycle()
+        elif path == '/api/proto/rename-project':
+            self.handle_proto_rename_project()
         elif path == '/api/proto/upload-image':
             self.handle_proto_upload_image()
         # ---- 原有路由 ----
@@ -2372,72 +2395,36 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error_response(str(e))
 
     def handle_rename_project(self):
-        """重命名项目（同时重命名文件夹）"""
+        """首页改名与工作台共用同一事务，保留标注身份与分享。"""
+        import project_rename
         try:
-            content_length = int(self.headers['Content-Length'])
-            body = self.rfile.read(content_length)
-            data = json.loads(body.decode('utf-8'))
-
-            project_id = data.get('id')
-            new_name = data.get('newName', '').strip()
-
-            if not project_id:
-                self.send_error_response("Missing project ID")
+            if not self.require_local_origin():
                 return
-            if not new_name:
-                self.send_error_response("Missing new name")
+            data = self.read_json_body()
+            ai_id = data.get('id')
+            name = project_rename.validate_name(data.get('newName'))
+            root = self.safe_ai_project_root(ai_id)
+            if not self.require_ai_project_access(ai_id):
                 return
-
-            projects = self.load_projects()
-            project = next((p for p in projects if p['id'] == project_id), None)
-
-            if not project:
-                self.send_error_response("Project not found")
-                return
-
-            old_name = project['name']
-            old_folder = os.path.join(PROJECTS_DIR, project_id)
-
-            # 生成新的文件夹名称（新名称 + 原时间戳）
-            # 从原ID中提取时间戳部分
-            parts = project_id.rsplit('_', 2)
-            if len(parts) >= 3:
-                timestamp = '_'.join(parts[-2:])  # 例如 "20260114_11-20-20"
+            if proto_meta.discover_pages(root):
+                connected = self.register_ai_workbench(ai_id)
+                result = self.rename_workbench_project(connected['projectId'], name, connected['revision'])
             else:
-                timestamp = datetime.datetime.now().strftime('%Y%m%d_%H-%M-%S')
-
-            # 处理新名称，移除不安全字符
-            safe_new_name = re.sub(r'[\\/:*?"<>|]', '', new_name)
-            safe_new_name = safe_new_name.replace(' ', '_')
-            if len(safe_new_name) > 30:
-                safe_new_name = safe_new_name[:30]
-
-            new_project_id = f"{safe_new_name}_{timestamp}"
-            new_folder = os.path.join(PROJECTS_DIR, new_project_id)
-
-            # 重命名文件夹
-            if os.path.exists(old_folder) and old_folder != new_folder:
-                import shutil
-                if os.path.exists(new_folder):
-                    # 如果目标已存在，添加随机后缀
-                    new_project_id = f"{safe_new_name}_{timestamp}_{datetime.datetime.now().strftime('%S')}"
-                    new_folder = os.path.join(PROJECTS_DIR, new_project_id)
-                shutil.move(old_folder, new_folder)
-                print(f"[重命名文件夹] {project_id} -> {new_project_id}")
-
-            # 更新项目信息
-            project['id'] = new_project_id
-            project['name'] = new_name
-            project['url'] = f'/projects/{new_project_id}/index.html'
-            self.save_projects(projects)
-
-            print(f"[重命名] {old_name} -> {new_name}")
-            self.send_json_response({'success': True, 'project': project})
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self.send_error_response(str(e))
+                # 待生成项目也能更名；不要求先创建占位 HTML。
+                with EXTERNAL_LOCK, proto_meta.PROJECT_LOCK:
+                    bundle = proto_meta.load_bundle(root) if (root / '.prototype' / 'project.json').exists() else proto_meta.default_bundle(root, (root / 'index.html').as_uri(), '首页')
+                    pid = bundle['project']['id']
+                    registry = load_external_registry()
+                    registry['projects'].setdefault(pid, {'root': str(root), 'name': root.name, 'source': 'ai', 'aiProjectId': ai_id, 'github_remote_id': ai_id})
+                    result = project_rename.rename(root, bundle, registry, pid, name, bundle['revision'], save_external_registry,
+                                                   projects_file=Path(PROJECTS_FILE), migrate_ai=db.rename_project_identity)
+            if 'project' not in result:
+                result['project'] = next(p for p in self.load_projects() if p['id'] == ai_id)
+            self.send_json_response({**result, 'success': True})
+        except project_rename.RevisionConflict as error:
+            self.send_json_status({'ok': False, 'success': False, 'error': str(error)}, 409)
+        except (ValueError, OSError) as error:
+            self.send_json_status({'ok': False, 'success': False, 'error': str(error)}, 400)
 
     def handle_restore_project(self):
         """恢复已删除的项目"""
@@ -3919,11 +3906,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             pages = proto_meta.discover_pages(root)
             if not pages:
                 raise ValueError('目录中没有 HTML 原型')
-            pid = proto_meta.project_id_for(root)
             bundle = proto_meta.ensure_bundle(root)
+            reg = load_external_registry()
+            pid = next((key for key, item in reg['projects'].items() if Path(item.get('root', '')).resolve() == root.resolve()), None)
+            if pid is None:
+                pid = bundle['project']['id'] if proto_meta.is_stable_project_id(bundle['project']['id']) else proto_meta.project_id_for(root)
+                if pid in reg['projects']:
+                    pid = proto_meta.project_id_for(root)  # 复制出来的新目录使用独立身份。
             proto_meta.ensure_project_id(root, bundle, pid)
             proto_meta.ensure_pages_registered(root, bundle)
-            reg = load_external_registry()
             if pid not in reg['projects']:
                 reg['projects'][pid] = {'root': str(root), 'name': root.name,
                                        'createdAt': proto_meta.directory_created_at(root),
@@ -3992,10 +3983,14 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             bundle = proto_meta.ensure_ai_project_bundle(root, record, detected, name)
             pid = bundle['project']['id']
             registry = load_external_registry()
+            if pid in registry['projects'] and Path(registry['projects'][pid].get('root', '')).resolve() != root:
+                pid = proto_meta.project_id_for(root)
+                proto_meta.ensure_project_id(root, bundle, pid)
             registered = registry['projects'].setdefault(pid, {
                 'createdAt': record.get('createdAt') or proto_meta.directory_created_at(root),
                 'addedAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')})
-            registered.update(root=str(root), name=name, source='ai', aiProjectId=project_id, github_remote_id=project_id)
+            registered.update(root=str(root), name=name, source='ai', aiProjectId=project_id)
+            registered.setdefault('github_remote_id', project_id)
             if record.get('github_url') and not registered.get('github_url'):
                 registered['github_url'] = record['github_url']
                 registered['github_published_at'] = record.get('github_published_at', '')
@@ -4034,7 +4029,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             revision = None
             if exists:
                 try:
-                    revision = proto_meta.load_bundle(root)['revision']
+                    bundle = proto_meta.load_bundle(root)
+                    revision = bundle['revision']
+                    trashed = {p['file'].casefold() for p in bundle['project']['pages'] if p.get('trashedAt')}
+                    pages = [p for p in pages if p['file'].casefold() not in trashed]
                 except Exception:
                     revision = None
             items.append({'projectId': pid, 'root': str(root), 'name': item.get('name') or root.name,
@@ -4235,6 +4233,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             return
         suffix = target.suffix.lower()
         if suffix in ('.html', '.htm'):
+            if proto_meta.meta_dir(root).joinpath('project.json').exists():
+                try:
+                    bundle = proto_meta.load_bundle(root)
+                    if any(p.get('trashedAt') and p['file'].casefold() == rel.replace('\\', '/').casefold() for p in bundle['project']['pages']):
+                        self.send_error(404, 'Page is in recycle bin')
+                        return
+                except ValueError as error:
+                    self.send_json_status({'ok': False, 'error': str(error)}, 409)
+                    return
             ctype = 'text/html; charset=utf-8'
         elif suffix in ('.js', '.mjs'):
             ctype = 'application/javascript; charset=utf-8'
@@ -4269,6 +4276,59 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         except ValueError as e:
             self.send_json_status({'ok': False, 'error': str(e)}, 409)
 
+    def rename_workbench_project(self, pid, name, revision):
+        import project_rename
+        with EXTERNAL_LOCK, proto_meta.PROJECT_LOCK:
+            registry = load_external_registry()
+            item = registry['projects'].get(pid)
+            root = external_root_for(pid)
+            if not item or root is None:
+                raise FileNotFoundError('项目未登记或目录已失效')
+            tool = Path(__file__).resolve().parent
+            if root == root.parent or root == tool or root in tool.parents:
+                raise ValueError('不能重命名工具目录或其父目录')
+            ai = item.get('source') == 'ai'
+            if not ai and tool in root.parents:
+                raise ValueError('工具内部项目请通过 AI 项目入口重命名')
+            return project_rename.rename(root, proto_meta.load_bundle(root), registry, pid, name, revision,
+                                         save_external_registry,
+                                         projects_file=Path(PROJECTS_FILE) if ai else None,
+                                         migrate_ai=db.rename_project_identity if ai else None)
+
+    def handle_proto_rename_project(self):
+        import project_rename
+        try:
+            data = self.read_json_body()
+            pid = str(data.get('projectId', ''))
+            if not self.require_registered_project_access(pid):
+                return
+            self.send_json_response(self.rename_workbench_project(pid, data.get('name'), data.get('expectedRevision')))
+        except project_rename.RevisionConflict as error:
+            self.send_json_status({'ok': False, 'conflict': True, 'error': str(error), 'current': error.current}, 409)
+        except FileNotFoundError as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 404)
+        except (ValueError, OSError) as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 400)
+
+    def handle_proto_page_lifecycle(self):
+        import page_lifecycle
+        try:
+            data = self.read_json_body()
+            pid = str(data.get('projectId', ''))
+            if not self.require_registered_project_access(pid):
+                return
+            root = external_root_for(pid)
+            if root is None:
+                self.send_json_status({'ok': False, 'error': '项目未登记或目录已失效'}, 404)
+                return
+            bundle = page_lifecycle.change_page(root, data.get('pageId'), data.get('action'),
+                                                data.get('expectedRevision'), data.get('confirmFile'))
+            self.send_json_response({'ok': True, 'bundle': bundle})
+        except page_lifecycle.RevisionConflict as error:
+            self.send_json_status({'ok': False, 'conflict': True, 'error': str(error), 'current': error.current}, 409)
+        except (ValueError, OSError) as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 400)
+
     def handle_proto_save(self):
         """保存项目元数据（expectedRevision CAS；冲突返回 409 + 当前 bundle）"""
         try:
@@ -4290,12 +4350,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             if incoming['project']['id'] != pid:
                 self.send_json_status({'ok': False, 'error': '不能覆盖其他项目'}, 400)
                 return
+            incoming_pages = {page['id']: page for page in incoming['project']['pages']}
+            if any(page['id'] not in incoming_pages or page.get('trashedAt') != incoming_pages[page['id']].get('trashedAt') for page in current['project']['pages']):
+                raise ValueError('移入回收站、恢复与彻底删除请使用页面回收站操作')
             # confirmed 只锁标注：页面需求文档可随时双击编辑（用户裁定 2026-09-28），故文档不参与已确认保护
             by_id = {item['id']: item for item in incoming['prd']['annotations']}
             for item in current['prd']['annotations']:
                 if item.get('confirmed') and by_id.get(item['id']) != item:
                     raise ValueError('已确认的标注不可修改、取消确认或删除')
             incoming['revision'] = current['revision'] + 1
+            proto_meta.remember_annotation_deletions(current, incoming)
             proto_meta.save_bundle(root, incoming)
             self.send_json_response({'ok': True, 'bundle': incoming})
         except ValueError as e:
@@ -4408,7 +4472,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             image_files = data.get('imageFiles', {})  # {pageIndex: [base64...]}
             form_data = normalize_design_form(form_data)
             global_data = form_data['global']
-            instruction = compose_generation_prompt(data.get('prompt', ''), global_data.get('designSystemId', ''), global_data.get('skillId', DEFAULT_SKILL_ID), global_settings=global_data)
+            instruction = compose_generation_prompt(data.get('prompt', ''), global_data.get('designSystemId', ''), global_data.get('skillId', DEFAULT_SKILL_ID), global_settings=global_data, agent_workflow=True)
 
             if not project_id:
                 self.send_error_response("缺少projectId")
@@ -4419,6 +4483,11 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             # 创建项目文件夹
             project_folder = os.path.join(PROJECTS_DIR, project_id)
             os.makedirs(project_folder, exist_ok=True)
+
+            import shutil
+            workflow_source = Path(proto_meta.__file__).resolve().parent / 'agent-skills' / 'prototype-flow'
+            shutil.copytree(workflow_source, Path(project_folder) / 'agent-skills' / 'prototype-flow', dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
 
             # 保存参考图片
             ref_images_folder = os.path.join(project_folder, 'reference')
@@ -4648,7 +4717,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 2. 所有「未来可能被点名修改或标注」的元素都要预埋 `data-proto-id`：导航、页头、每个按钮、表格、卡片、表单行、状态徽标、空态块。kebab-case 命名，页面内唯一（跨页面可重复）。
 3. 多状态页面必须提供 `window.PrototypeBridge = {{ enter(stateId) {{ ... }} }}`：推荐元素用 `data-state-visible="状态A,状态B"` 声明可见状态；enter 与页面自身的导航、Tab、路由和弹层切换都同步更新 `document.documentElement.dataset.protoState`，重复调用结果一致，异步切换返回 Promise，不重载整页。
 4. 文件名可用中文，但路径中不要出现 `#`、`?`、空格。
-5. 根元素声明 `data-proto-preview="{'mobile' if global_data.get('skillId') == 'mobile-app' else 'web'}"`；单文件的业务视图按页面名小写 slug 登记 stateId，保留中文，连续符号合成 `-`，重复名称追加 `-2`、`-3`；default 指向初始视图。
+5. 每个业务页面按实际端类型声明 `data-proto-preview="web"`、`data-proto-preview="mobile"` 或 `data-proto-preview="pad"`；Pad 使用横向平板画布与外壳。单端项目的表单默认值为 {'mobile' if global_data.get('skillId') == 'mobile-app' else 'web'}，混合端分别声明。单文件的业务视图按页面名小写 slug 登记 stateId，保留中文，连续符号合成 `-`，重复名称追加 `-2`、`-3`；default 指向初始视图。
+6. 读取 `agent-skills/prototype-flow/SKILL.md` 与 `references/multi-client.md`。混合端项目按每个业务页面实际类型声明 Web/App/Pad，编写 `prototype.manifest.json`；仅目录+加载其他文件的入口可声明 launcher，业务首页保留 page。
+7. 演示目录使用 skill 配套导航组件；业务菜单保持项目设计。用 `connect_project.py --tool-root <工具仓库> <原型目录> --build-launcher` 登记与生成演示壳，PRD 用 proto_import.py 落库。
+8. PRD 按 skill 的 references/prd-import.md 使用版本 3 草稿、最新 baseRevision 与本期 scope。scope.requirements 须引用本期用户原文并说明 before / after；背景 / 目标用 background / goals、标注用 items，每条均关联本期 requirementId，由工具生成 Markdown。只选择适用小节、不凑齐五项、不接受整段 body，不以页面总览或整块容器夹带旧功能。“重新落库”不等于整页补全；明确要求纠正本期误注时按 cleanupRequest / removals 定点清理未确认内容，不清空历史。点击提示必须单独列在 hotspots，省略即无提示，不按容器扩散到原有重批 / 导出等交互，不恢复用户手动删除的标注。完整 PRD 与整页点击提示必须分别有用户明确要求。落库完成回复项目名称、页面 / 状态，并附报告的页面直达 viewerUrl。
 
 ## 禁止
 - 不要调用外部后端接口。
@@ -4659,6 +4731,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 """
             with open(os.path.join(project_folder, 'AGENTS.md'), 'w', encoding='utf-8') as f:
                 f.write(agents_md)
+            import shutil
+            workflow_source = Path(proto_meta.__file__).resolve().parent / 'agent-skills' / 'prototype-flow'
+            shutil.copytree(workflow_source, Path(project_folder) / 'agent-skills' / 'prototype-flow', dirs_exist_ok=True,
+                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
 
             task_lines = [
                 f"# {project_name}",

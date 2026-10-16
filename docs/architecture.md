@@ -1,5 +1,25 @@
 # 架构设计 (Architecture)
 
+## 页面三级树（2026-10-15）
+
+页面关系保存在 `project.pages[].parentId`，数组决定同级顺序；共用导航递归渲染和折叠子树，拖动提交完整移动请求，由工作台沿用 CAS 保存。跨端移动连同子树更新所属端，服务端 `validate_page_hierarchy` 校验父引用、端一致性、循环和三级上限。页面身份与 PRD 不随排序变化。
+
+可移植清单以 `parentFile` 引用父文件，接入后转换为稳定 parentId。省略 parentFile 保留用户层级，空字符串显式解除；公共导航和评审导出通过 `navigation_pages` 跳过回收父级，保持可见后代。永久删除将直属子页面提升并同步清单，不连带删除子页面文件。
+
+## 页面回收站（2026-10-15）
+
+`page_lifecycle.py` 负责页面生命周期。软删除以页面 `trashedAt` 保存，不移动源文件或清除 PRD；导航、预览和导出使用活动页面集合。恢复清除标记并保留数组位置。永久删除在专用 CAS API 中确认文件名、校验目录边界与链接，清除该页关联数据并更新清单指纹，保留其他页面与共享资源。
+
+永久删除先将 HTML 临时改名到 `.prototype/`，以 `page-operation.pending.json` 记录前后元数据、原文件定位与清单备份，再保存清单及三份元数据，成功后删除暂存文件。失败恢复源文件、清单和元数据；异常中断保留记录，后续读取拒绝静默重建。回收站文件及 PRD 不进入导出，生成的演示导航只含活动页；没有业务页时阻止导出，工作台空项目仍可进入回收站。
+
+## 多端清单与共用导航（2026-10-14）
+
+`prototype_manifest.py` 校验项目根 `prototype.manifest.json` 并将端、角色、预览类型和默认业务页合入已登记元数据；保留页面身份和 PRD。清单指纹避免重复应用，角色纠正通过现有 CAS 保存。
+
+`agent-skills/prototype-flow/assets/project-navigation.css/js` 是导航组件的唯一维护来源：viewer 直接加载，研发导出内嵌，独立演示入口由模板生成并复制资源。页内 project-page.js 使用父窗口来源校验处理演示入口的状态切换；研发评审仍由 review-bridge 完成握手。
+
+接入脚本读取清单与工具仓库，不依赖固定个人路径。外部复制 Prompt 和 AI IDE 项目包包含完整 skill；业务侧栏沿用产品设计。演示入口声明与多端分组属于项目结构，不参与视觉风格预设。
+
 ## 首页升级（2026-10-10）
 
 src/home-ui.js 管理共用卡片、视口观察、封面请求、更多菜单、弹窗焦点与首页主题；业务仍由 src/script.js 调用已有接口。DOM 文本用 textContent 写入；路径和名称不作为 HTML 片段。
@@ -57,7 +77,7 @@ AI 项目仍保留首页旧 ID、生成记录与协作归属。`POST /api/projec
 
 多 HTML 项目以 `project.pages[].file` 导航；同一 HTML 中的旧 Vue / Router 页面映射为首页 adapter 状态，记录 `legacyPage`、`legacyType` 与可选路由路径。`src/proto-navigation.js` 连接现代 `PrototypeBridge` 与旧框架导航，在原型业务导航和 `data-proto-state` 之间同步状态，Viewer 与研发版评审壳共用适配模块，切换同文件状态不重载 iframe。
 
-创建页三种生成入口统一提供稳定 `data-proto-id`、根元素页面 / 状态 / 预览类型与 `PrototypeBridge.enter(stateId)` 协议；`record.json` 中保存 `global.previewType`。App / Web 自动预览依次读取原型根元素 `data-proto-preview`、页面 / 项目元数据与 DOM 特征。真机外壳开关只切换容器样式与装饰显示，保留 iframe 文档、表单内容和业务状态，并跨工作台模式与页面沿用所选外壳状态。
+创建页三种生成入口统一提供稳定 `data-proto-id`、根元素页面 / 状态 / 预览类型与 `PrototypeBridge.enter(stateId)` 协议；`record.json` 中保存 `global.previewType`。Web / App / Pad 自动预览依次读取状态、页面、所属端、原型根元素 `data-proto-preview` 与项目元数据，最后用 DOM 特征兜底。Pad 使用固定逻辑画布与 ResizeObserver 适配缩放。真机外壳开关只切换容器样式与装饰显示，保留 iframe 文档、表单内容和业务状态，并跨工作台模式与页面沿用所选外壳状态。
 
 AI「导出与分享」解析工作台 ID 后复用本地弹窗和 `/api/ext/export`、`/api/ext/publish`：`pure` 构建纯原型，`review` 构建只读评审壳与原型副本；共享版本选择，删除旧 AI 专属导出弹窗与内嵌入口。团队协作分享仍使用原归属与团队接口。
 
@@ -71,6 +91,8 @@ AI 导出复制成品与资源，排除根目录的生成记录、完整 Prompt�
 研发版导出将状态配置、导航适配器与锚点 / 评审脚本注入原型副本。评审壳通过 `postMessage` 与 iframe 通信，在 HTTP 与 `file://` 下使用相同的导航、标注和 PRD。
 
 ### 点击热区发现
+
+提示范围来自页面状态 `interactionHints: {mode: "targets", protoIds: [...]}`，空数组或缺省代表不提示，只有明确要求时使用 `{mode: "all"}`。PRD 草稿按本次需求生成此范围；不从所有标注、可点击元素或稳定 ID 反推授权。组件目标可包含其内部真实交互，仍须通过动作与可见性检测。新一轮导入替换相同状态的提示范围；评审壳通过 init 消息传递各状态配置，切状态读取对应范围。
 
 `src/proto-hotspots.js` 提供 `ProtoHotspots.init / show / hide / destroy`，自身不自动启动提示 UI。文件服务只在 HTML 响应副本中提前载入模块，源文件保持原样；模块记录交互事件的实际绑定及移除，保留回调身份、this、去重、capture、once 和 AbortSignal，避免仅凭按钮标签、role 或 cursor 误判。React 根代理由元素 props 的实际业务回调识别；任意自定义祖先代理的区域使用显式热点声明。无实际行为的普通按钮、空链接和占位链接排除。
 

@@ -1,4 +1,4 @@
-/* 点击空白时短暂显示交互热区；独立提示层，不修改原型元素或拦截业务点击。 */
+/* 点击空白时短暂提示本次需求范围内的真实交互；未声明范围时不扫描整页。 */
 (() => {
     'use strict';
     if (window.ProtoHotspots) return;
@@ -78,6 +78,16 @@
         if (!(el instanceof Element) || el === document.body || el === document.documentElement || owned(el) || el.closest(BLOCKED) || el.matches(':disabled')) return false;
         return el.dataset.protoHotspot === 'true' || binding(el) || navigation(el) || nativeAction(el);
     }
+    function currentScope() {
+        try { return typeof options.scope === 'function' ? options.scope() : options.scope; }
+        catch (_) { return null; }
+    }
+    function inScope(el, scope = currentScope()) {
+        if (scope?.mode === 'all') return true;
+        if (scope?.mode !== 'targets' || !Array.isArray(scope.protoIds)) return false;
+        // 范围只授权该控件自身；容器标注不授权内部的历史交互。
+        return scope.protoIds.includes(el.getAttribute('data-proto-id'));
+    }
     function hitAction(target) {
         for (let el = target instanceof Element ? target : target?.parentElement; el && el !== document.documentElement; el = el.parentElement)
             if (action(el) && rectFor(el)) return true;
@@ -119,8 +129,9 @@
     function refresh() {
         frame = 0;
         if (!enabled()) { hide(); return; }
+        const scope = currentScope();
         for (const [el, box] of boxes) {
-            const rect = action(el) ? rectFor(el) : null;
+            const rect = inScope(el, scope) && action(el) ? rectFor(el) : null;
             if (!rect) { box.remove(); boxes.delete(el); }
             else position(box, rect);
         }
@@ -130,6 +141,8 @@
     }
     function show() {
         if (!layer || !enabled()) { hide(); return 0; }
+        const scope = currentScope();
+        if (scope?.mode !== 'all' && (scope?.mode !== 'targets' || !scope.protoIds?.length)) { hide(); return 0; }
         if (boxes.size && performance.now() - started < DURATION) { refresh(); return boxes.size; }
         hide();
         const candidates = [];
@@ -137,7 +150,7 @@
             if (/^(SCRIPT|STYLE|LINK|META|OPTION|OPTGROUP|PATH|SVG)$/.test(el.tagName)) continue;
             const bounds = el.getBoundingClientRect();
             if (!bounds.width || !bounds.height || bounds.bottom <= 0 || bounds.top >= innerHeight || bounds.right <= 0 || bounds.left >= innerWidth) continue;
-            if (action(el)) { const rect = rectFor(el); if (rect) candidates.push({ el, rect }); }
+            if (inScope(el, scope) && action(el)) { const rect = rectFor(el); if (rect) candidates.push({ el, rect }); }
             if (candidates.length >= MAX_HINTS * 2) break;
         }
         const leaves = candidates.filter(candidate => !candidates.some(other => other.el !== candidate.el && candidate.el.contains(other.el))).slice(0, MAX_HINTS);
@@ -172,7 +185,7 @@
     }
     function init(config = {}) {
         options = config;
-        if (layer) return window.ProtoHotspots;
+        if (layer) { hide(); return window.ProtoHotspots; }
         style = document.createElement('style'); style.setAttribute('data-prototype-owned', '');
         style.textContent = `
 .ph-layer{--ph-fill:${COLORS.fill};--ph-opacity-low:.18;--ph-opacity-high:.42;--ph-opacity-still:.3;position:fixed;inset:0;z-index:2147481000;border:0!important;outline:0!important;box-shadow:none!important;background:transparent!important;pointer-events:none!important;overflow:hidden;}

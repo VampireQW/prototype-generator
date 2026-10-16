@@ -115,7 +115,8 @@
         label.append(document.createTextNode(kind === 'ai' ? 'AI 原型' : '本地原型')); identity.append(label); cover.append(identity);
         if (preview && !disabled) { cover.dataset.preview = '/api/home/thumbnail?' + new URLSearchParams(preview); previewObserver.observe(cover); }
         const status = node('span', 'project-badge'); status.dataset.tone = tone;
-        status.innerHTML = icon(badgeIcon); status.append(document.createTextNode(badge)); cover.append(status);
+        status.innerHTML = icon(badgeIcon); status.append(document.createTextNode(badge));
+        cover.append(status);
         const body = node('div', 'project-card-body');
         const title = node('h3', 'project-card-title', name); title.title = name; body.append(title);
         body.append(node('div', 'project-card-meta', meta));
@@ -133,7 +134,9 @@
         container.append(el);
     }
     const counts = { local: null, ai: null };
+    let localFilter = null;
     function updateCounts(source, total, visible = total) {
+        if (source === 'local' && localFilter) localFilter.setValue($('externalFilter').value);
         if (total != null) counts[source] = total;
         const badge = $(source === 'local' ? 'localProjectCount' : 'aiProjectCount');
         badge.hidden = counts[source] == null; badge.textContent = counts[source] ?? '';
@@ -192,6 +195,17 @@
         pages.forEach((id, i) => { const li = node('li'); li.append(node('span', '', i + 1), document.createTextNode($('pageName_' + id)?.value.trim() || `页面 ${i + 1}`)); list.append(li); });
     }
     function init() {
+        const nativeFilter = $('externalFilter');
+        if (nativeFilter && window.ProtoProjectNavigation?.createSelect) {
+            const host = node('div', 'ppn library-filter-host');
+            nativeFilter.after(host); nativeFilter.hidden = true;
+            nativeFilter.parentElement.classList.add('is-enhanced');
+            localFilter = ProtoProjectNavigation.createSelect(host, {
+                label: nativeFilter.getAttribute('aria-label'), value: nativeFilter.value,
+                items: [...nativeFilter.options].map(option => ({value: option.value, label: option.textContent})),
+                onChange: value => { nativeFilter.value = value; nativeFilter.dispatchEvent(new Event('change', {bubbles: true})); }
+            });
+        }
         document.querySelectorAll('i[class*="fa"]').forEach(icon => icon.setAttribute('aria-hidden', 'true'));
         $('userMenuBtn').innerHTML = icon('user');
         updateCounts('local'); updateCounts('ai');

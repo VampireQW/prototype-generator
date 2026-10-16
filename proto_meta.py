@@ -128,6 +128,10 @@ def project_id_for(root: Path) -> str:
     return "p-" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
 
 
+def is_stable_project_id(value) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r'p-[0-9a-f]{16}', value))
+
+
 def meta_dir(root: Path) -> Path:
     return root / ".prototype"
 
@@ -181,6 +185,81 @@ def validate_size(value, label="视口"):
     return {k: value[k] for k in ("width", "height")}
 
 
+def validate_interaction_hints(value):
+    if value is None:
+        return
+    if not isinstance(value, dict) or value.get('mode') not in ('targets', 'all'):
+        raise ValueError('interactionHints 必须指定 targets 或 all 模式')
+    ids = value.get('protoIds', [])
+    if not isinstance(ids, list) or any(not isinstance(pid, str) or not pid.strip() for pid in ids) or len(set(ids)) != len(ids):
+        raise ValueError('interactionHints.protoIds 必须为不重复的元素 ID 数组')
+
+
+def remember_annotation_deletions(before, after):
+    """工作台删除只留下定位身份，供 Agent 导入防止恢复；不保存已删除正文。"""
+    records = {}
+    for item in before['prd'].get('deletedAnnotations', []) + after['prd'].get('deletedAnnotations', []):
+        records[(item['pageId'], item['stateId'], item['protoId'])] = item
+    remaining = {n['id'] for n in after['prd']['annotations']}
+    for note in before['prd']['annotations']:
+        pid = (note.get('anchor') or {}).get('protoId')
+        if note['id'] not in remaining and pid:
+            key = (note['pageId'], note['stateId'], pid)
+            records[key] = {'pageId': key[0], 'stateId': key[1], 'protoId': pid, 'deletedAt': now_iso()}
+    if records:
+        after['prd']['deletedAnnotations'] = list(records.values())
+
+
+def validate_page_hierarchy(pages):
+    """Page levels exclude client groups and states; recycled parents keep their links."""
+    by_id = {p['id']: p for p in pages}
+    if any(p.get('parentId') is not None and not isinstance(p['parentId'], str) for p in pages):
+        raise ValueError('父页面 ID 无效')
+    for page in pages:
+        parent_id = page.get('parentId')
+        if parent_id is not None and not isinstance(parent_id, str):
+            raise ValueError('父页面 ID 无效')
+        if not parent_id:
+            continue
+        parent = by_id.get(parent_id)
+        if not parent:
+            raise ValueError('父页面不存在')
+        if page.get('role') == 'launcher' or parent.get('role') == 'launcher':
+            raise ValueError('演示入口不支持页面层级')
+        if (page.get('clientId') or '') != (parent.get('clientId') or ''):
+            raise ValueError('父子页面必须属于同一个端')
+        seen, current, depth = {page['id']}, parent, 1
+        while current:
+            if current['id'] in seen:
+                raise ValueError('页面层级不能循环引用')
+            seen.add(current['id'])
+            depth += 1
+            if depth > 3:
+                raise ValueError('页面最多支持三级结构')
+            current = by_id.get(current.get('parentId'))
+
+
+def navigation_pages(pages):
+    """Hide recycled pages while promoting their visible descendants for navigation."""
+    by_id = {p['id']: p for p in pages}
+    result = []
+    for source in pages:
+        if source.get('trashedAt'):
+            continue
+        page = dict(source)
+        parent = by_id.get(page.get('parentId'))
+        seen = {page['id']}
+        while parent and parent.get('trashedAt') and parent['id'] not in seen:
+            seen.add(parent['id'])
+            parent = by_id.get(parent.get('parentId'))
+        if parent and parent['id'] not in seen:
+            page['parentId'] = parent['id']
+        else:
+            page.pop('parentId', None)
+        result.append(page)
+    return result
+
+
 def validate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
     if bundle.get("schemaVersion") != SCHEMA_VERSION:
         raise ValueError("项目协议版本不支持")
@@ -188,14 +267,30 @@ def validate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("revision 无效")
     project = bundle.get("project") or {}
     pages = project.get("pages")
-    if not project.get("id") or not isinstance(pages, list) or not pages:
+    if not project.get("id") or not isinstance(pages, list):
         raise ValueError("项目页面清单无效")
+    clients = project.get('clients', [])
+    if not isinstance(clients, list) or any(not isinstance(c, dict) or not c.get('id') or not c.get('title') for c in clients):
+        raise ValueError('端定义无效')
+    client_ids = {c['id'] for c in clients}
+    if len(client_ids) != len(clients) or any(c.get('previewType', 'web') not in ('mobile', 'web', 'pad') for c in clients):
+        raise ValueError('端定义重复或显示类型无效')
     scopes: set[str] = set()
     page_ids: set[str] = set()
     for page in pages:
         if not page.get("id") or page["id"] in page_ids:
             raise ValueError("页面 ID 为空或重复")
         page_ids.add(page["id"])
+        if 'trashedAt' in page and (not isinstance(page['trashedAt'], str) or not page['trashedAt'].strip()):
+            raise ValueError('页面回收时间无效')
+        if page.get('role', 'page') not in ('page', 'launcher') or page.get('previewType', 'web') not in ('web', 'mobile', 'pad'):
+            raise ValueError('页面角色或显示类型无效')
+        if page.get('clientId') and page['clientId'] not in client_ids:
+            raise ValueError('页面引用了未登记的端')
+        if page.get('priority') is not None and (type(page['priority']) is not int or not 1 <= page['priority'] <= 6):
+            raise ValueError('页面优先级必须为 1–6 的整数')
+        if page.get('progress') is not None and (type(page['progress']) is not int or not 0 <= page['progress'] <= 100):
+            raise ValueError('页面完成进度必须为 0–100 的整数')
         safe_relative(page.get("file") or "index.html")
         states = page.get("states")
         if not isinstance(states, list) or not states:
@@ -203,11 +298,18 @@ def validate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
         for state in states:
             if not state.get("id") or state.get("kind") not in {"default", "adapter", "manual"}:
                 raise ValueError("状态定义无效")
+            if state.get('previewType', 'web') not in ('web', 'mobile', 'pad'):
+                raise ValueError('状态显示类型无效')
             key = f"{page['id']}\n{state['id']}"
             if key in scopes:
                 raise ValueError("状态 ID 重复")
             scopes.add(key)
             validate_size(state.get('viewport'))
+            validate_interaction_hints(state.get('interactionHints'))
+    validate_page_hierarchy(pages)
+    deleted = bundle.get('prd', {}).get('deletedAnnotations', [])
+    if not isinstance(deleted, list) or any(not isinstance(item, dict) or any(not isinstance(item.get(k), str) or not item[k] for k in ('pageId', 'stateId', 'protoId')) for item in deleted):
+        raise ValueError('已删除标注定位记录无效')
     for group in (bundle.get("prd", {}).get("documents"), bundle.get("prd", {}).get("annotations"), bundle.get("changes", {}).get("items")):
         if not isinstance(group, list):
             raise ValueError("PRD 或任务列表无效")
@@ -263,14 +365,17 @@ def bundle_from_docs(docs: dict[str, Any]) -> dict[str, Any]:
         "schemaVersion": SCHEMA_VERSION,
         "revision": revision,
         "project": {"id": p["id"], "name": p.get("name", "原型项目"), "pages": p.get("pages", []),
-                    **{key: p[key] for key in ('source', 'aiProjectId', 'previewType') if key in p}},
-        "prd": {"documents": prd.get("documents", []), "annotations": prd.get("annotations", [])},
+                    **{key: p[key] for key in ('source', 'aiProjectId', 'previewType', 'clients', 'defaultPage', 'navigationManifestHash') if key in p}},
+        "prd": {"documents": prd.get("documents", []), "annotations": prd.get("annotations", []),
+                **({'deletedAnnotations': prd['deletedAnnotations']} if 'deletedAnnotations' in prd else {})},
         "changes": {"items": changes.get("items", [])},
     })
 
 
 def load_bundle(root: Path) -> dict[str, Any]:
     md = meta_dir(root)
+    if (md / 'page-operation.pending.json').exists():
+        raise ValueError('上次页面删除中断，已保留页面文件及恢复记录；请先恢复，避免覆盖现场')
     if (md / ".pending-write.json").exists():
         raise ValueError("上次元数据保存中断，已保留 .pending-write.json 恢复备份；请先恢复，不会重建项目")
     docs = {}
@@ -327,7 +432,14 @@ def ensure_bundle(root: Path, url: str = "", title: str = "") -> dict[str, Any]:
         if not url:
             pages = discover_pages(root)
             if not pages:
-                raise ValueError("项目目录中没有 HTML 原型")
+                import prototype_manifest
+                declaration = prototype_manifest.load_manifest(root)
+                if not declaration:
+                    raise ValueError("项目目录中没有 HTML 原型")
+                entry = next((p for p in declaration['pages'] if p['file'] == declaration.get('defaultPage')),
+                             next(p for p in declaration['pages'] if p.get('role', 'page') == 'page'))
+                pages = [{'url': (root.resolve() / entry['file']).as_uri(),
+                          'title': entry.get('title') or Path(entry['file']).stem}]
             url, title = pages[0]["url"], pages[0]["title"]
         bundle = default_bundle(root, url, title)
         save_bundle(root, bundle)
@@ -360,14 +472,24 @@ def ensure_project_id(root: Path, bundle: dict[str, Any], pid: str) -> bool:
 
 def ensure_pages_registered(root: Path, bundle: dict[str, Any]) -> bool:
     """把目录里新发现但未登记的页面补进 bundle；有变更则 revision+1 并落盘。返回是否有变更。"""
+    import prototype_manifest
+    declaration = prototype_manifest.load_manifest(root)
     pages = bundle['project']['pages']
     known_files = {str(p.get('file', '')).casefold() for p in pages}
     known_ids = {p['id'] for p in pages}
     changed = False
-    for rec in discover_pages(root):
+    records = discover_pages(root)
+    discovered_files = {rec['file'].casefold() for rec in records}
+    for item in (declaration or {}).get('pages', []):
+        if item['file'].casefold() not in discovered_files:
+            records.append({'file': item['file'], 'url': (root.resolve() / item['file']).as_uri(),
+                            'title': item.get('title') or Path(item['file']).stem})
+            discovered_files.add(item['file'].casefold())
+    for rec in records:
         if rec['file'].casefold() in known_files:
             continue
         page = page_record(root, rec['url'], rec['title'])
+        page['file'] = rec['file']
         base_id = page['id']
         suffix = 2
         while page['id'] in known_ids:
@@ -377,6 +499,7 @@ def ensure_pages_registered(root: Path, bundle: dict[str, Any]) -> bool:
         known_files.add(page['file'].casefold())
         pages.append(page)
         changed = True
+    changed = prototype_manifest.apply_manifest(root, bundle, declaration) or changed
     if changed:
         bundle['revision'] += 1
         save_bundle(root, bundle)
@@ -384,10 +507,11 @@ def ensure_pages_registered(root: Path, bundle: dict[str, Any]) -> bool:
 
 
 def ensure_ai_project_bundle(root: Path, record: dict, detected_pages: list[dict], name: str = '') -> dict:
-    """把旧 AI 项目接入同一工作台，首次补登状态与页面需求，已有内容保持原样。"""
+    """把旧 AI 项目接入工作台，保留旧文档，只按显式背景 / 目标补充页面需求。"""
     with PROJECT_LOCK:
         bundle = ensure_bundle(root)
-        ensure_project_id(root, bundle, project_id_for(root))
+        if not is_stable_project_id(bundle['project']['id']):
+            ensure_project_id(root, bundle, project_id_for(root))
         ensure_pages_registered(root, bundle)
         project = bundle['project']
         before = json.dumps(bundle, ensure_ascii=False, sort_keys=True)
@@ -398,13 +522,18 @@ def ensure_ai_project_bundle(root: Path, record: dict, detected_pages: list[dict
         skill_id = record.get('skillId') or global_data.get('skillId') or ''
         inputs = [item for item in (record.get('pages') or []) if isinstance(item, dict)]
         pages = project['pages']
+        if not pages:
+            if before != json.dumps(bundle, ensure_ascii=False, sort_keys=True):
+                bundle['revision'] += 1
+                save_bundle(root, bundle)
+            return bundle
         home = next((page for page in pages if str(page.get('file', '')).casefold() == 'index.html'), pages[0])
         source = safe_asset(root, home['file']).read_text(encoding='utf-8', errors='replace')
         hint = global_data.get('previewType') or record.get('previewType')
-        if hint not in ('mobile', 'web'):
+        if hint not in ('mobile', 'web', 'pad'):
             hint = 'mobile' if skill_id == 'mobile-app' else 'web' if skill_id in ('web-prototype', 'dashboard', 'saas-landing', 'html-ppt') else ''
         if not hint:
-            declaration = re.search(r'data-proto-preview\s*=\s*["\'](mobile|web)["\']', source)
+            declaration = re.search(r'data-proto-preview\s*=\s*["\'](mobile|web|pad)["\']', source)
             hint = declaration.group(1) if declaration else ''
         if hint:
             project['previewType'] = hint
@@ -488,7 +617,7 @@ def ensure_ai_project_bundle(root: Path, record: dict, detected_pages: list[dict
                 used_legacy.add(legacy)
             if not markdown.strip() and matching:
                 parts = []
-                for key, title in (('layout', '布局描述'), ('features', '功能说明'), ('content', '页面内容'), ('interaction', '交互说明'), ('description', '页面说明')):
+                for key, title in (('background', '需求背景'), ('goals', '需求目标')):
                     text = str(matching.get(key) or '').strip()
                     if text:
                         parts.append(f'## {title}\n\n{text}')
@@ -508,6 +637,7 @@ def ensure_ai_project_bundle(root: Path, record: dict, detected_pages: list[dict
         if json.dumps(bundle, ensure_ascii=False, sort_keys=True) != before:
             bundle['revision'] += 1
             save_bundle(root, bundle)
+        ensure_pages_registered(root, bundle)
         return bundle
 
 
@@ -596,6 +726,7 @@ def directory_created_at(root: Path, fallback: str = '') -> str:
 def scan_roots(roots: list[str], registered: dict) -> tuple[list[dict], list[dict]]:
     """与全流程一致：根及直接子目录，只读发现，绝不初始化元数据。"""
     candidates, errors, seen = [], [], set()
+    connected_roots = {str(Path(item['root']).resolve()).casefold() for item in registered.values() if item.get('root')}
     for text in roots:
         try:
             base = Path(text).expanduser()
@@ -611,7 +742,7 @@ def scan_roots(roots: list[str], registered: dict) -> tuple[list[dict], list[dic
                 if skip_scan_directory(folder):
                     continue
                 pid = project_id_for(folder)
-                if pid in seen or pid in registered:
+                if pid in seen or pid in registered or str(folder.resolve()).casefold() in connected_roots:
                     continue
                 seen.add(pid)
                 try:

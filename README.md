@@ -261,6 +261,8 @@ python server.py
 
 ### 本地 Agent 协作 skill
 
+多端项目可通过 `prototype.manifest.json` 登记端与页面角色，工作台默认直开业务页，独立演示入口和导出共用导航组件。完整技能包含 references / assets / scripts，迁移方式见 [多端项目与 AI 工具迁移](docs/multi-client.md)。
+
 仓库自带 `agent-skills/prototype-flow/`，覆盖原型接入、Markdown PRD / 元素标注落库和修改任务协作。支持复制到 Codex 或 Claude Code 的技能目录，保留整个目录及引用文件；安装与使用见 [协作 skill 指南](docs/agent-skill.md)。
 
 只安装 skill 不会自动把目录加入首页项目列表。Agent 完成导入后，在“本地原型”中添加原型目录即可查看 PRD；已登记项目刷新工作台即可。
@@ -366,7 +368,7 @@ PROTOTYPE_GITHUB_TOKEN=你的_GitHub_Token python server.py
 
 ## 📝 更新日志
 
-查看 [本次更新说明](docs/releases/2026-10-11.md) 或 [完整更新日志](docs/changelog.md)。
+查看 [本次更新说明](docs/releases/2026-10-16.md)、[上一版更新说明](docs/releases/2026-10-11.md) 或 [完整更新日志](docs/changelog.md)。
 
 ## 开发验证
 

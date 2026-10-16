@@ -25,11 +25,13 @@
     }
     const cardWidth = () => cardDoc().documentElement.clientWidth;
     const cardHeight = () => cardDoc().documentElement.clientHeight;
-    /* iframe 视口坐标 → 卡文档坐标：卡在父页时加上本 iframe 在父页里的偏移 */
+    /* iframe 视口坐标 → 卡文档坐标：包含平板缩放与 iframe 边缘偏移。 */
     function toCard(x, y) {
         if (cardDoc() === document) return { x, y };
-        const r = window.frameElement?.getBoundingClientRect?.();
-        return r ? { x: x + r.left, y: y + r.top } : { x, y };
+        const frame=window.frameElement, r=frame?.getBoundingClientRect?.();
+        if(!r)return {x,y};
+        const sx=r.width/(frame.offsetWidth || r.width) || 1, sy=r.height/(frame.offsetHeight || r.height) || 1;
+        return {x:r.left+(x+(frame.clientLeft || 0))*sx,y:r.top+(y+(frame.clientTop || 0))*sy};
     }
     const editable = el => !!el?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]');
     let hoverBox = null;
@@ -52,10 +54,10 @@
 
     /* 联动展开期间放行原型点击：reveal 通过合成 trig.click() 点开折叠按钮，标注模式下会被 onClick 捕获拦截
        （preventDefault + stopImmediatePropagation 并弹新建输入卡），导致点引导框 / 序号定位都展不开。 */
-    let revealing = false;
-    function revealThrough(target) {
-        revealing = true;
-        try { return ProtoAnchors.reveal?.(target); } finally { revealing = false; }
+    let revealing = 0;
+    async function revealThrough(target) {
+        revealing++;
+        try { return await (ProtoAnchors.revealAndWait?.(target) ?? ProtoAnchors.reveal?.(target)); } finally { revealing--; }
     }
 
     function ensureStyle(doc = document) {
@@ -64,12 +66,11 @@
         style.id = 'proto-annotate-style';
         style.setAttribute('data-prototype-owned', '');
         style.textContent = `
-.pa-layer{--pa-accent:#2563eb;--pa-accent-hover:#1d4ed8;--pa-ring:#7ba2ff;--pa-on-accent:#ffffff;--pa-surface:#212326;--pa-text:#f2f4f7;--pa-muted:#a8b0ba;--pa-border:#808790;--pa-control:#808790;--pa-hover:#363c44;--pa-stale:#626b78;--pa-scroll:#78828f;--pa-error:#ff8a8a;--pa-shadow:0 8px 24px rgba(16,24,40,.24);--pa-font:"PingFang SC","Microsoft YaHei UI","Microsoft YaHei",system-ui,sans-serif;position:fixed;inset:0;z-index:2147483000;pointer-events:none;}
-/* 浅色系（由父页外观设置下发 data-theme=light）：与右栏 --ext-* 浅色 token 同源。正文 #1a1d23/#fff 16.9:1，次要 #626b78/#fff 5.4:1；
-   卡边框与滚动条沟 #808790/#fff 3.6:1（浮卡盖在任意原型内容上，边界按控件“≥ 3:1”取）；焦点环改用主色 #2563eb/#fff 5.2:1。 */
+.pa-layer{--pa-accent:#2563eb;--pa-accent-hover:#1d4ed8;--pa-ring:#52a8ff;--pa-on-accent:#ffffff;--pa-surface:#111111;--pa-text:#ededed;--pa-muted:#a1a1a1;--pa-border:#666666;--pa-control:#666666;--pa-hover:#1a1a1a;--pa-stale:#666666;--pa-scroll:#666666;--pa-error:#ff6166;--pa-shadow:0 1px 1px #0000000f,0 8px 16px -4px #0003,0 24px 32px -8px #0003;--pa-font:Geist,Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei UI","Microsoft YaHei",sans-serif;position:fixed;inset:0;z-index:2147483000;pointer-events:none;}
+/* 标注卡使用工作台的中性色，序号与内容配色保持用户设置。 */
 /* 父页按模式收起整层（预览 / 微调）：序号、引导徽标、气泡卡一起不出现，不是逐个 visibility 藏 */
 .pa-layer[data-hidden]{display:none;}
-.pa-layer[data-theme="light"]{--pa-ring:#2563eb;--pa-surface:#ffffff;--pa-text:#1a1d23;--pa-muted:#626b78;--pa-border:#808790;--pa-control:#808790;--pa-hover:#f1f2f4;--pa-scroll:#808790;--pa-error:#b42318;--pa-shadow:0 8px 24px rgba(16,24,40,.16);}
+.pa-layer[data-theme="light"]{--pa-ring:#0070f3;--pa-surface:#ffffff;--pa-text:#171717;--pa-muted:#666666;--pa-border:#888888;--pa-control:#888888;--pa-hover:#f5f5f5;--pa-scroll:#888888;--pa-error:#c50000;--pa-shadow:0 1px 1px #00000005,0 8px 16px -4px #0000000a,0 24px 32px -8px #0000000f;}
 .pa-layer *, .pa-layer *::before{box-sizing:border-box;}
 .pa-pin{position:absolute;display:grid;place-items:center;min-width:36px;height:36px;margin:0;padding:0 8px;border:3px solid var(--pa-on-accent);border-radius:50% 50% 50% 2px;background:var(--pa-accent);color:var(--pa-on-accent);font:600 13px/1 var(--pa-font);font-variant-numeric:tabular-nums;box-shadow:var(--pa-shadow);transform:translateY(-100%);cursor:grab;touch-action:none;user-select:none;pointer-events:auto;}
 .pa-pin::before{content:"";position:absolute;inset:-7px;}
@@ -83,9 +84,9 @@
 .pa-layer .pa-pin:focus-visible{outline-color:var(--pa-accent);}
 .pa-layer button:disabled{opacity:.5;cursor:not-allowed;}
 /* 卡片 = 外壳（不裁剪，边框上挂拖拽热区）+ 内部滚动区 .pa-card-scroll。默认最多 60vh 高（曾撑满整屏），宽 420px；手动拖过高度后只受视口钳制。 */
-.pa-card{position:absolute;z-index:5;display:flex;flex-direction:column;width:420px;max-width:calc(100% - 24px);max-height:min(60vh,calc(100% - 24px));overflow:visible;pointer-events:auto;background:var(--pa-surface);color:var(--pa-text);border:1px solid var(--pa-border);border-radius:10px;box-shadow:var(--pa-shadow);font:14px/1.7 var(--pa-font);letter-spacing:.02em;animation:paOpen 180ms ease-out;}
+.pa-card{position:absolute;z-index:5;display:flex;flex-direction:column;width:420px;max-width:calc(100% - 24px);max-height:min(60vh,calc(100% - 24px));overflow:visible;pointer-events:auto;background:var(--pa-surface);color:var(--pa-text);border:1px solid var(--pa-border);border-radius:8px;box-shadow:var(--pa-shadow);font:14px/1.7 var(--pa-font);letter-spacing:0;animation:paOpen 180ms ease-out;}
 .pa-card.pa-sized{max-height:calc(100% - 24px);}
-.pa-layer .pa-card-scroll{flex:1 1 auto;min-height:0;margin:0;padding:0;overflow-x:hidden;overflow-y:auto;border-radius:0 0 9px 9px;}
+.pa-layer .pa-card-scroll{flex:1 1 auto;min-height:0;margin:0;padding:0;overflow-x:hidden;overflow-y:auto;border-radius:0 0 7px 7px;}
 /* 边缘拖拽热区：骑在卡片真实边框上（外 6px + 边框 + 内 3px，不占滚动条的抓取宽），不画任何指示线——可拖只由光标表达（曾有一条蓝线，用户要求去掉）。
    左右缘调宽、下缘调高、下方两角同时调；上缘留给拖柄移动。 */
 .pa-card-resize{position:absolute;touch-action:none;z-index:6;}
@@ -98,7 +99,7 @@
 .pa-card-resize-sw{left:-6px;cursor:nesw-resize;}
 @media(pointer:coarse){.pa-card-resize-e,.pa-card-resize-w{width:20px;}.pa-card-resize-e{right:-10px;}.pa-card-resize-w{left:-10px;}.pa-card-resize-s{height:20px;bottom:-10px;}.pa-card-resize-se,.pa-card-resize-sw{width:28px;height:28px;bottom:-10px;}.pa-card-resize-se{right:-10px;}.pa-card-resize-sw{left:-10px;}}
 /* 顶部拖柄：按住拖动卡片（卡体内边距同样可拖）；在滚动区之外，长内容滚动时始终在顶。 */
-.pa-layer .pa-card-grip{position:relative;flex:0 0 auto;z-index:2;display:grid;place-items:center;height:14px;margin:0;padding:0;background:var(--pa-surface);border-radius:9px 9px 0 0;cursor:grab;touch-action:none;user-select:none;}
+.pa-layer .pa-card-grip{position:relative;flex:0 0 auto;z-index:2;display:grid;place-items:center;height:14px;margin:0;padding:0;background:var(--pa-surface);border-radius:7px 7px 0 0;cursor:grab;touch-action:none;user-select:none;}
 .pa-card-grip::before{content:"";width:32px;height:4px;border-radius:2px;background:var(--pa-control);opacity:.75;}
 .pa-card.pa-moving,.pa-card.pa-moving .pa-card-grip,.pa-card.pa-moving .pa-card-body{cursor:grabbing;}
 .pa-card.pa-moving{user-select:none;}
@@ -660,7 +661,7 @@
                 marker.setAttribute('data-prototype-owned', '');
                 marker.__paTrig = trig;
                 marker.style.setProperty('--g-delay', (-(gi++ % 4) * 0.45) + 's');
-                marker.onclick = (e) => { e.stopPropagation(); revealThrough(marker.__paTarget); scheduleLayout(); };
+                marker.onclick = async (e) => { e.stopPropagation(); await revealThrough(marker.__paTarget); scheduleLayout(); };
                 pinLayer.appendChild(marker);
             }
             marker.__paTarget = g.target;
@@ -732,7 +733,9 @@
         layoutPins();
     }
 
-    function flashNote(id) {
+    let focusGeneration = 0;
+    async function flashNote(id) {
+        const generation = ++focusGeneration;
         const note = notes.find((n) => n.id === id);
         if (!note) return false;
         let found = ProtoAnchors.point(note);
@@ -741,7 +744,11 @@
             // 目标被折叠/隐藏（Feature 2）：仅在确有显现路径时联动；无入口时把失败回传给右栏，不再静默假装定位成功。
             const hiddenEl = ProtoAnchors.resolveHidden?.(note.anchor);
             pendingReveal = !!ProtoAnchors.revealHint?.(note.anchor, hiddenEl);
-            if (pendingReveal && revealThrough(note.anchor)) found = ProtoAnchors.point(note);
+            if (pendingReveal) {
+                await revealThrough(note.anchor);
+                if (generation !== focusGeneration) return true; // 用户已改选其他序号，不抢回焦点。
+                found = ProtoAnchors.point(note);
+            }
         }
         if (found.element) {
             found.element.scrollIntoView({ block: 'center', behavior: motion() });
@@ -751,7 +758,7 @@
         selectNote(id);
         layoutPins();
         setTimeout(layoutPins, 700);
-        return !!found.point || pendingReveal;
+        return !!found.point;
     }
 
     // ---------- 生命周期 ----------

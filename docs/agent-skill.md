@@ -11,7 +11,7 @@
 
 ## 1. 安装 skill
 
-下载或更新本仓库，把 **`agent-skills/prototype-flow/` 整个目录**复制到所用 Agent 的技能目录。不要只复制 `SKILL.md`，三个 `references/` 文件也要保留。
+下载或更新本仓库，把 **`agent-skills/prototype-flow/` 整个目录**复制到所用 Agent 的技能目录。保留全部 `references/`、`assets/` 和 `scripts/`，不要只复制 `SKILL.md`。多端项目的新清单和迁移流程见 [多端接入与迁移](multi-client.md)。
 
 | Agent | 仅在目标项目中使用 | 当前用户的多个项目中使用 |
 | --- | --- | --- |
@@ -42,8 +42,11 @@ Codex 可明确引用 `$prototype-flow`；Claude Code 可使用 `/prototype-flow
 工具仓库：<工具仓库目录>
 原型项目：<原型项目目录>
 检查并补齐稳定 data-proto-id 和已有业务状态的登记。
-根据原型、已确认需求和 .prototype/brief.md 整理页面 PRD 与元素标注，
+仅整理本期实际改造，背景、目标和每条标注都关联本期需求，
+引用需求原文并说明改造前后差异，用版本 3 的分条对象生成 Markdown，
 写入 .prototype/prd.draft.json，然后调用 proto_import.py 正式落库。
+可点击提示单独列出本次变化的具体控件，不提示原有重批、导出等功能。
+完成后告诉我项目名称、页面名称，并给出可直接打开该页标注的链接。
 不明确的业务规则列为待确认问题。
 ```
 
@@ -63,3 +66,23 @@ python "<工具仓库>/proto_import.py" "<原型项目>"
 **落库与首页登记是两步**：导入脚本保存项目内 `.prototype/` 元数据，不会自动将目录写入首页列表。已添加过的项目刷新工作台即可。
 
 本地 HTML 接入和 PRD 导入本身不需要第三方 AI API Key 或 GitHub Token；GitHub Pages 发布由用户在工作台另行配置、发起。
+
+## 增量 PRD 与点击提示（2026-10-15）
+
+更新工具仓库和完整 `prototype-flow` 文件夹，并让 Agent 在新会话读取新版入口。草稿已升级为版本 3，基于最新 revision 逐条关联本期需求，引用需求原文并说明 before / after；背景 / 目标用分条对象，标注用 items，由工具生成 Markdown，不接受旧版整段 body；复刻原有界面不自动生成整页标注。完整 PRD 与整页点击提示分别需要用户明确要求。
+
+旧项目没有提示范围时默认不提示；新导入把本次范围写入状态 `interactionHints`。用户删除的标注保持删除，不重放旧草稿；范围、update / restore 与完整格式见 [PRD 协议](../agent-skills/prototype-flow/references/prd-import.md)。
+
+## 结构化标注与完成回复（2026-10-16）
+
+更新完整 skill 后，让 Agent 重新读取入口和 PRD 协议。页面需求默认省略，确有新增背景或目标再写；实现规则放到元素标注。标注由 AI 选择“页面显示 / 数据流转 / 业务规则 / 交互说明 / 异常情况”中适用的 Markdown 小节和列表，可仅写一项，不凑齐五项。导入工具会拒绝无结构正文；历史内容不会自动重排或覆盖。
+
+hotspots 必须单独填写本次改变的具体交互 ID，省略即无提示；容器标注不再使内部全部功能高亮。落库成功后使用报告的 projectName、pages[].pageTitle 和 viewerUrl 回复项目 / 页面位置与点击链接。默认来源为 http://localhost:8080，工具运行在其他来源时传入 `--viewer-origin`。
+
+## 本期内容逐条关联（2026-10-16）
+
+更新后的草稿使用 schemaVersion 3；工作台元数据仍为 2。旧草稿须重新按本期范围组织，不能仅修改版本数字。每条需求以 sourceQuote 引用用户原文，增量需求填写 before / after；document.background / goals 的每条及 annotations.items 的每条分别绑定 requirementId。工具生成 Markdown 标题、空行和列表，页面外观与原有手工编辑方式不变。
+
+“重新整理 / 重新落库”仍只针对本期，不补全整页。Agent 应先逐条排除旧功能：撤销本期改造后仍原样成立的描述不提交；容器标注不能夹带内部旧规则。明确要求清理已误写内容时，以 cleanupRequest 引用授权原文，使用 removals 点名未确认误注；修订用 update，背景 / 目标修订用 --replace-doc。确认保护、人工删除结果及无关历史内容保留。
+
+当前仓库的 Qoder 技能副本与发布目录同步。让正在运行的 Agent 重新读取新版 SKILL.md 和 references/prd-import.md；只在对话中说“按新标准”不能保证它已读取最新文件。导入报告附本期需求、前后差异、contentRefs 和 removedAnnotations，Agent 复核后回复项目 / 页面直达链接。工具能验证格式与关联，语义范围仍由 Agent 根据真实本期需求判断。

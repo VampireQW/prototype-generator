@@ -73,6 +73,42 @@ def connect(api, root):
     return data
 
 
+def test_workbench_rename_keeps_identity_access_and_published_target(api):
+    root = make_ai(api, record={'projectName': 'AI 验收项目'})
+    result = connect(api, root)
+    pid = result['projectId']
+    api.owners[root.name] = 42
+    def migrate(old, new):
+        if old in api.owners:
+            api.owners[new] = api.owners.pop(old)
+    api.namespace['db'].rename_project_identity = migrate
+    api.namespace['USER'] = {'id': 42}
+    code, renamed, _ = api.request('/api/proto/rename-project', {'projectId': pid, 'name': '团队原型', 'expectedRevision': result['revision']})
+    assert code == 200, renamed
+    assert not root.exists() and (api.projects / '团队原型').is_dir()
+    assert api.owners == {'团队原型': 42}
+    assert api.request('/api/proto/read?projectId=' + pid)[0] == 200
+    connected = api.request('/api/projects/workbench', {'projectId': '团队原型'})[1]
+    assert connected['projectId'] == pid
+    item = json.loads(api.registry.read_text(encoding='utf-8'))['projects'][pid]
+    assert item['github_remote_id'] == root.name
+    assert connected['name'] == '团队原型'
+    api.namespace['ACCESS'] = False
+    api.namespace['USER'] = {'id': 99}
+    assert api.request('/api/proto/rename-project', {'projectId': pid, 'name': '无权更名', 'expectedRevision': connected['revision']})[0] == 403
+
+
+def test_pending_ai_project_can_rename_without_placeholder_html(api):
+    root = make_ai(api)
+    (root / 'index.html').unlink()
+    api.namespace['db'].rename_project_identity = lambda *args: None
+    status, result, _ = api.request('/rename-project', {'id': root.name, 'newName': '尚未生成'})
+    assert status == 200, result
+    assert result['success'] and result['project']['id'] == '尚未生成'
+    assert not root.exists() and (api.projects / '尚未生成' / 'record.json').exists()
+    assert not (api.projects / '尚未生成' / 'index.html').exists()
+
+
 def test_contract_idempotent_migration_and_local_list(api, tmp_path):
     root = make_ai(api, record={'global': {'skillId': 'mobile-app'}, 'pages': [
         {'name': 'home', 'layout': '首页布局', 'features': '首页功能'},
@@ -92,7 +128,7 @@ def test_contract_idempotent_migration_and_local_list(api, tmp_path):
     assert {s['legacyPage'] for s in page['states'] if 'legacyPage' in s} == {'home', 'detail'}
     docs = {d['stateId']: d['markdown'] for d in bundle['prd']['documents']}
     assert docs['home'] == '# 旧首页需求\n\n保留旧文档'
-    assert '详情功能' in docs['detail'] and '详情布局' in docs['detail']
+    assert 'detail' not in docs  # 未明确提供背景 / 目标的页面不自动补写 PRD。
     assert api.request('/api/external/list')[1]['items'] == []
     local = tmp_path / 'local'
     local.mkdir()
@@ -120,7 +156,7 @@ def test_modern_bridge_states_without_layout_and_unknown_preview(api):
     assert {state['id'] for state in page['states']} >= {'首页', '练习详情'}
     assert 'aiNavigation' not in page
     assert 'previewType' not in bundle['project']
-    assert {doc['stateId'] for doc in bundle['prd']['documents']} == {'首页', '练习详情'}
+    assert bundle['prd']['documents'] == []
     assert api.request('/api/proto/save', {'projectId': bundle['project']['id'], 'expectedRevision': bundle['revision'], 'bundle': bundle})[0] == 200
 
 
@@ -133,7 +169,7 @@ def test_multiple_real_files_remain_pages(api):
     bundle = proto_meta.load_bundle(root)
     assert {page['file'] for page in bundle['project']['pages']} == {'index.html', 'pages/课程列表.html', 'pages/课程详情.html'}
     assert all(len(page['states']) == 1 for page in bundle['project']['pages'])
-    assert len(bundle['prd']['documents']) == 2
+    assert bundle['prd']['documents'] == []
 
 
 def test_duplicate_modern_view_names_get_independent_states(api):
@@ -143,7 +179,7 @@ def test_duplicate_modern_view_names_get_independent_states(api):
     bundle = proto_meta.load_bundle(root)
     assert {state['id'] for state in bundle['project']['pages'][0]['states']} >= {'课程', '课程-2'}
     docs = {doc['stateId']: doc['markdown'] for doc in bundle['prd']['documents']}
-    assert '课程入口' in docs['课程'] and '课程详情' in docs['课程-2']
+    assert docs == {}
 
 
 @pytest.mark.parametrize('layout,count,expected', [('single', 2, 'single'), ('split', 2, 'split'), ('auto', 4, 'split')])

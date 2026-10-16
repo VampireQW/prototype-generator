@@ -36,6 +36,72 @@ def test_javascript_syntax(source):
     node(source, check=True)
 
 
+def test_workbench_deep_links_select_registered_page_state_and_keep_url_current():
+    loader=VIEWER[VIEWER.index('async function loadProto()'):VIEWER.index('function extPageRecord()')]+VIEWER[VIEWER.index('function renderProjectName()'):VIEWER.index('function openProjectRename()')]
+    sync=VIEWER[VIEWER.index('function syncExtLocation()'):VIEWER.index('function renderExtPageList()')]
+    node(r'''
+const assert=require('node:assert/strict'),vm=require('node:vm');
+const bundle={project:{name:'示例项目',pages:[{id:'home',states:[{id:'default'}]},{id:'detail',states:[{id:'default'},{id:'done'}]},{id:'old',trashedAt:'now',states:[{id:'default'}]}]}};
+const opened=[],warnings=[],element={};
+const context={URL,URLSearchParams,extId:'p-example',extBundle:null,extPage:'',extStateId:'done',extInitialLocation:null,currentMode:'annotate',location:new URL('http://localhost:8080/src/viewer.html?ext=p-example&page=detail&state=done&mode=annotate'),
+document:{},console,fetch:async()=>({json:async()=>({ok:true,bundle})}),$:()=>element,
+ProtoProjectNavigation:{defaultPage:project=>project.pages[0]},showAppAlert:e=>{throw new Error(JSON.stringify(e));},showToast:message=>warnings.push(message),showExtEmptyPages(){},applyPreviewType(){},openExtPage:id=>opened.push(id)};
+context.history={replaceState:(_,__,url)=>context.location=new URL(url)};
+vm.createContext(context);vm.runInContext(LOADER+SYNC,context);
+(async()=>{
+await context.loadProto();assert.equal(context.extPage,'detail');assert.equal(opened.at(-1),'detail');assert.equal(context.extInitialLocation.stateId,'done');
+context.extInitialLocation=null;context.extPage='home';context.extStateId='default';context.syncExtLocation();
+assert.equal(context.location.searchParams.get('page'),'home');assert.equal(context.location.searchParams.get('state'),'default');assert.equal(context.location.searchParams.get('mode'),'annotate');
+context.location=new URL('http://localhost:8080/src/viewer.html?ext=p-example&page=old');await context.loadProto();assert.equal(context.extPage,'home');assert.equal(warnings.length,1);
+context.extInitialLocation=null;context.location=new URL('http://localhost:8080/src/viewer.html?ext=p-example&page=detail&state=missing');await context.loadProto();assert.equal(context.extInitialLocation.stateId,'default');
+})().catch(e=>{console.error(e);process.exitCode=1});
+'''.replace('LOADER',repr(loader)).replace('SYNC',repr(sync)))
+
+
+def test_pad_scaled_coordinates_match_inspector_and_annotation_card():
+    geometry=VIEWER[VIEWER.index('function previewFrameGeometry()'):VIEWER.index('function onOverlayMouseMove(e)')]
+    click=VIEWER[VIEWER.index('function handleInspectorClick(e)'):VIEWER.index('function selectElementsInBox(boxRect)')]
+    to_card=ANNOTATE[ANNOTATE.index('function toCard(x, y)'):ANNOTATE.index('const editable =')]
+    node(r'''
+const assert=require('node:assert/strict'),vm=require('node:vm');
+const picked={tagName:'BUTTON',classList:{add(){}}},points=[];
+const frame={offsetWidth:1200,offsetHeight:840,clientLeft:10,clientTop:10,getBoundingClientRect:()=>({left:200,top:50,width:600,height:420}),contentDocument:{elementFromPoint:(x,y)=>{points.push({x,y});return picked;}}};
+const document={},parentDocument={};
+const context={console,previewFrame:frame,selectedElements:[],clearAllSelections(){},showInspectorModal(){},document,window:{frameElement:frame},cardDoc:()=>parentDocument};
+vm.createContext(context);vm.runInContext(GEOMETRY+CLICK+TO_CARD,context);
+context.handleInspectorClick({clientX:355,clientY:155});
+assert.deepEqual(points,[{x:300,y:200}]);
+assert.equal(context.selectedElements[0],picked);
+assert.deepEqual(JSON.parse(JSON.stringify(context.toCard(300,200))),{x:355,y:155});
+context.cardDoc=()=>document;assert.deepEqual(JSON.parse(JSON.stringify(context.toCard(300,200))),{x:300,y:200});
+'''.replace('GEOMETRY',repr(geometry)).replace('CLICK',repr(click)).replace('TO_CARD',repr(to_card)))
+
+
+def test_prd_toggle_preserves_width_and_moves_focus_out_of_collapsed_panel():
+    source = VIEWER[VIEWER.index('function syncPrdControls()'):VIEWER.index("const prdResizer = $('prdResizer');")]
+    node(r'''
+const assert=require('node:assert/strict'),vm=require('node:vm');
+function element(initial=[]){const classes=new Set(initial);return {style:{},attributes:{},classList:{add:v=>classes.add(v),remove:v=>classes.delete(v),contains:v=>classes.has(v),toggle(v,on){if(on===undefined)on=!classes.has(v);if(on)classes.add(v);else classes.delete(v);}},setAttribute(k,v){this.attributes[k]=v;},focus(){this.focused=true;},contains(){return true;}};}
+const sidebar=element(['expanded']),floating=element(),toggle=element(),content=element(['flex']);
+let refreshes=0;
+const context={prdSidebar:sidebar,prdFloatingToggle:floating,prdToggle:toggle,prdContentEl:content,prdExpanded:true,
+localStorage:{getItem:()=> '512'},document:{activeElement:{}},extId:'fixture',extRefreshSidebar:()=>refreshes++,previewFrame:null};
+vm.createContext(context);vm.runInContext(SOURCE,context);
+context.togglePrdSidebar();
+assert.equal(context.prdExpanded,false);assert.equal(sidebar.classList.contains('collapsed'),true);
+assert.equal(sidebar.style.width,'');assert.equal(content.classList.contains('hidden'),true);
+assert.equal(floating.focused,true);assert.equal(floating.attributes['aria-expanded'],'false');
+assert.equal(floating.attributes['aria-label'],'展开 PRD 面板');assert.equal(floating.classList.contains('hidden'),false);
+context.togglePrdSidebar();
+assert.equal(sidebar.style.width,'512px');assert.equal(refreshes,1);assert.equal(sidebar.attributes['aria-hidden'],'false');
+assert.equal(floating.attributes['aria-expanded'],'true');assert.equal(toggle.attributes['aria-expanded'],'true');
+sidebar.classList.add('hidden-mode');context.syncPrdControls();
+assert.equal(floating.classList.contains('hidden'),true);assert.equal(sidebar.attributes['aria-hidden'],'true');
+sidebar.classList.remove('hidden-mode');context.syncPrdControls();
+assert.equal(floating.classList.contains('hidden'),false);assert.equal(sidebar.style.width,'512px');
+'''.replace('SOURCE', repr(source)))
+
+
 def contrast(a, b):
     def luminance(color):
         c = [int(color[i:i + 2], 16) / 255 for i in (1, 3, 5)]
@@ -1041,7 +1107,7 @@ def test_hidden_pins_stay_hidden_and_guide_is_transparent_overlay():
     assert 'if (!found?.point) { noPoint.push(n); continue; }' in pins
     # #2a reveal 同一触发器只点一次（Vue/React 原型 nextTick 才更新 DOM，重复点会把展开的区域再折回）
     reveal = anchors.split('function reveal(', 1)[1].split('\n    }', 1)[0]
-    assert 'const clicked = new Set();' in reveal and 'clicked.has(trig)' in reveal and 'clicked.add(trig);' in reveal
+    assert 'const clicked = attempted;' in reveal and 'clicked.has(trig)' in reveal and 'clicked.add(trig);' in reveal
     # #2c 隐藏子树 innerText 退化为 textContent（span 间空格消失），文本比对必须忽略空白；共享 sameText 已上提到文件顶部，resolve / resolveHidden 同规则
     resolve_hidden = anchors.split('function resolveHidden(', 1)[1].split('function revealTrigger(', 1)[0]
     assert "const loose = (s) => (s || '').replace(/\\s+/g, '');" in anchors
@@ -1085,8 +1151,8 @@ def test_hidden_pins_stay_hidden_and_guide_is_transparent_overlay():
     assert 'existing.find(x => x.__rvTrig === trig)' in pins and 'existing.forEach(x => { if (!alive.has(x)) x.remove(); });' in pins
     assert "glayer.setAttribute('data-prototype-owned', '')" in pins and 'glayer.appendChild(guide)' in pins
     # 点击绑在整个 <button> 框上（不只标签），透明区域同样可点；标签由 revealHint 动态给出（展开 / 选择值 / 切换 Tab 等）
-    assert 'marker.onclick = (e) => { e.stopPropagation(); revealThrough(marker.__paTarget); scheduleLayout(); }' in annotate
-    assert 'window.ProtoAnchors.reveal(guide.__rvTarget)' in pins
+    assert 'marker.onclick = async (e) => { e.stopPropagation(); await revealThrough(marker.__paTarget); scheduleLayout(); }' in annotate
+    assert 'await window.ProtoAnchors.revealAndWait(guide.__rvTarget)' in pins
     assert '<span class="pa-guide-tag">${ICON}<span>${g.label} · ${g.notes.length}</span></span>' in annotate
     assert '<span class="__review_guide_tag">\' + GICON + \'<span>\' + g.label + \' · \' + g.notes.length + \'</span></span>' in pins
 
@@ -1095,13 +1161,13 @@ def test_reveal_click_passes_through_annotate_capture():
     """标注模式下 onClick 捕获拦截所有非自有点击：reveal 合成的 trig.click() 必须放行，
     否则点引导框 / 序号定位展不开折叠，反而弹出新建标注输入卡。"""
     annotate = (SRC / 'proto-annotate.js').read_text(encoding='utf-8')
-    assert 'let revealing = false;' in annotate
-    assert 'revealing = true;\n        try { return ProtoAnchors.reveal?.(target); } finally { revealing = false; }' in annotate
+    assert 'let revealing = 0;' in annotate
+    assert 'revealing++;' in annotate and 'return await (ProtoAnchors.revealAndWait?.(target) ?? ProtoAnchors.reveal?.(target))' in annotate and 'finally { revealing--; }' in annotate
     on_click = annotate.split('function onClick(e) {', 1)[1].split('\n    }', 1)[0]
     assert on_click.lstrip().startswith('if (revealing || owned(e.target)) return;')
     # 所有 reveal 调用都走 revealThrough（引导框点击 + flashNote 定位）
     assert 'ProtoAnchors.reveal(' not in annotate and annotate.count('ProtoAnchors.reveal?.(') == 1
-    assert 'if (pendingReveal && revealThrough(note.anchor)) found = ProtoAnchors.point(note);' in annotate
+    assert 'await revealThrough(note.anchor);' in annotate
 
 
 def test_pick_preview_number_stays_visible_before_and_after_click():
@@ -1445,8 +1511,8 @@ console.log('ok');
     assert "document.addEventListener('proto-anchors:reveal-failed'" in annotate
     assert "document.addEventListener('proto-anchors:reveal-failed', layout)" in pins
     assert 'pendingReveal = !!ProtoAnchors.revealHint?.(note.anchor, hiddenEl);' in annotate
-    assert 'return !!found.point || pendingReveal;' in annotate
-    assert 'const focused = pa?.flashNote(noteId);' in viewer and 'if (focused === false && note)' in viewer
+    assert 'return !!found.point;' in annotate
+    assert 'const focused = await pa?.flashNote(noteId);' in viewer and 'if (focused === false && note)' in viewer
     assert "revealFailed() { showToast('该标注对应元素当前隐藏，页面没有可用的展开入口'" in viewer
 
 
@@ -1480,8 +1546,8 @@ console.log('ok');
     hint = anchors.split('function revealHint(', 1)[1].split('function reveal(', 1)[0]
     assert hint.index('if (conditionHint && !condition.satisfied) return conditionHint;') < hint.index('revealTrigger(el)')
     reveal = anchors.split('function reveal(', 1)[1].split('\n    }', 1)[0]
-    assert 'if (condition && !condition.satisfied && applyCondition(condition))' in reveal
-    assert "condition?.satisfied && applyCondition(condition)" in reveal
+    assert 'if (condition && !condition.satisfied && !attempted.has(condition.element))' in reveal
+    assert "condition?.satisfied && !attempted.has(condition.element)" in reveal
     assert 'return !el || hidden(el) ? null : el;' in reveal
 
 

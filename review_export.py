@@ -16,6 +16,8 @@ import html
 import json
 import re
 import shutil
+import prototype_manifest
+import proto_meta
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,16 +35,21 @@ BUNDLE_MARK = "<!-- proto-review-bundle -->"
 HOTSPOT_SCRIPT = ('hotspots', 'proto-hotspots.js')
 HTML_SUFFIXES = (".html", ".htm")
 
-IGNORE_NAMES = {".prototype", "exports", "dist", ".git", "node_modules", "__pycache__"}
+IGNORE_NAMES = {".prototype", "exports", "dist", ".git", "node_modules", "__pycache__", "agent-skills"}
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 与 GitHub Contents API 单文件上限一致
 
 
-def copy_proto(root: Path, dest: Path, *, ai_project: bool = False) -> list[str]:
+def copy_proto(root: Path, dest: Path, *, ai_project: bool = False, excluded_files=()) -> list[str]:
     """复制项目文件到 dest，返回 POSIX 相对路径清单（已排序，便于断言）。"""
     copied: list[str] = []
     root_resolved = root.resolve()
+    excluded_files = {str(path).replace('\\', '/').casefold() for path in excluded_files}
     for item in sorted(root.rglob("*")):
         rel = item.relative_to(root)
+        if rel.as_posix().casefold() in excluded_files:
+            continue
+        if rel.as_posix() == prototype_manifest.MANIFEST_NAME:
+            continue
         if ai_project and (
             (len(rel.parts) == 1 and rel.name.casefold() in {'record.json', 'prompt.full.md', 'task.md', 'agents.md', 'design.md'})
             or rel.parts[0].casefold() == 'prd'
@@ -74,15 +81,19 @@ def review_data(bundle: dict, published_at: str) -> dict:
     """评审壳嵌入数据：只含展示所需字段（不导出 changes 任务列表）。"""
     project = bundle.get("project") or {}
     prd = bundle.get("prd") or {}
+    pages = proto_meta.navigation_pages(project.get('pages', []))
+    page_ids = {p['id'] for p in pages}
     return {
         "name": project.get("name", "原型项目"),
         "projectId": project.get("id", ""),
-        **({'previewType': project['previewType']} if project.get('previewType') in ('mobile', 'web') else {}),
+        **({'previewType': project['previewType']} if project.get('previewType') in ('mobile', 'web', 'pad') else {}),
         "revision": bundle.get("revision", 0),
         "publishedAt": published_at,
-        "pages": project.get("pages", []),
-        "documents": prd.get("documents", []),
-        "annotations": prd.get("annotations", []),
+        "pages": [{k:v for k,v in p.items() if k != 'url'} for p in pages],
+        "clients": project.get('clients', []),
+        "defaultPage": project.get('defaultPage', ''),
+        "documents": [d for d in prd.get('documents', []) if d.get('pageId') in page_ids],
+        "annotations": [n for n in prd.get('annotations', []) if n.get('pageId') in page_ids],
     }
 
 
@@ -93,6 +104,8 @@ def render_shell(template: str, data: dict) -> str:
             raise ValueError(f"评审壳模板缺少占位符 {placeholder}")
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     out = template.replace("__PROJECT_TITLE__", html.escape(str(data.get("name", "原型项目")), quote=True))
+    out = out.replace('__PROJECT_NAV_CSS__', (prototype_manifest.ASSETS_DIR / 'project-navigation.css').read_text(encoding='utf-8'))
+    out = out.replace('__PROJECT_NAV_JS__', (prototype_manifest.ASSETS_DIR / 'project-navigation.js').read_text(encoding='utf-8'))
     return out.replace("__REVIEW_DATA__", payload)
 
 
@@ -119,7 +132,7 @@ def inject_hotspot_bootstrap(text: str, *, inline: bool = False) -> str:
             raise ValueError(f'脚本 {name} 含 </script，无法内嵌')
         tag = f'<script data-prototype-owned {marker} data-proto-review="{key}">\n{source}\n</script>\n'
     else:
-        tag = f'<script data-prototype-owned {marker} src="/src/proto-hotspots.js?v=20261005-real-actions-orange"></script>\n'
+        tag = f'<script data-prototype-owned {marker} src="/src/proto-hotspots.js?v=20261016-exact-hints"></script>\n'
     first_script = re.search(r'<script\b', text, re.I)
     head_end = re.search(r'</head\s*>', text, re.I)
     positions = [match.start() for match in (first_script, head_end) if match]
@@ -180,7 +193,10 @@ def build_review_export(root: Path, bundle: dict, out_dir: Path, published_at: s
     published = published_at or datetime.now(timezone.utc).isoformat()
     proto_dir = out_dir / "proto"
     proto_dir.mkdir(parents=True, exist_ok=True)
-    copied = copy_proto(root, proto_dir, ai_project=(bundle.get('project') or {}).get('source') == 'ai')
+    if not any(not p.get('trashedAt') and p.get('role') != 'launcher' for p in bundle['project']['pages']):
+        raise ValueError('没有可导出的业务页面，请先从回收站恢复页面')
+    copied = copy_proto(root, proto_dir, ai_project=(bundle.get('project') or {}).get('source') == 'ai', excluded_files=[p['file'] for p in bundle['project']['pages'] if p.get('trashedAt')])
+    copied = sorted(set(copied + prototype_manifest.build_launcher(proto_dir, bundle)))
     injected = inject_proto_scripts(proto_dir, copied, bundle)
     (out_dir / "index.html").write_text(
         render_shell(template, review_data(bundle, published)), encoding="utf-8"
@@ -203,13 +219,17 @@ def build_pure_export(root: Path, bundle: dict, out_dir: Path) -> dict:
     out_dir = Path(out_dir)
     if not root.is_dir():
         raise ValueError(f"项目目录不存在：{root}")
-    copied = copy_proto(root, out_dir, ai_project=(bundle.get('project') or {}).get('source') == 'ai')
+    if not any(not p.get('trashedAt') and p.get('role') != 'launcher' for p in bundle['project']['pages']):
+        raise ValueError('没有可导出的业务页面，请先从回收站恢复页面')
+    copied = copy_proto(root, out_dir, ai_project=(bundle.get('project') or {}).get('source') == 'ai', excluded_files=[p['file'] for p in bundle['project']['pages'] if p.get('trashedAt')])
+    launcher_files = prototype_manifest.build_launcher(out_dir, bundle)
+    copied = sorted(set(copied + launcher_files))
     html_files = [rel for rel in copied if rel.lower().endswith(".html")]
     if not html_files:
         raise ValueError("项目里没有可发布的 HTML 页面")
     entry = "index.html"
     if not (out_dir / "index.html").is_file():
-        pages = (bundle.get("project") or {}).get("pages") or []
+        pages = [p for p in (bundle.get("project") or {}).get("pages", []) if not p.get('trashedAt')]
         home = next((p for p in pages if p.get("id") == "home"), pages[0] if pages else None)
         target = ((home or {}).get("file") or html_files[0]).replace("\\", "/")
         entry = target
