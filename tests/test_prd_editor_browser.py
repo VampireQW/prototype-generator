@@ -20,7 +20,7 @@ HARNESS = '''<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" h
 <style>body{margin:0;background:#e5e7eb}.pa-card{position:absolute;left:16px;top:30px;width:min(420px,calc(100vw - 360px));display:flex;flex-direction:column;background:white;border:1px solid #808790;border-radius:10px;max-height:80vh}
 .pa-card-grip{height:14px;flex:none;cursor:grab;touch-action:none}.pa-card-scroll{overflow:auto;min-height:0}.pa-card-body{padding:8px 20px 12px 12px}
 .pa-card-resize-e{position:absolute;right:-5px;top:16px;bottom:4px;width:10px;cursor:ew-resize;touch-action:none}
-aside{position:absolute;right:0;top:0;width:320px;height:100vh;background:white;overflow:auto;padding:16px;box-sizing:border-box}.section{position:relative;padding-bottom:40px}.section h2{margin:0 0 12px;font:600 16px/1.8 sans-serif}
+aside{position:absolute;right:0;top:0;width:320px;height:100vh;background:white;overflow:auto;padding:112px 16px 16px;box-sizing:border-box}.section{position:relative;padding-bottom:40px}.section h2{margin:0 0 12px;font:600 16px/1.8 sans-serif}
 .fixture-sidebar-grip{position:absolute;left:0;top:0;width:8px;height:100%;cursor:ew-resize;touch-action:none}
 #selected-pin{display:none;position:fixed;width:36px;height:36px;background:#2563eb;border-radius:50%;z-index:5}
 @media(max-width:650px){.pa-card{width:calc(100vw - 32px);top:16px}aside{width:100%;top:90vh}}</style>
@@ -102,9 +102,17 @@ def assert_floating_outside(page, host):
     toolbar = page.locator('.proto-md-toolbar')
     assert toolbar.evaluate("e => e.parentElement === document.documentElement && getComputedStyle(e).position === 'fixed'")
     box = toolbar.bounding_box()
-    assert overlap(box, host.bounding_box()) == 0
-    assert box['x'] >= 0 and box['y'] >= 0
-    assert box['x'] + box['width'] <= page.viewport_size['width'] + 1
+    if host.get_attribute('id') == 'prdSidebar':
+        editor = page.locator('.proto-md.is-editing').bounding_box()
+        assert overlap(box, editor) == 0
+        assert box['y'] + box['height'] <= editor['y'] - 12 + 1
+        assert box['x'] + box['width'] <= editor['x'] + editor['width'] + 8
+    else:
+        assert overlap(box, host.bounding_box()) == 0
+    assert box['y'] >= 0
+    if host.get_attribute('id') != 'prdSidebar':
+        assert box['x'] >= 0
+        assert box['x'] + box['width'] <= page.viewport_size['width'] + 1
     assert box['y'] + box['height'] <= page.viewport_size['height'] + 1
     return box
 
@@ -262,11 +270,12 @@ def test_toolbar_follows_card_move_and_host_resizes(browser_page):
     settle_layout(page)
     sidebar = page.locator('aside')
     before = assert_floating_outside(page, sidebar)
-    assert before['x'] + before['width'] <= sidebar.bounding_box()['x']
+    assert before['x'] + before['width'] <= sidebar.bounding_box()['x'] + sidebar.bounding_box()['width']
+    assert before['y'] + before['height'] <= page.locator('#note').bounding_box()['y'] - 12 + 1
     drag(page, page.locator('.fixture-sidebar-grip'), -160, 0)
     after = assert_floating_outside(page, sidebar)
     assert sidebar.bounding_box()['width'] == 480
-    assert abs(after['x'] - before['x'] + 160) <= 2
+    assert abs(after['x'] - before['x']) <= 2
 
 
 @pytest.mark.parametrize('width', [1440, 375])

@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>原型预览器</title>
-    <link rel="stylesheet" href="/src/proto-markdown.css?v=20261015-vercel-workbench">
+    <link rel="stylesheet" href="/src/proto-markdown.css?v=20261016-toolbar-single-row">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1958,7 +1958,7 @@
     <script src="/src/vendor/vditor/dist/js/lute/lute.min.js"></script>
     <script src="/src/vendor/vditor/dist/index.min.js"></script>
     <script src="/src/vendor/dompurify/dist/purify.min.js"></script>
-    <script src="/src/proto-markdown.js?v=20261015-pad"></script>
+    <script src="/src/proto-markdown.js?v=20261016-toolbar-single-row"></script>
     <script>
         console.log('%c[MAIN VIEWER] Script 开始加载', 'background: blue; color: white; font-weight: bold');
         // ==================== 状态管理 ====================
@@ -3380,7 +3380,7 @@
                     return;
                 }
                 const mdStyle = d.createElement('link');
-                mdStyle.rel = 'stylesheet'; mdStyle.href = '/src/proto-markdown.css?v=20261015-vercel-workbench';
+                mdStyle.rel = 'stylesheet'; mdStyle.href = '/src/proto-markdown.css?v=20261016-toolbar-single-row';
                 mdStyle.setAttribute('data-prototype-owned', ''); d.head.appendChild(mdStyle);
                 await new Promise((resolve,reject)=>{
                 const s1 = d.createElement('script');

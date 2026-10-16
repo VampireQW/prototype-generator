@@ -286,6 +286,7 @@
     function makeToolbar(s) {
         const doc = s.region.ownerDocument, bar = doc.createElement('div');
         bar.className = 'proto-md-toolbar'; bar.dataset.theme = s.options.theme || 'light';
+        if (!s.region.closest('.pa-card') && s.region.closest('#prdSidebar, aside')) bar.classList.add('is-single-row');
         bar.setAttribute('role', 'toolbar'); bar.setAttribute('aria-label', 'Markdown 格式工具栏');
         bar.setAttribute('data-prototype-owned', '');
         // 按下按钮不夺焦点：编辑器 iframe 里的选区与光标原地保留，命令直接作用在当前行 / 选中文字上
@@ -335,7 +336,7 @@
         return bar;
     }
     const TOOLBAR_GAP = 12;
-    /* 工具条始终脱离正文布局，以整个浮窗外框定位；右栏优先放到面板左侧。 */
+    /* 工具条脱离正文布局；右栏在当前正文 / 标注序号上方，浮卡仍按外框避让。 */
     function placeToolbar(s, x, y) {
         const bar = s.toolbar; if (!bar) return;
         const doc = s.region.ownerDocument, win = doc.defaultView, EDGE = 4;
@@ -348,7 +349,8 @@
             return;
         }
         const card = s.region.closest('.pa-card'), panel = !card && s.region.closest('#prdSidebar, aside');
-        const anchor = card || s.region, rect = anchor.getBoundingClientRect();
+        const anchor = card || (panel && s.region.closest('.ext-note')?.querySelector('.ext-note-head')) || s.region;
+        let rect = anchor.getBoundingClientRect();
         const avoid = [];
         const collect = (d, ox = 0, oy = 0, clip, sx = 1, sy = 1) => {
             for (const node of d.querySelectorAll('[data-proto-toolbar-avoid]')) {
@@ -380,7 +382,22 @@
             const bounds = bar.getBoundingClientRect();
             return { width: bounds.width, height: bounds.height };
         };
-        const normal = measure(), candidates = [];
+        const normal = measure();
+        if (panel) {
+            const size = normal;
+            if (s.toolbarOpening) {
+                s.toolbarOpening = false;
+                const scroller = s.region.closest('#extReadingScroll') || panel;
+                const minTop = Math.max(EDGE, scroller.getBoundingClientRect().top) + size.height + TOOLBAR_GAP;
+                if (rect.top < minTop) {
+                    scroller.scrollTop = Math.max(0, scroller.scrollTop - (minTop - rect.top));
+                    rect = anchor.getBoundingClientRect();
+                }
+            }
+            set(Math.min(rect.right, W - EDGE) - size.width, rect.top - size.height - TOOLBAR_GAP);
+            return;
+        }
+        const candidates = [];
         const add = (left, top, size) => candidates.push({ left, top, ...size });
         const beside = (leftEdge, rightEdge, side) => {
             const space = side === 'left' ? leftEdge - TOOLBAR_GAP - EDGE : W - rightEdge - TOOLBAR_GAP - EDGE;
@@ -389,7 +406,6 @@
             add(side === 'left' ? leftEdge - TOOLBAR_GAP - size.width : rightEdge + TOOLBAR_GAP,
                 clamp(rect.top, EDGE, H - size.height - EDGE), size);
         };
-        if (panel) { const p = panel.getBoundingClientRect(); beside(p.left, p.right, 'left'); }
         for (const top of [rect.top - normal.height - TOOLBAR_GAP, rect.bottom + TOOLBAR_GAP]) {
             for (const left of [rect.left, rect.right - normal.width]) add(clamp(left, EDGE, W - normal.width - EDGE), top, normal);
         }
@@ -472,7 +488,7 @@
             conflict: !!draft && draft.base !== options.value, cover: false, kept: null,
             /* 编辑器高度下限：编辑既有标注时贴合内容（与阅读态等高、双击零跳变）；
                新增标注（无内容）时给一个舒适的初始输入区。 */
-            minH: options.minHeight ?? 28 };
+            minH: options.minHeight ?? 28, toolbarOpening: true };
         region.classList.add('proto-md', 'is-editing'); region.removeAttribute('role');
         /* 主题必须在这里也设一次：新建标注不经 render 直接 begin，region 没有 data-theme 就按浅色变量铺白底，
            编辑器 iframe 加载期间（opacity 0）深色卡里就露出一块白——即“插入序号后浮窗闪一下白”。 */
