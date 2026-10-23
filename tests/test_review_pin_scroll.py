@@ -12,7 +12,8 @@ const assert=require('node:assert/strict'),vm=require('node:vm');
 const listeners={},frames=[],syncs=[];let y=200,visible=true;
 class Element{
  constructor(){this.style={setProperty(){}};this.dataset={};this.children=[];this.classList={add(){},remove(){},toggle(){}};}
- appendChild(n){this.children.push(n)} replaceChildren(){this.children=[]} setAttribute(){} querySelectorAll(){return []} querySelector(){return null}
+ appendChild(n){n.parentElement=this;this.children.push(n)} remove(){if(this.parentElement)this.parentElement.children=this.parentElement.children.filter(n=>n!==this);this.parentElement=null}
+ replaceChildren(){this.children=[]} setAttribute(){} querySelectorAll(){return []} querySelector(){return null}
 }
 const html=new Element(),head=new Element();html.dataset.protoState='default';html.outerHTML='<html></html>';
 const note={id:'one',stateId:'default',number:1,displayNumber:1};

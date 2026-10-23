@@ -63,6 +63,14 @@ def payload_of(out: Path) -> tuple[str, dict]:
     return match.group(1), json.loads(match.group(1))
 
 
+def test_page_navigation_resize_is_inlined():
+    html_text = review_export.render_shell(review_export.SHELL_TEMPLATE.read_text(encoding='utf-8'), {'name': '示例', 'pages': []})
+    assert '__SIDEBAR_RESIZE_' not in html_text
+    assert 'window.ProtoSidebarResize = {attach}' in html_text
+    assert 'page-nav-resize-overlay' in html_text
+    assert 'aria-controls="tree"' in html_text
+
+
 def test_copy_completeness_and_exclusions(tmp_path):
     root, out, _ = build(tmp_path)
     (root / '.prototype').mkdir()
@@ -93,6 +101,24 @@ def test_shell_contains_embedded_data(tmp_path):
     assert len(data['pages']) == 2 and len(data['documents']) == 1 and len(data['annotations']) == 1
     assert 'changes' not in data and 'task-1' not in raw, '任务列表不应进入评审数据'
     assert result['publishedAt'] == '2026-02-03T04:05:06+00:00'
+
+
+def test_export_keeps_manual_hotspots_exclusions_and_reveal_path(tmp_path):
+    root = make_project(tmp_path / 'project')
+    bundle = make_bundle()
+    policy = {'mode': 'targets', 'protoIds': ['btn'],
+              'manualTargets': [{'id': 'm', 'anchor': {'selector': '#manual'}, 'label': '手动入口'}],
+              'excludedTargets': [{'id': 'e', 'anchor': {'protoId': 'old'}}]}
+    steps = [{'selector': '#tab', 'kind': 'click', 'value': 'true', 'label': '切换'},
+             {'selector': '#open', 'kind': 'click', 'value': 'true', 'label': '展开'}]
+    bundle['project']['pages'][0]['states'][0]['interactionHints'] = policy
+    bundle['prd']['annotations'][0]['anchor']['revealSteps'] = steps
+    out = tmp_path / 'review'
+    review_export.build_review_export(root, bundle, out)
+    _, payload = payload_of(out)
+    assert payload['pages'][0]['states'][0]['interactionHints'] == policy
+    assert payload['annotations'][0]['anchor']['revealSteps'] == steps
+    assert 'revealSteps' in (out / 'proto/index.html').read_text(encoding='utf-8')
 
 
 def test_script_close_tag_escaped(tmp_path):

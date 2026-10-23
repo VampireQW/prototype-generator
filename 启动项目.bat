@@ -4,10 +4,10 @@ cd /d "%~dp0"
 
 echo [INFO] 正在启动服务...
 
-:: 2. 自动打开浏览器
-start http://localhost:8080/src/index.html
-
-:: 3. 启动服务器 (使用系统 PATH 中的 Python)
-python server.py
-
-pause
+:: 2. 服务完成交接并启动成功后打开浏览器
+python server.py --open-browser
+if errorlevel 1 (
+    pause
+    exit /b 1
+)
+exit /b 0

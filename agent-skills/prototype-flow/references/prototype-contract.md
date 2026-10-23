@@ -18,6 +18,22 @@
 
 稳定 ID 与真实交互只用于定位，不代表它属于本轮需求。PRD 与可点击提示按 `prd-import.md` 的本次范围落库；没有声明的旧项目不会全页提示。若只还原旧系统页面，不为每个已有交互自动生成标注。容器可承载整体显示的标注，点击提示必须在 hotspots 中单独列出具体控件 ID，不会扩散到容器内部旧功能。
 
+### 点击提示绑定具体操作节点
+
+`data-proto-id` 放在实际接收操作的按钮、开关、链接或自定义控件上。容器 PRD 锚点可以另有 ID，但不能把表格、整张题卡或工具栏的 ID 当作其中按钮的热点。
+
+对使用祖先 / document 事件代理的控件，在该控件自身声明 `data-proto-hotspot="true"`，并核对真实点击能执行本期操作。声明只说明该节点具有交互，不扩大提示范围，仍须进入当前页面状态的 hotspots 清单。`role`、手形光标或父容器有事件，都不能代替真实交互。`data-proto-hotspot="false"` 会排除自身和后代。
+
+```html
+<div data-proto-id="question-card">
+  <button data-proto-id="explain-toggle" data-proto-hotspot="true"
+          data-action="toggle-explanation">需要讲解</button>
+  <button data-proto-id="old-regrade">重批</button>
+</div>
+```
+
+本期只改讲解开关时，hotspots 仅填写 `explain-toggle`，不填写 `question-card` 或 `old-regrade`。平台拒绝包含其他控件的容器，运行时还会排除异常大面积节点；不要通过声明 true 绕过粒度要求。默认隐藏或禁用的控件应在其实际可操作状态验收，不用扩大容器范围补偿。
+
 ## 同文件的多个业务状态
 
 底部 Tab、分段或详情视图若共用一个 HTML，分别使用明确的 stateId。提供 `window.PrototypeBridge.enter(stateId)`，让工作台能主动切入目标状态；原型自己的导航也调用同一切换方法，并同步 `document.documentElement.dataset.protoState`。
@@ -25,7 +41,7 @@
 简化示例（`default` 为初始列表，`detail` 为详情）：
 
 ```html
-<button data-proto-id="btn-detail" data-enter-state="detail">查看详情</button>
+<button data-proto-id="btn-detail" data-proto-hotspot="true" data-enter-state="detail">查看详情</button>
 <section data-state-visible="default">列表</section>
 <section data-state-visible="detail" hidden>详情</section>
 <script>

@@ -17,9 +17,11 @@
     // review-pins.js 启动时读取的宿主对象：标注在 init 消息到达后填充，正文 HTML 由壳预渲染（气泡层无 Markdown 渲染器）。
     window.__REVIEW__ = {
         notes: [],
+        selectedNoteId: null,
         asideOpen: () => asideOpen,
         onSync: (map, state, stale) => post({ type: 'sync', map, state, stale }),
         onFocus: (noteId) => post({ type: 'focus', noteId }),
+        onSelect: (noteId) => post({ type: 'selection', noteId }),
         renderBody: (note) => note.bodyHtml || '<p>' + esc(note.body || '') + '</p>',
     };
     window.ProtoHotspots?.init({ scope: () => {
@@ -43,7 +45,9 @@
             try { window.__reviewRelayout?.(); } catch (_) { /* ignore */ }
             try { found = A.point(note); } catch (_) { /* ignore */ }
         }
-        if (found?.element) found.element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        if (found?.element?.id === 'screenshot-image' && found.point && document.documentElement.dataset.protoScreenshot === 'true')
+            window.scrollTo({ top: Math.max(0, found.point.y + window.scrollY - window.innerHeight / 2), behavior: 'smooth' });
+        else if (found?.element) found.element.scrollIntoView({ block: 'center', behavior: 'smooth' });
         else if (found?.point) window.scrollTo({ top: Math.max(0, found.point.y + window.scrollY - window.innerHeight / 2), behavior: 'smooth' });
     }
 
@@ -56,6 +60,8 @@
                 window.ProtoHotspots?.hide();
                 document.documentElement.dataset.protoHost = 'review';
                 window.__REVIEW__.notes = Array.isArray(m.notes) ? m.notes : [];
+                window.__REVIEW__.selectedNoteId = m.selectedNoteId || null;
+                window.__reviewSelectNote?.(window.__REVIEW__.selectedNoteId);
                 asideOpen = m.asideOpen !== false;
                 if (m.enterState) { try { window.ProtoAnchors.enterState?.(m.enterState)?.catch?.(() => {}); } catch (_) { /* ignore */ } }
                 relayout();
@@ -68,7 +74,11 @@
                 try { window.ProtoAnchors.enterState?.(m.stateId)?.catch?.(() => {}); } catch (_) { /* ignore */ }
                 break;
             case 'reveal':
-                if (m.note) reveal(m.note);
+                if (m.note) { window.__REVIEW__.selectedNoteId = m.note.id; window.__reviewSelectNote?.(m.note.id); reveal(m.note); }
+                break;
+            case 'select':
+                window.__REVIEW__.selectedNoteId = m.noteId || null;
+                window.__reviewSelectNote?.(window.__REVIEW__.selectedNoteId);
                 break;
             case 'hidePop':
                 try { window.__reviewHidePop?.(); } catch (_) { /* ignore */ }

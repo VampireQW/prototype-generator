@@ -1,6 +1,6 @@
 /* 评审壳只读气泡层：随导出内嵌进每个原型 HTML（review_export.inject_bundle），跑在被评审原型页面内。
    依赖同页先加载的 proto-anchors.js / proto-order.js / review-bridge.js；通过 window.__REVIEW__（由 bridge 建立，内部走 postMessage）与壳父页通信。
-   只读：无编辑、无拖动、无删除。 */
+   只读：无编辑、无删除；正文浮窗支持移动与调整宽度。 */
 (() => {
     'use strict';
     if (window.__reviewPinsBoot) return;
@@ -9,15 +9,22 @@
     if (!R || !window.ProtoAnchors || !window.ProtoOrder) return;
 
     const style = document.createElement('style');
+    style.setAttribute('data-prototype-owned', '');
     style.textContent = `
 .__review_pin{position:absolute;display:grid;place-items:center;min-width:36px;height:36px;padding:0 8px;border:3px solid #fff;border-radius:50% 50% 50% 2px;background:#2563eb;color:#fff;font:600 13px/1 "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;font-variant-numeric:tabular-nums;box-shadow:0 8px 24px rgba(16,24,40,.24);transform:translateY(-100%);cursor:pointer;pointer-events:auto;}
 .__review_pin:hover{background:#1d4ed8;}
 .__review_pin:not(.__stale){background:var(--pin-fill);color:var(--pin-ink);border-color:var(--pin-stroke);}
 .__review_pin:not(.__stale):hover{background:var(--pin-fill);filter:brightness(.96);}
 .__review_pin.__stale{background:#626b78;cursor:default;}
+.__review_pin.__review_selected{outline:3px solid #2563eb;outline-offset:3px;z-index:2;}
 @media(prefers-color-scheme:dark){.__review_pin{border-color:#121519;}}
-.__review_pop{position:fixed;z-index:2147482001;width:min(360px,calc(100vw - 16px));max-width:calc(100vw - 16px);overflow:visible;border:1px solid #d8dee3;border-radius:10px;background:#fff;color:#1a1d23;font:14px/1.7 "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;letter-spacing:.02em;box-shadow:0 8px 24px rgba(16,24,40,.24);display:none;}
-.__review_pop_body{max-height:calc(100vh - 16px);overflow:auto;overscroll-behavior:contain;padding:12px 14px;border-radius:inherit;}
+.__review_pop{position:fixed;box-sizing:border-box;z-index:2147482001;width:min(360px,calc(100vw - 16px));max-width:calc(100vw - 16px);overflow:visible;border:1px solid #d8dee3;border-radius:10px;background:#fff;color:#1a1d23;font:14px/1.7 "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;letter-spacing:.02em;box-shadow:0 8px 24px rgba(16,24,40,.24);display:none;}
+.__review_pop_body{box-sizing:border-box;max-height:calc(100vh - 36px);overflow:auto;overscroll-behavior:contain;padding:4px 14px 12px;border-radius:inherit;}
+.__review_pop_grip{box-sizing:border-box;display:grid;place-items:center;width:100%;height:18px;margin:0;padding:0;border:0;border-radius:9px 9px 0 0;background:transparent;color:inherit;cursor:grab;touch-action:none;user-select:none;}
+.__review_pop_grip::before{content:"";width:32px;height:4px;border-radius:2px;background:currentColor;opacity:.3;}
+.__review_pop_grip:focus-visible{outline:2px solid #2563eb;outline-offset:-3px;}
+.__review_pop.pop-moving{user-select:none;}
+.__review_pop.pop-moving,.__review_pop.pop-moving *{cursor:grabbing!important;}
 .__review_pop_resize{position:absolute;top:0;bottom:0;width:12px;cursor:ew-resize;touch-action:none;z-index:3;background:transparent;}
 /* 热区以浮窗真实边框为中心，不画独立蓝细条；视觉仍是浮窗自身边缘，命中区向内外各扩 6px。 */
 .__review_pop_resize_w{left:0;transform:translateX(-50%);}.__review_pop_resize_e{right:0;transform:translateX(50%);}
@@ -58,9 +65,10 @@
     (document.head || document.documentElement).appendChild(style);
 
     const layer = document.createElement('div');
+    layer.setAttribute('data-prototype-owned', '');
     layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147482000;';
     document.documentElement.appendChild(layer);
-    // 引导框独立图层：序号层每次重排 replaceChildren 整体重建，引导框要按触发器复用（保住悬停态、呼吸相位与点击）
+    // 引导框独立图层，按触发器复用；序号按标注 ID 复用，保住悬停、聚焦与按下到松开的点击目标。
     const glayer = document.createElement('div');
     glayer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147481999;';
     glayer.setAttribute('data-prototype-owned', '');   // 引导框是 <button>，标记自有以免 revealTrigger 兜底搜索把它当成原型触发器
@@ -68,17 +76,78 @@
 
     // 收起态气泡：PRD 侧栏收起时，点序号在序号旁展示正文；正文独立滚动，左右边缘可拖宽。
     let pop = null, popBody = null, popResizing = null, popNoteId = null;
+    let popMoving = null, popMoveCleanup = null;
+    const owned = el => !!(el?.closest?.('[data-prototype-owned]') || el?.parentElement?.closest?.('[data-prototype-owned]'));
+    let selectedNoteId = R.selectedNoteId || null;
+    function selectNote(noteId) {
+        selectedNoteId = (R.notes || []).some(n => n.id === noteId && n.stateId === stateOf()) ? noteId : null;
+        R.selectedNoteId = selectedNoteId;
+        for (const pin of layer.querySelectorAll('.__review_pin')) {
+            const selected = pin.dataset.noteId === selectedNoteId;
+            pin.classList.toggle('__review_selected', selected);
+            pin.setAttribute('aria-current', String(selected));
+        }
+    }
+    window.__reviewSelectNote = selectNote;
     function setPinExpanded(noteId, expanded) {
         if (!noteId) return;
         layer.querySelector(`.__review_pin[data-note-id="${CSS.escape(noteId)}"]`)?.setAttribute('aria-expanded', String(expanded));
     }
     function hidePop() {
+        popMoveCleanup?.(true);
         if (pop) pop.style.display = 'none';
         setPinExpanded(popNoteId, false);
         popNoteId = null;
     }
+    function placePop(left, top) {
+        const r = pop.getBoundingClientRect();
+        pop.style.left = Math.max(8, Math.min(left, innerWidth - r.width - 8)) + 'px';
+        pop.style.top = Math.max(8, Math.min(top, innerHeight - r.height - 8)) + 'px';
+    }
+    function startPopMove(e, grip) {
+        if (!pop || pop.style.display !== 'block' || popResizing || popMoving || e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const r = pop.getBoundingClientRect(), root = document.documentElement;
+        const previous = { cursor: root.style.cursor, userSelect: root.style.userSelect };
+        const start = { x: e.clientX, y: e.clientY, left: r.left, top: r.top };
+        popMoving = { pointerId: e.pointerId, moved: false };
+        const move = ev => {
+            if (!popMoving || ev.pointerId !== e.pointerId) return;
+            const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
+            if (!popMoving.moved && Math.hypot(dx, dy) < 5) return;
+            popMoving.moved = true;
+            ev.preventDefault();
+            pop.classList.add('pop-moving');
+            root.style.cursor = 'grabbing'; root.style.userSelect = 'none';
+            placePop(start.left + dx, start.top + dy);
+        };
+        const finish = (cancel = false) => {
+            if (!popMoving) return;
+            popMoving = null; popMoveCleanup = null;
+            if (cancel) { pop.style.left = start.left + 'px'; pop.style.top = start.top + 'px'; }
+            pop.classList.remove('pop-moving');
+            root.style.cursor = previous.cursor; root.style.userSelect = previous.userSelect;
+            window.removeEventListener('pointermove', move, true);
+            window.removeEventListener('pointerup', up, true);
+            window.removeEventListener('pointercancel', cancelPointer, true);
+            window.removeEventListener('blur', cancelMove, true);
+            window.removeEventListener('keydown', key, true);
+            try { if (grip.hasPointerCapture(e.pointerId)) grip.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+        };
+        const up = ev => { if (ev.pointerId === e.pointerId) finish(); };
+        const cancelPointer = ev => { if (ev.pointerId === e.pointerId) finish(true); };
+        const cancelMove = () => finish(true);
+        const key = ev => { if (ev.key === 'Escape') { ev.preventDefault(); ev.stopImmediatePropagation(); finish(true); } };
+        popMoveCleanup = finish;
+        try { grip.setPointerCapture(e.pointerId); } catch (_) { /* window 监听兜底 */ }
+        window.addEventListener('pointermove', move, { capture: true, passive: false });
+        window.addEventListener('pointerup', up, true);
+        window.addEventListener('pointercancel', cancelPointer, true);
+        window.addEventListener('blur', cancelMove, true);
+        window.addEventListener('keydown', key, true);
+    }
     function startPopResize(e, handle, side) {
-        if (!pop || e.button !== 0) return;
+        if (!pop || popMoving || e.button !== 0) return;
         e.preventDefault(); e.stopPropagation();
         const rect = pop.getBoundingClientRect(), startX = e.clientX, startW = rect.width, fixedRight = rect.right;
         popResizing = { handle, side, pointerId: e.pointerId };
@@ -116,6 +185,20 @@
         pop.setAttribute('role', 'dialog');
         pop.setAttribute('data-prototype-owned', '');
         pop.addEventListener('click', e => e.stopPropagation());
+        const grip = document.createElement('button');
+        grip.type = 'button'; grip.className = '__review_pop_grip';
+        grip.setAttribute('aria-label', '移动标注浮窗');
+        grip.title = '拖动移动；方向键微调，Shift 加速';
+        grip.onpointerdown = e => startPopMove(e, grip);
+        grip.addEventListener('keydown', e => {
+            if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hidePop(); return; }
+            const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+            if (!direction || e.ctrlKey || e.altKey || e.metaKey) return;
+            e.preventDefault(); e.stopPropagation();
+            const r = pop.getBoundingClientRect(), step = e.shiftKey ? 40 : 10;
+            placePop(r.left + direction[0] * step, r.top + direction[1] * step);
+        });
+        pop.appendChild(grip);
         popBody = document.createElement('div'); popBody.className = '__review_pop_body';
         pop.appendChild(popBody);
         for (const side of ['w', 'e']) {
@@ -129,6 +212,7 @@
     }
     function showPop(note, pin) {
         ensurePop();
+        popMoveCleanup?.();
         setPinExpanded(popNoteId, false);
         popNoteId = note.id;
         pin.setAttribute('aria-expanded', 'true');
@@ -174,27 +258,37 @@
     }
 
     const stateOf = () => document.documentElement.dataset.protoState || 'default';
-    let lastState = '', lastX = -1, lastY = -1, lastW = 0, lastH = 0, lastHtml = '';
+    let lastState = '', lastX = -1, lastY = -1, lastW = 0, lastH = 0;
     let lastOrder = '', lastStale = '';
+    const pinsById = new Map();
 
     function layout() {
         const state = stateOf();
         if (state !== lastState) hidePop(); // 只在原型状态切换时关气泡；纯几何重排不关（避免侧栏收起引发的 reflow 误关刚弹出的气泡）
         const notes = (R.notes || []).filter(n => n.stateId === state);
+        window.ProtoAnchors.setRevealNotes?.(notes);
+        if (selectedNoteId && !notes.some(n => n.id === selectedNoteId)) selectNote(null);
         const arranged = window.ProtoOrder.project(notes, window);
         const stale = [], noPoint = [];
-        layer.replaceChildren();
+        const visibleIds = new Set();
         for (const n of arranged) {
             let found = null;
             try { found = window.ProtoAnchors.point(n); } catch (_) { /* 锚定异常按失效处理 */ }
             if (!found?.point) { noPoint.push(n); continue; }
             if (found.point.visible === false) continue; // 滚出嵌套容器的序号随锚点隐藏，不算失锚。
-            const pin = document.createElement('button');
-            pin.type = 'button';
-            pin.className = '__review_pin';
+            let pin = pinsById.get(n.id);
+            if (!pin) {
+                pin = document.createElement('button');
+                pin.type = 'button';
+                pin.className = '__review_pin';
+                pin.dataset.noteId = n.id;
+                pinsById.set(n.id, pin);
+                layer.appendChild(pin);
+            }
             window.ProtoAppearance?.applyPin(pin, n);
-            pin.dataset.noteId = n.id;
-            pin.textContent = n.displayNumber;
+            pin.classList.toggle('__review_selected', n.id === selectedNoteId);
+            pin.setAttribute('aria-current', String(n.id === selectedNoteId));
+            if (pin.textContent !== String(n.displayNumber)) pin.textContent = n.displayNumber;
             pin.setAttribute('aria-label', `标注 ${n.displayNumber}`);
             pin.setAttribute('aria-haspopup', 'dialog');
             pin.setAttribute('aria-controls', '__review_popover');
@@ -203,12 +297,18 @@
             pin.style.top = found.point.y + 'px';
             pin.onclick = e => {
                 e.preventDefault(); e.stopPropagation();
+                selectNote(n.id);
+                R.onSelect?.(n.id);
                 // PRD 侧栏展开：定位到右栏对应内容；收起：就地弹气泡展示内容。
                 if (R.asideOpen && R.asideOpen()) { hidePop(); R.onFocus?.(n.id); }
                 else togglePop(n, pin);
             };
-            layer.appendChild(pin);
+            visibleIds.add(n.id);
         }
+        for (const [id, pin] of pinsById) {
+            if (!visibleIds.has(id)) { pin.remove(); pinsById.delete(id); }
+        }
+        if (popNoteId && !visibleIds.has(popNoteId)) hidePop();
         // 无落点分流（Feature 1 引导 + 失锚判定）：元素还在且被折叠/隐藏 → 正常颜色，可展开的盖透明脉冲描边框引导；
         // 元素真找不到、或可见但落点失效（目标变化）才算失锚（右栏灰显、置底、不可点）。
         const groups = new Map();
@@ -252,7 +352,8 @@
                 glayer.appendChild(guide);
             }
             guide.__rvTarget = g.target;
-            const html = '<span class="__review_guide_tag">' + GICON + '<span>' + g.label + ' · ' + g.notes.length + '</span></span>';
+            const safeLabel = String(g.label).replace(/[&<>"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]);
+            const html = '<span class="__review_guide_tag">' + GICON + '<span>' + safeLabel + ' · ' + g.notes.length + '</span></span>';
             if (guide.__rvHtml !== html) { guide.innerHTML = html; guide.__rvHtml = html; }
             guide.title = '点击“' + g.label + '”以显示 ' + g.notes.length + ' 处标注（' + g.notes.map(n => n.displayNumber).join(' ') + '）';
             guide.setAttribute('aria-label', guide.title);
@@ -273,11 +374,21 @@
 
     document.addEventListener('proto-anchors:reveal-failed', layout);
 
+    // 关闭弹窗和显示入口可能保持 HTML 字符数不变；监听真实 DOM 变化。
+    // 过滤自有层，避免重建序号 / 拖动浮窗时反过来触发无限重排。
+    if (typeof MutationObserver !== 'undefined') {
+        new MutationObserver(records => { if (records.some(record => !owned(record.target))) scheduleLayout(); })
+            .observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true,
+                attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-expanded', 'aria-hidden', 'data-proto-state'] });
+    }
+    for (const event of ['transitionend', 'animationend', 'load'])
+        document.addEventListener(event, e => { if (!owned(e.target)) scheduleLayout(); }, true);
+    document.fonts?.ready.then(scheduleLayout);
+
     setInterval(() => {
-        const html = document.documentElement.outerHTML.length;
         if (stateOf() !== lastState || scrollX !== lastX || scrollY !== lastY ||
-            innerWidth !== lastW || innerHeight !== lastH || html !== lastHtml) {
-            lastX = scrollX; lastY = scrollY; lastW = innerWidth; lastH = innerHeight; lastHtml = html;
+            innerWidth !== lastW || innerHeight !== lastH) {
+            lastX = scrollX; lastY = scrollY; lastW = innerWidth; lastH = innerHeight;
             layout();
         }
     }, 350);

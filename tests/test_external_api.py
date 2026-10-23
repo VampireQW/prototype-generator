@@ -160,7 +160,8 @@ def test_registry_upgrade_and_roots_lifecycle(api, tmp_path):
     assert (child / 'index.html').exists()
     api.request('/api/external/roots/add', {'path': str(root)})
     api.request('/api/external/remove', {'projectId': pid})
-    assert len(api.request('/api/external/list')[1]['discovered']) == 1
+    hidden = api.request('/api/external/list')[1]
+    assert hidden['discovered'] == [] and len(hidden['hidden']) == 1
     assert (child / '.prototype' / 'prd.json').exists()
 
 
@@ -475,10 +476,9 @@ def test_ext_publish_supports_pure_mode_and_export_route():
     assert "elif path == '/api/ext/export':" in source
     assert 'def handle_ext_export' in source
     assert 'build_pure_export' in source
-    # 发布版本落登记：发布时记录、状态查询返回、取消发布清理
+    # 发布版本落登记：发布时记录、状态查询返回；取消发布由行为回归覆盖。
     assert "item['github_publish_mode'] = mode" in source
     assert "'mode': item.get('github_publish_mode', '')" in source
-    assert "item.pop('github_publish_mode', None)" in source
 
 
 def test_github_token_persisted_locally_encrypted(tmp_path):

@@ -164,8 +164,11 @@ function toggleExternalAddPanel() {
 }
 
 let externalLoading = false;
+let externalReloadQueued = false;
 let externalAdding = false;
 let externalProjects = [];
+let externalHiddenProjects = [];
+let externalShowHidden = false;
 function externalStatus(text, error = false) {
     $('externalStatus').textContent = text;
     $('externalStatus').dataset.error = String(error);
@@ -179,7 +182,7 @@ async function externalPost(route, body) {
     return data;
 }
 async function loadExternalProjects() {
-    if (externalLoading) return;
+    if (externalLoading) { externalReloadQueued = true; return; }
     externalLoading = true;
     HomeUI.loading($('externalList'));
     document.querySelector('[aria-label="刷新本地项目"]').classList.add('is-loading');
@@ -189,7 +192,7 @@ async function loadExternalProjects() {
         const resp = await fetch('/api/external/list');
         const data = await resp.json();
         if (!resp.ok || !data.ok) throw new Error(data.error || '无法读取本地项目');
-        renderExternalProjects(data.items || [], data.discovered || []);
+        renderExternalProjects(data.items || [], data.discovered || [], data.hidden || []);
         const roots = $('externalRoots');
         roots.replaceChildren();
         for (const path of data.roots || []) {
@@ -211,9 +214,12 @@ async function loadExternalProjects() {
             `${data.items.length} 个已连接 · ${(data.discovered || []).length} 个新发现`, errors.length > 0);
     } catch (e) {
         externalStatus(e.message, true);
-        if (!externalProjects.length) HomeUI.empty($('externalList'), '项目读取失败', e.message, '重试', loadExternalProjects, 'error');
+        if (!(externalShowHidden ? externalHiddenProjects : externalProjects).length) HomeUI.empty($('externalList'), '项目读取失败', e.message, '重试', loadExternalProjects, 'error');
     }
-    finally { externalLoading = false; $('externalList').setAttribute('aria-busy', 'false'); document.querySelector('[aria-label="刷新本地项目"]').classList.remove('is-loading'); }
+    finally {
+        externalLoading = false; $('externalList').setAttribute('aria-busy', 'false'); document.querySelector('[aria-label="刷新本地项目"]').classList.remove('is-loading');
+        if (externalReloadQueued) { externalReloadQueued = false; void loadExternalProjects(); }
+    }
 }
 window.addEventListener('focus', () => { if (!document.hidden) loadExternalProjects(); });
 document.addEventListener('keydown', event => {
@@ -221,10 +227,20 @@ document.addEventListener('keydown', event => {
 });
 document.addEventListener('visibilitychange', () => { if (!document.hidden) loadExternalProjects(); });
 
-function renderExternalProjects(items, discovered = []) {
+function toggleHiddenExternalProjects(show = !externalShowHidden) {
+    externalShowHidden = !!show;
+    $('externalSearch').value = ''; $('externalFilter').value = 'all';
+    HomeUI.closeMenu(); renderExternalProjects();
+}
+
+function renderExternalProjects(items, discovered = [], hidden = []) {
     const box = $('externalList');
     if (!box) return;
-    if (items) externalProjects = [...items, ...discovered];
+    if (items) { externalProjects = [...items, ...discovered]; externalHiddenProjects = hidden; }
+    $('hiddenProjectCount').textContent = externalHiddenProjects.length;
+    $('externalHiddenToggle').setAttribute('aria-pressed', String(externalShowHidden));
+    $('externalHiddenBack').hidden = !externalShowHidden;
+    box.setAttribute('aria-label', externalShowHidden ? '已隐藏的本地项目' : '本地原型项目');
     const query = ($('externalSearch')?.value || '').trim().toLocaleLowerCase();
     const timestamp = (item) => {
         const created = Date.parse(item.createdAt);
@@ -232,7 +248,7 @@ function renderExternalProjects(items, discovered = []) {
         const added = Date.parse(item.addedAt);
         return Number.isFinite(added) ? added : 0;
     };
-    const entries = externalProjects.filter(item =>
+    const entries = (externalShowHidden ? externalHiddenProjects : externalProjects).filter(item =>
         `${item.name || ''} ${item.root || ''}`.toLocaleLowerCase().includes(query) &&
         (($('externalFilter')?.value || 'all') === 'all' ||
          ($('externalFilter').value === 'discovered' && item.discovered) ||
@@ -246,9 +262,15 @@ function renderExternalProjects(items, discovered = []) {
     status.textContent = query ? `找到 ${entries.length} 个项目` : '';
     $('localResultCount').hidden = !!query;
     HomeUI.updateCounts('local', externalProjects.length, entries.length);
+    if (externalShowHidden) $('localResultCount').textContent = `${entries.length} 个已隐藏项目`;
     if (!entries.length) {
         const filtered = !!query || $('externalFilter')?.value !== 'all';
-        HomeUI.empty(box, filtered ? '没有匹配的项目' : '还没有本地原型', filtered ? '换个关键词，或清除筛选后查看全部项目。' : '添加一个项目文件夹，开始预览和标注。', filtered ? '清除筛选' : '添加本地项目', () => { if (filtered) { $('externalSearch').value = ''; $('externalFilter').value = 'all'; renderExternalProjects(); } else toggleExternalAddPanel(); });
+        HomeUI.empty(box, filtered ? '没有匹配的项目' : externalShowHidden ? '没有已隐藏的项目' : '还没有本地原型',
+            filtered ? '换个关键词，或清除筛选后查看全部项目。' : externalShowHidden ? '隐藏的项目会保留在这里，可随时显示到首页。' : '添加一个项目文件夹，开始预览和标注。',
+            filtered ? '清除筛选' : externalShowHidden ? '返回项目' : '添加本地项目', () => {
+                if (filtered) { $('externalSearch').value = ''; $('externalFilter').value = 'all'; renderExternalProjects(); }
+                else if (externalShowHidden) toggleHiddenExternalProjects(false); else toggleExternalAddPanel();
+            });
     }
     for (const item of entries) box.append(buildExternalCard(item));
 }
@@ -262,21 +284,25 @@ function buildExternalCard(item) {
         tone: item.discovered ? 'warning' : item.exists ? 'success' : 'danger',
         badgeIcon: item.discovered ? 'spark' : item.exists ? 'check' : 'error',
         meta: item.exists ? `${item.pages} 个页面${HomeUI.formatDate(item.createdAt) ? ' · ' + HomeUI.formatDate(item.createdAt) : ''}` : '请检查项目路径',
-        detail: item.root, open, disabled: !item.exists, preview: { source: 'local', id: item.projectId }
+        detail: item.root, open, disabled: !item.exists || externalShowHidden, preview: { source: 'local', id: item.projectId }
     });
-    if (item.discovered) {
+    const deletion = { icon: 'delete', label: '彻底删除项目及本地文件', danger: true, handler: () => deleteExternalProject(item.projectId, item.name, item.root) };
+    if (externalShowHidden) {
+        const restore = HomeUI.action('open', '显示到首页', () => restoreExternalProject(item.projectId));
+        restore.className = 'app-button app-secondary project-restore'; restore.textContent = '显示到首页';
+        actions.append(restore, HomeUI.more(item.name, [deletion]));
+    } else if (item.discovered) {
         actions.append(HomeUI.action('connect', `连接项目 ${item.name}`, open));
     } else {
         actions.append(
             HomeUI.action('open', `预览 ${item.name}`, open, { disabled: !item.exists }),
-            HomeUI.action('publish', `发布 / 导出 ${item.name}`, () => openExtPublishModal(item), { disabled: !item.exists }),
-            HomeUI.more(item.name, [
-                ...(!item.exists ? [{icon: 'folder', label: '添加新的项目目录', handler: () => { toggleExternalAddPanel(); if ($('externalAddBox').classList.contains('hidden')) toggleExternalAdd(); }}] : []),
-                { icon: 'remove', label: '移出列表，保留磁盘文件', handler: () => removeExternalProject(item.projectId) },
-                { icon: 'delete', label: '删除项目及本地文件', danger: true, handler: () => deleteExternalProject(item.projectId, item.name, item.root) }
-            ])
+            HomeUI.action('publish', `发布 / 导出 ${item.name}`, () => openExtPublishModal(item), { disabled: !item.exists })
         );
     }
+    if (!externalShowHidden) actions.append(HomeUI.more(item.name, [
+        ...(!item.exists ? [{icon: 'folder', label: '添加新的项目目录', handler: () => { toggleExternalAddPanel(); if ($('externalAddBox').classList.contains('hidden')) toggleExternalAdd(); }}] : []),
+        { icon: 'hidden', label: '隐藏项目', handler: () => hideExternalProject(item.projectId) }, deletion
+    ]));
     return article;
 }
 
@@ -333,21 +359,20 @@ async function addExternalProject() {
     finally { externalAdding = false; $('externalPathAddBtn').disabled = false; }
 }
 
-async function removeExternalProject(pid) {
-    const confirmed = await showAppConfirm({
-        title: '移出列表',
-        message: '从列表移除该外部项目？磁盘文件与标注数据不会被删除。',
-        confirmText: '移出列表',
-        tone: 'warning'
-    });
-    if (!confirmed) return;
+const externalVisibilityBusy = new Set();
+async function setExternalProjectHidden(pid, hidden) {
+    if (externalVisibilityBusy.has(pid)) return;
+    externalVisibilityBusy.add(pid);
     try {
-        await externalPost('remove', {projectId: pid});
-        loadExternalProjects();
+        await externalPost(hidden ? 'hide' : 'restore', {projectId: pid});
+        showToast(hidden ? '项目已隐藏，可在“已隐藏”中恢复' : '项目已显示到首页');
+        await loadExternalProjects();
     } catch (e) {
-        showToast('移除失败：' + e.message, 'error');
-    }
+        showToast(e.message, 'error');
+    } finally { externalVisibilityBusy.delete(pid); }
 }
+function hideExternalProject(pid) { return setExternalProjectHidden(pid, true); }
+function restoreExternalProject(pid) { return setExternalProjectHidden(pid, false); }
 
 // 删除项目：两级确认，明确告知本地文件夹会一起删除且不可恢复
 async function deleteExternalProject(pid, name, root) {
@@ -368,7 +393,7 @@ async function deleteExternalProject(pid, name, root) {
     });
     if (!second) return;
     try {
-        const data = await externalPost('delete', {projectId: pid});
+        const data = await externalPost('delete', {projectId: pid, expectedRoot: root});
         if (data.publishedUrl) {
             showToast('项目已删除；GitHub 评审站不会自动下线，如需移除请到仓库删除对应目录', 'info');
         } else {
@@ -3225,6 +3250,7 @@ async function doExtGithubPublish() {
             $('extPubPublishedInfo').classList.remove('hidden');
             $('extPubUnpublishBtn').classList.remove('hidden');
             finalText = '重新发布 / 更新';
+            window.PagesManager?.publicationChanged();
             showToast('🚀 发布成功！约 1-3 分钟后链接生效');
         } else {
             showToast('发布失败: ' + (data.error || '未知错误'), 'error');
@@ -3257,7 +3283,8 @@ async function executeExtGithubUnpublish() {
         });
         const data = await resp.json();
         if (data.ok) {
-            showToast('✅ 已取消发布并删除 GitHub 上的文件');
+            showToast(data.message || '已提交取消发布，Pages 重新部署后生效');
+            window.PagesManager?.publicationChanged();
             $('extPubPublishedInfo').classList.add('hidden');
             $('extPubPublishBtnText').textContent = '立即发布';
             $('extPubUnpublishBtn').classList.add('hidden');

@@ -133,6 +133,14 @@ body.home-app { min-width: 0; min-height: 100vh; margin: 0; background: var(--ho
 .home-app .library-filter-host { min-width:136px;padding:0;background:transparent; }.home-app .library-filter-host .ppn-select { height:40px;min-height:40px;border-radius:var(--home-radius); }.home-app .library-filter-host .ppn-select>svg { right:12px; }.home-app .library-select.is-enhanced>svg { display:none; }
 .home-app .ppn.ppn-menu { border-radius:8px;border-color:var(--home-border);padding:4px; }.home-app .ppn .ppn-option { border-radius:4px;min-height:36px; }.home-app .ppn button:focus-visible { outline:2px solid var(--home-focus);outline-offset:-2px; }
 .library-results-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; color: var(--home-tertiary); font-size: 12px; line-height: 20px; font-variant-numeric: tabular-nums; }
+.library-results-summary,.library-results-actions { display:flex;align-items:center;gap:12px;min-width:0;flex-wrap:wrap; }
+.library-hidden-button { display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:3px 7px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--home-muted);font:12px/20px var(--home-font);white-space:nowrap;cursor:pointer; }
+.library-hidden-button:hover,.library-hidden-button[aria-pressed="true"] { background:var(--home-alt);border-color:var(--home-border);color:var(--home-text); }
+.library-hidden-button .app-icon { width:14px;height:14px; }
+.hidden-project-count { padding:0 5px;border-radius:4px;background:var(--home-alt);color:var(--home-tertiary);font-size:11px;line-height:18px; }
+.project-card-actions .project-restore { margin-right:auto;min-height:28px;padding:3px 8px;font-size:12px; }
+@media(pointer:coarse){.library-hidden-button,.project-card-actions .project-restore{min-height:40px}}
+@media(max-width:480px){.library-results-actions{gap:4px}.library-results-actions .library-sort{display:none}}
 .library-sort { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .library-sort svg { width: 16px; height: 16px; }
 .library-status { font-size: 12px; color: var(--home-tertiary); overflow-wrap: anywhere; }
@@ -198,6 +206,9 @@ body.home-app { min-width: 0; min-height: 100vh; margin: 0; background: var(--ho
 .project-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; padding: 8px 10px; border: 0; border-radius: 9px; text-align: left; font-size: 13px; background: transparent; color: var(--home-text); }
 .project-menu-item svg { flex: none; width: 17px; height: 17px; color: var(--home-muted); }
 .project-menu-item:hover { background: var(--home-alt); }
+.home-theme-menu { width: 176px; }
+.home-theme-menu .project-menu-item[aria-checked="true"] { background: var(--home-alt); }
+.home-theme-check { display: inline-flex; margin-left: auto; }
 .project-menu-item[data-danger="true"] { color: var(--home-danger); border-top: 1px solid var(--home-border); margin-top: 4px; border-radius: 0 0 9px 9px; }
 .project-menu-item[data-danger="true"] svg { color: var(--home-danger); }
 .project-menu-item[data-danger="true"]:hover { background: var(--home-danger-soft); }
@@ -310,6 +321,36 @@ body.home-app { min-width: 0; min-height: 100vh; margin: 0; background: var(--ho
 .home-app .export-mode-btn { background: var(--home-surface); border-color: var(--home-border); color: var(--home-muted); border-radius: var(--home-radius); }
 .home-app .export-mode-btn.active { border-color: var(--home-accent); background: var(--home-soft); color: var(--home-accent); }
 .home-app [id$="Modal"] :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea) { border-color: var(--home-control); background-color: var(--home-surface); color: var(--home-text); }
+/* 发布弹窗使用完整的主题表面，避免固定浅色工具类在暗色下残留。 */
+.home-app #extPublishModal { --publish-status-line: color-mix(in srgb, var(--home-success) 35%, var(--home-surface)); }
+.home-app #extPublishModal .home-publish-dialog { border: 1px solid var(--home-border); background: var(--home-surface); color: var(--home-text); box-shadow: var(--home-popup-shadow); max-height: calc(100dvh - 32px); overflow-y: auto; }
+.home-app #extPublishModal .home-publish-header { background: var(--home-alt); border-color: var(--home-border); }
+.home-app #extPublishModal :is(h3,h4) { color: var(--home-text); }
+.home-app #extPublishModal :is(h3,h4) > i { color: inherit; }
+.home-app #extPublishModal .home-publish-close { color: var(--home-muted); }
+.home-app #extPublishModal .home-publish-close:hover { background: var(--home-hover); color: var(--home-text); }
+.home-app #extPublishModal input[name="extPubMode"] + div { border: 1px solid var(--home-control); border-radius: 8px; background: var(--home-surface); }
+.home-app #extPublishModal input[name="extPubMode"]:checked + div { border-color: var(--home-accent); background: var(--home-alt); box-shadow: inset 0 0 0 1px var(--home-accent); }
+.home-app #extPublishModal .home-publish-repo { gap: 12px; border: 1px solid var(--home-border); background: var(--home-alt); }
+.home-app #extPublishModal .home-publish-repo > span { min-width: 0; }
+.home-app #extPubRepoDisplay { overflow-wrap: anywhere; }
+.home-app #extPublishModal .home-publish-repo button { flex: none; color: var(--home-text); }
+.home-app #extPublishModal .home-publish-repo button:hover { text-decoration: underline; }
+.home-app #extPubPublishedInfo { background: var(--home-success-soft); border-color: var(--publish-status-line); color: var(--home-success); }
+.home-app #extPublishModal #extPubPublishedUrl { min-width: 0; background: var(--home-surface); border-color: var(--publish-status-line); color: var(--home-text); }
+.home-app #extPubPublishedInfo button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; padding: 6px; border: 1px solid var(--publish-status-line); border-radius: 6px; background: var(--home-surface); color: var(--home-success); }
+.home-app #extPubPublishedInfo button:hover { background: var(--home-success); border-color: var(--home-success); color: var(--home-surface); }
+.home-app #extLocalExportBtn { border: 1px solid var(--home-control); background: var(--home-alt); color: var(--home-text); }
+.home-app #extLocalExportBtn:hover { border-color: var(--home-muted); background: var(--home-hover); color: var(--home-text); }
+.home-app #extPubPublishBtn { border: 1px solid var(--home-accent); background: var(--home-accent); color: var(--home-on-accent); }
+.home-app #extPubPublishBtn:hover { border-color: var(--home-accent-hover); background: var(--home-accent-hover); color: var(--home-on-accent); }
+.home-app #extPubUnpublishBtn { border-color: color-mix(in srgb, var(--home-danger) 35%, var(--home-surface)); background: var(--home-danger-soft); color: var(--home-danger); }
+.home-app #extPubUnpublishBtn:hover { border-color: var(--home-danger); background: color-mix(in srgb, var(--home-danger) 12%, var(--home-danger-soft)); color: var(--home-danger); }
+.home-app #extPublishModal .home-publish-warning { background: var(--home-warning-soft); border-color: color-mix(in srgb, var(--home-warning) 35%, var(--home-surface)); color: var(--home-warning); }
+.home-app #extPublishModal .home-publish-setup { border-color: var(--home-control); background: var(--home-alt); color: var(--home-text); }
+.home-app #extPublishModal .home-publish-setup:hover { border-color: var(--home-muted); background: var(--home-hover); }
+.home-app #extPublishModal button:disabled { cursor: wait; }
+@media (pointer: coarse) { .home-app #extPubPublishedInfo button { min-width: 44px; min-height: 44px; } }
 .home-app #modelManagerModal .model-manager-card { border: 1px solid var(--home-border); border-radius: var(--home-popup-radius); background: var(--home-surface); color: var(--home-text); box-shadow: var(--home-popup-shadow); }
 .home-app #modelManagerModal .model-manager-form { background: var(--home-alt); }
 .home-app #modelManagerModal #modelFormTitle { color: var(--home-text); }

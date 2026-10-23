@@ -109,7 +109,7 @@ def api(tmp_path):
         connection.close()
         return result
 
-    yield SimpleNamespace(request=request, registry=registry, calls=calls, hooks=hooks, session=session, gh=gh, tmp_path=tmp_path)
+    yield SimpleNamespace(request=request, registry=registry, calls=calls, hooks=hooks, session=session, gh=gh, tmp_path=tmp_path, namespace=ns)
     server.shutdown()
     server.server_close()
     worker.join(timeout=3)
@@ -168,28 +168,23 @@ def test_publish_unregistered(api):
 
 
 def test_unpublish_recurses_and_cleans(api):
+    from test_pages_manager import Remote
     pid, _ = register_project(api)
+    remote = Remote()
+    remote.files = {'index.html': b'root', 'projects/index.html': b'listing', 'projects/other/index.html': b'keep',
+                    f'projects/{pid}/index.html': b'shell', f'projects/{pid}/proto/index.html': b'prototype',
+                    f'projects/{pid}/proto/pages/a.html': b'nested',
+                    'projects/manifest.json': json.dumps([{'id': pid}, {'id': 'other'}]).encode()}
+    api.gh.update(username='test-owner', repo='fixture-repo')
+    api.namespace['github_api_session'] = lambda token: remote
     status, res = api.request('/api/ext/publish', {'extId': pid})
     assert res['ok']
-    base = f'https://api.github.com/repos/u/r/contents/projects/{pid}'
-    api.session.tree = {
-        base: [
-            {'type': 'file', 'url': f'{base}/index.html', 'sha': '1', 'path': f'projects/{pid}/index.html'},
-            {'type': 'dir', 'url': f'{base}/proto', 'path': f'projects/{pid}/proto'},
-        ],
-        f'{base}/proto': [
-            {'type': 'file', 'url': f'{base}/proto/index.html', 'sha': '2', 'path': f'projects/{pid}/proto/index.html'},
-            {'type': 'dir', 'url': f'{base}/proto/pages', 'path': f'projects/{pid}/proto/pages'},
-        ],
-        f'{base}/proto/pages': [
-            {'type': 'file', 'url': f'{base}/proto/pages/a.html', 'sha': '3', 'path': f'projects/{pid}/proto/pages/a.html'},
-        ],
-    }
     status, res = api.request('/api/ext/unpublish', {'extId': pid})
     assert status == 200 and res['ok']
-    deleted = {url for url, _ in api.session.deleted}
-    assert deleted == {f'{base}/index.html', f'{base}/proto/index.html', f'{base}/proto/pages/a.html'}, '嵌套目录必须递归删除'
-    assert any(k.get('remove') for k in api.calls['listing']), '列表页应移除项目'
+    assert not any(path.startswith(f'projects/{pid}/') for path in remote.files), '嵌套目录必须完整删除'
+    assert remote.files['projects/other/index.html'] == b'keep', '保留其他项目'
+    assert [item['id'] for item in json.loads(remote.files['projects/manifest.json'])] == ['other']
+    assert any(method == 'PATCH' and args['json']['force'] is False for method, _, args in remote.calls)
     saved = json.loads(api.registry.read_text(encoding='utf-8'))['projects'][pid]
     assert 'github_url' not in saved and 'github_published_at' not in saved
     status, res = api.request(f'/api/ext/publish-status?projectId={urllib.parse.quote(pid)}')

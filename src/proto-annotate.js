@@ -35,8 +35,10 @@
     }
     const editable = el => !!el?.closest?.('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]');
     let hoverBox = null;
+    let cursorPoint = null;      // 仅鼠标指针预览，不创建落点或右栏编辑器。
     let pinLayer = null;
     let inputCard = null;
+    let sidebarPick = null;      // 右栏新增会话的清理函数；不创建浮窗。
     let cardObserver = null;
     let cardPoint = null;
     let cardResizing = null;   // 拖宽进行中：抑制 ResizeObserver 锚点重排
@@ -77,6 +79,8 @@
 .pa-layer .pa-pin:not(.pa-stale){background:var(--pin-fill,var(--pa-accent));color:var(--pin-ink,var(--pa-on-accent));border-color:var(--pin-stroke,var(--pa-on-accent));}
 .pa-layer .pa-pin[data-note-id]:hover{background:var(--pin-fill,var(--pa-accent));filter:brightness(.96);}
 .pa-pin.pa-cursor{pointer-events:none;z-index:2;}
+.pa-pin.pa-cursor-preview{opacity:.82;}
+html[data-proto-pick-cursor],html[data-proto-pick-cursor] :not([data-prototype-owned],[data-prototype-owned] *){cursor:none!important;}
 .pa-pin.pa-stale{background:var(--pa-stale);}
 .pa-pin.pa-selected,.pa-pin.pa-flash{outline:3px solid var(--pa-accent);outline-offset:3px;z-index:3;}
 .pa-pin.pa-dragging{cursor:grabbing;z-index:4;}
@@ -198,33 +202,60 @@
             hoverBox.className = 'pa-pin pa-cursor';
             hoverBox.setAttribute('aria-hidden', 'true');
             hoverBox.setAttribute('data-prototype-owned', '');
-            // 插入时冻结的预览序号是工具条自动摆位的障碍（proto-markdown placeToolbar 避让协议）
+            // 新落点序号是工具条自动摆位的障碍（proto-markdown placeToolbar 避让协议）。
             hoverBox.setAttribute('data-proto-toolbar-avoid', '');
             pinLayer.appendChild(hoverBox);
         }
         return hoverBox;
     }
 
-    function showPreviewNumber(x, y) {
+    function showPickCursor(x, y) {
+        if (!active || pending || inputCard) return;
+        if (pinLayer?.hasAttribute?.('data-hidden')) return;
         const box = ensureHoverBox();
+        cursorPoint = { x, y };
+        const rebindId = window.__paRebindId;
+        box.textContent = numberOf(notes.find(note => note.id === rebindId)) || previewNumber(x, y);
+        box.classList?.add('pa-cursor-preview');
+        box.toggleAttribute?.('data-proto-toolbar-avoid', false);
+        box.style.left = Math.max(4, Math.min(x, viewWidth() - (box.offsetWidth || 36) - 4)) + 'px';
+        box.style.top = Math.max(40, Math.min(y, viewHeight() - 4)) + 'px';
+        box.style.display = '';
+        document.documentElement.toggleAttribute?.('data-proto-pick-cursor', true);
+    }
+
+    function showPreviewNumber(x, y) {
+        if (!pending) { hideHover(); return; }
+        const box = ensureHoverBox();
+        cursorPoint = null;
+        document.documentElement.toggleAttribute?.('data-proto-pick-cursor', false);
+        box.classList?.remove('pa-cursor-preview');
+        box.toggleAttribute?.('data-proto-toolbar-avoid', true);
+        // 首次保存后已有正式气泡，待输入序号不再叠加显示。
+        if (pending?.noteId && notes.some(note => note.id === pending.noteId)) { box.style.display = 'none'; return; }
         const rebindId = pending?.rebindId || window.__paRebindId;
         box.textContent = numberOf(notes.find(n => n.id === rebindId)) || previewNumber(x, y);
-        box.style.left = Math.min(x, viewWidth() - 44) + 'px';
-        box.style.top = Math.max(40, y) + 'px';
+        const found = ProtoAnchors.point(pending);
+        if (!found.point || !found.point.visible) { box.style.display = 'none'; return; }
+        box.style.left = Math.max(4, Math.min(found.point.x, viewWidth() - (box.offsetWidth || 36) - 4)) + 'px';
+        box.style.top = Math.max(40, Math.min(found.point.y, viewHeight() - 4)) + 'px';
         box.style.display = '';
     }
 
     function onMouseMove(e) {
         if (!active || drag || saving) { hideHover(); return; }
-        // 点击落点后序号冻结在落点旁，直到输入卡关闭；在输入卡上移动鼠标也不能把它藏掉。
+        // 点击前仅显示序号指针；点击后不再跟随鼠标，按页面锚点定位。
         if (pending || inputCard) return;
         if (owned(e.target)) { hideHover(); return; }
-        showPreviewNumber(e.clientX, e.clientY);
+        showPickCursor(e.clientX, e.clientY);
     }
 
-    // 落点已冻结（pending）期间预览序号不可隐藏：鼠标移出 iframe 到父页的 PRD 栏 / 顶栏也会触发 document mouseleave，
-    // 不能让它把用户正在对照输入的序号藏掉。只有 closeInputCard 清掉 pending 之后才允许隐藏。
-    function hideHover() { if (hoverBox && !pending) hoverBox.style.display = 'none'; }
+    // 移出 iframe 不隐藏已落点的序号；滚出目标可见区则由锚点重排负责隐藏。
+    function hideHover() {
+        cursorPoint = null;
+        document.documentElement.toggleAttribute?.('data-proto-pick-cursor', false);
+        if (hoverBox && !pending) hoverBox.style.display = 'none';
+    }
 
     function onClick(e) {
         if (revealing || owned(e.target)) return;
@@ -261,7 +292,8 @@
             e.preventDefault(); e.stopPropagation();
             if (saving) return;
             if (drag) cancelDrag();
-            if (editable(e.target) && inputCard) { closeInputCard(true); return; }
+            if (editable(e.target) && (inputCard || sidebarPick)) { closeInputCard(true); return; }
+            if (sidebarPick) { closeInputCard(true); return; }
             if (inputCard) closeInputCard(true);
             window.__paRebindId = null;
             if (active) { deactivate(); host()?.exitAnnotate?.(); }
@@ -276,8 +308,25 @@
 
     function openInputCard(x, y) {
         if (inputCard) closeInputCard(true);
+        const pick = pending;
+        const done = id => {
+            if (pending !== pick) return;
+            closeInputCard();
+            if (pick.scopeKey === host()?.scopeKey?.()) {
+                selectNote(id);
+                if (host()?.prdExpanded?.()) host()?.focusNote?.(id);
+            }
+        };
+        const cancelled = () => { if (pending === pick) closeInputCard(true); };
+        if (!pick.rebindId && host()?.prdExpanded?.() && host()?.beginSidebarPick) {
+            sidebarPick = host().beginSidebarPick(pick, done, cancelled);
+            if (!sidebarPick) { closeInputCard(); return; }
+            showPreviewNumber(x, y);
+            host()?.markdown?.relayout?.();
+            return;
+        }
         inputCard = makeCard();
-        const card = inputCard, pick = pending;
+        const card = inputCard;
         card.setAttribute('role', 'dialog');
         card.setAttribute('aria-label', pick.rebindId ? '重新绑定标注' : '添加标注');
         setCardBody(card, '<div class="pa-card-body pa-card-solo"><div class="pa-card-text"></div></div>');
@@ -298,14 +347,11 @@
                 } finally { saving = false; button.disabled = false; }
             };
         } else {
-            const started = host()?.beginPick?.(region, pick, id => {
-                if (inputCard === card) closeInputCard();
-                if (pick.scopeKey === host()?.scopeKey?.()) { selectNote(id); host()?.focusNote?.(id); }
-            }, () => { if (inputCard === card) closeInputCard(true); });
+            const started = host()?.beginPick?.(region, pick, done, cancelled);
             if (!started) { closeInputCard(); return; }
         }
         placeCard(x, y);
-        // 即使用户没有先移动鼠标、hoverBox 尚未创建，点击后也必须在落点旁显示并冻结序号。
+        // 无需先移动鼠标：点击后创建序号，并立即按锚点绑定页面位置。
         showPreviewNumber(x, y);
         // beginPick 已同步摆过一次工具条，但那时卡片还没落位、序号还没显示；现在按真实几何重摆，避开序号
         host()?.markdown?.relayout?.();
@@ -487,6 +533,8 @@
 
     function closeInputCard(preserve = false) {
         const card = inputCard;
+        const closeSidebar = sidebarPick;
+        sidebarPick = null;
         inputCard = null;
         pending = null;
         cardObserver?.disconnect();
@@ -496,9 +544,12 @@
         if (card?.dataset?.noteId && cardOffset) keptOffset = { id: card.dataset.noteId, offset: cardOffset };
         cardOffset = null;
         if (card) { host()?.markdown?.suspend(card); card.remove(); }
+        closeSidebar?.();
         composing = false;
         hideHover();
     }
+
+    function closePendingPick() { if (pending) closeInputCard(true); }
 
     function selectNote(id) {
         selectedId = id;
@@ -554,6 +605,7 @@
 
     function renderPins(list) {
         notes = Array.isArray(list) ? list : [];
+        ProtoAnchors.setRevealNotes?.(notes);
         ensureLayers();
         if (selectedId && !notes.some(n => n.id === selectedId)) { closeInputCard(); selectNote(null); }
         if (drag && !notes.some(n => n.id === drag.id)) cancelDrag();
@@ -617,6 +669,8 @@
             if (inputCard?.dataset.noteId === note.id && found.point.visible) placeCard(x, y);
         });
         layoutGuides();
+        if (pending && hoverBox) showPreviewNumber(pending.x, pending.y);
+        else if (cursorPoint && active) showPickCursor(cursorPoint.x, cursorPoint.y);
     }
 
     /* 点击引导（Feature 1）：为「锚点存在但被折叠隐藏」的标注，在其折叠触发器上盖一层透明可点的虚线框（原型内容透视可见），
@@ -665,7 +719,8 @@
                 pinLayer.appendChild(marker);
             }
             marker.__paTarget = g.target;
-            const html = `<span class="pa-guide-tag">${ICON}<span>${g.label} · ${g.notes.length}</span></span>`;
+            const safeLabel = String(g.label).replace(/[&<>"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]);
+            const html = `<span class="pa-guide-tag">${ICON}<span>${safeLabel} · ${g.notes.length}</span></span>`;
             if (marker.__paHtml !== html) { marker.innerHTML = html; marker.__paHtml = html; }
             const nums = g.notes.map(numberOf).join(' ');
             marker.title = `点击“${g.label}”以显示 ${g.notes.length} 处标注（${nums}）`;
@@ -750,7 +805,9 @@
                 found = ProtoAnchors.point(note);
             }
         }
-        if (found.element) {
+        if (found.element?.id === 'screenshot-image' && found.point && document.documentElement?.dataset?.protoScreenshot === 'true') {
+            window.scrollTo({ top: Math.max(0, found.point.y + window.scrollY - window.innerHeight / 2), behavior: motion() });
+        } else if (found.element) {
             found.element.scrollIntoView({ block: 'center', behavior: motion() });
         } else if (found.point) {
             window.scrollTo({ top: Math.max(0, found.point.y + window.scrollY - window.innerHeight / 2), behavior: motion() });
@@ -761,17 +818,27 @@
         return !!found.point;
     }
 
+    async function testReveal(anchor) {
+        closeInputCard(true);
+        const current = ProtoAnchors.resolveHidden(anchor);
+        if (current && !ProtoAnchors.hidden(current)) {
+            current.scrollIntoView({ block: 'center', behavior: motion() });
+            return { ok: true, alreadyVisible: true };
+        }
+        const target = await revealThrough(anchor);
+        if (!target || ProtoAnchors.hidden(target)) return { ok: false, message: '未能显示标注目标，请检查入口顺序和目标绑定' };
+        target.scrollIntoView({ block: 'center', behavior: motion() });
+        layoutPins(); setTimeout(layoutPins, 700);
+        return { ok: true };
+    }
+
     // ---------- 生命周期 ----------
 
     function activate() {
         if (active) return;
         active = true;
         ensureLayers();
-        const draft = host()?.getPickDraft?.();
-        if (draft && !inputCard && !window.__paRebindId) {
-            pending = { ...draft };
-            openInputCard(pending.x, pending.y);
-        }
+        hideHover();
         host()?.pickChanged?.(true);
         layoutPins();
     }
@@ -811,6 +878,7 @@
     function setVisible(visible) {
         ensureLayers();
         const hidden = !visible;
+        if (hidden) hideHover();
         if (pinLayer.hasAttribute('data-hidden') === hidden) return;
         pinLayer.toggleAttribute('data-hidden', hidden);
         cardLayer?.toggleAttribute?.('data-hidden', hidden);
@@ -819,8 +887,7 @@
 
     let layoutTimer = null;
     function scheduleLayout() {
-        // 重排只更新已保存序号的位置；不能隐藏正在跟随鼠标或已冻结在新落点旁的预览序号。
-        // 原型 hover/动画引发 DOM 变化时 MutationObserver 会频繁进这里，旧逻辑无条件 hideHover 导致序号时有时无。
+        // 已保存与待输入序号共同按锚点逐帧更新，覆盖页面 / 内嵌滚动、尺寸和 DOM 变化。
         if (layoutTimer) return;
         layoutTimer = requestAnimationFrame(() => { layoutTimer = null; layoutPins(); });
     }
@@ -842,5 +909,5 @@
     document.addEventListener('transitionend', (e) => { if (!owned(e.target)) scheduleLayout(); }, true);
     document.addEventListener('animationend', (e) => { if (!owned(e.target)) scheduleLayout(); }, true);
 
-    window.ProtoAnnotate = { activate, deactivate, renderPins, layoutPins, flashNote, startRebind, selectNote, closeInputCard, setTheme, setVisible, openNoteId: () => inputCard?.dataset.noteId || null, cardOpen: () => !!inputCard, isActive: () => active, isBusy: () => saving || !!host()?.markdown?.isBusy() };
+    window.ProtoAnnotate = { activate, deactivate, renderPins, layoutPins, flashNote, testReveal, startRebind, selectNote, closeInputCard, closePendingPick, setTheme, setVisible, openNoteId: () => inputCard?.dataset.noteId || null, cardOpen: () => !!inputCard, isActive: () => active, isBusy: () => saving || !!host()?.markdown?.isBusy() };
 })();

@@ -129,7 +129,13 @@ def test_toolbar_and_image_resize_save_undo(browser_page, theme, width):
         box = toolbar.bounding_box()
         input_box = page.locator('.proto-md-frame').bounding_box()
         assert overlap(box,input_box) == 0
-        assert 0 <= box['x'] and box['x'] + box['width'] <= width + 1
+        if region == 'card':
+            assert 0 <= box['x'] and box['x'] + box['width'] <= width + 1
+        else:
+            # 右栏按已确定的规则保持自然宽度单行，窄视口向左延伸；浮窗仍须完整在屏内。
+            assert box['x'] + box['width'] <= width + 1
+            assert toolbar.evaluate("e => e.classList.contains('is-single-row')")
+            assert toolbar.locator('button').evaluate_all("nodes => new Set(nodes.map(n => Math.round(n.getBoundingClientRect().top))).size === 1")
         assert toolbar.locator('button').count() == 15
         first = frame.locator('.vditor-ir img').first
         first.wait_for()

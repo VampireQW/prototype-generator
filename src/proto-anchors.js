@@ -48,6 +48,7 @@
         return path.join(' > ');
     }
     function controlLabel(el) {
+        if (!el) return '';
         const byFor = el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
         const label = el.labels?.[0] || byFor || el.closest('label') || el.closest('.f-item,.form-item,.form-group,.field')?.querySelector('label');
         return text(label).replace(/[：:]$/, '').slice(0, 80);
@@ -165,6 +166,12 @@
         return { element: null, reason: '目标变化，等待重新定位' };
     }
     function at(x, y) {
+        // 截图标注始终绑定图片自身；覆盖其上的热区可随时移动、删除。
+        const image = document.querySelector('html[data-proto-screenshot="true"] #screenshot-image');
+        if (image) {
+            const bounds = image.getBoundingClientRect();
+            if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) return image;
+        }
         return (
             document
                 .elementsFromPoint(x, y)
@@ -239,7 +246,9 @@
         const ew = Math.max(r.width, element.scrollWidth), eh = Math.max(r.height, element.scrollHeight);
         let px = p.x, py = p.y;
         if (Number.isFinite(p.rx) && Number.isFinite(p.ry)) {
-            px = p.rx * ew; py = p.ry * eh;
+            // placement 的比例以边框矩形归一化，复原必须使用同一尺寸。
+            // tooltip / 绝对定位子节点可撑大 scrollWidth/Height，却没有改变控件本身。
+            px = p.rx * r.width; py = p.ry * r.height;
         } else {
             // 旧锚点无 rx/ry：仅当当前响应式尺寸缩小导致绝对偏移越界、且偏移在创建时 rect 内时，按原尺寸比例回退。
             const base = note.anchor?.rect;
@@ -344,6 +353,29 @@
         }
         return fallback;
     }
+    function manualCondition(anchor, attempted = new Set()) {
+        const steps = anchor?.revealSteps || [];
+        const controls = steps.map(step => {
+            let matches = [];
+            try { matches = [...document.querySelectorAll(step.protoId ? `[data-proto-id="${CSS.escape(step.protoId)}"]` : step.selector || ':not(*)')]; } catch (_) { /* invalid locator */ }
+            return matches.length === 1 && !owned(matches[0]) && visible(matches[0]) && !matches[0].disabled && matches[0].getAttribute('aria-disabled') !== 'true' ? matches[0] : null;
+        });
+        for (let i = 0; i < steps.length; i++) {
+            const condition = steps[i], element = controls[i];
+            if (!element || attempted.has(element)) continue;
+            if (condition.kind === 'click' && controls.slice(i + 1).some(next => {
+                if (!next) return false;
+                const controlled = (element.getAttribute('aria-controls') || '').split(/\s+/).filter(Boolean);
+                for (let branch = next; branch && branch !== document.body; branch = branch.parentElement) {
+                    if (controlled.includes(branch.id) || branch.getAttribute('data-proto-reveal-by') === condition.selector) return true;
+                }
+                return false;
+            })) continue;
+            if (condition.kind !== 'click' && conditionValue(element, condition) === condition.value) continue;
+            return { element, condition, label: condition.label || conditionGuideLabel(condition) };
+        }
+        return null;
+    }
     function applyCondition(hit) {
         if (!hit?.element) return false;
         const { element, condition } = hit;
@@ -423,8 +455,115 @@
         }
         return null;
     }
+    let revealNotes = [];
+    function setRevealNotes(notes) { revealNotes = Array.isArray(notes) ? notes : []; }
+    const revealPathKey = steps => JSON.stringify(steps.map(s => [s.protoId || s.selector, s.kind, s.value]));
+    function hiddenContainer(el) {
+        for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+            const css = getComputedStyle(n);
+            if (n.hidden || css.display === 'none' || n.tagName === 'DETAILS' && !n.open) return n;
+        }
+        return null;
+    }
+    function sharedReveal(anchor, el = resolveHidden(anchor)) {
+        if (!el || !hidden(el) || anchor?.revealSteps?.length || declaredCondition(el) || revealTrigger(el, true) || conditionTrigger(anchor)) return null;
+        const container = hiddenContainer(el); if (!container) return null;
+        const paths = new Map();
+        for (const note of revealNotes) {
+            const steps = note.anchor?.revealSteps;
+            if (!steps?.length || steps.some(s => s.kind === 'click' && /删除|清空|提交|支付|发布|导出|确定|保存|下单/.test(s.label || ''))) continue;
+            const peer = resolveHidden(note.anchor);
+            if (!peer || peer === el || hiddenContainer(peer) !== container) continue;
+            const key = revealPathKey(steps);
+            if (!paths.has(key)) paths.set(key, { steps, sourceNoteIds: [], container });
+            paths.get(key).sourceNoteIds.push(note.id);
+        }
+        if (paths.size !== 1) return null;
+        const shared = paths.values().next().value;
+        return manualCondition({ revealSteps: shared.steps }) ? shared : null;
+    }
+    // 编辑器只读检查：不点击、不改条件，也能在弹窗已打开时展示识别到的完整路径。
+    function inspectReveal(anchor) {
+        const el = resolveHidden(anchor), shown = !!el && !hidden(el);
+        const result = (state, reason, steps = [], extra = {}) => ({ state, reason, steps, visible: shown, rendered: !!el, ...extra });
+        const find = locator => {
+            try { return [...document.querySelectorAll(locator || ':not(*)')].filter(n => !owned(n)); } catch (_) { return []; }
+        };
+        const inspectStep = step => {
+            const matches = find(step.protoId ? `[data-proto-id="${CSS.escape(step.protoId)}"]` : step.selector);
+            const control = matches.length === 1 ? matches[0] : null;
+            return { ...step, label: step.label || text(control) || controlLabel(control) || '展开',
+                status: matches.length > 1 ? 'duplicate' : !control ? 'missing' : control.disabled || control.getAttribute('aria-disabled') === 'true' ? 'disabled' : visible(control) ? 'ready' : 'hidden' };
+        };
+        if (anchor?.revealSteps?.length) {
+            const rows = anchor.revealSteps.map(inspectStep), broken = rows.some(s => ['missing', 'duplicate', 'disabled'].includes(s.status)) || !shown && rows.every(s => s.status === 'hidden');
+            return result(broken ? 'needed' : 'manual', broken ? '手动路径当前不可用，请检查入口或补充上层步骤' : !el ? '目标当前未渲染，可测试手动路径后检查定位' : '按手动配置的顺序展开', rows, { source: '手动配置' });
+        }
+        if (!el) return result('missing', '标注目标未找到，请先检查页面状态或重新绑定序号');
+        const chain = [];
+        for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) chain.unshift(n);
+        const steps = [], seen = new Set(); let problem = '';
+        const add = step => { const key = JSON.stringify([step.selector, step.kind, step.value]); if (!seen.has(key)) { seen.add(key); steps.push(inspectStep(step)); } };
+        const ariaControls = [...document.querySelectorAll('[aria-controls]')].filter(c => !owned(c));
+        for (const node of chain) {
+            const by = node.getAttribute('data-proto-reveal-by');
+            if (by) {
+                const matches = find(by), control = matches.length === 1 ? matches[0] : null;
+                const raw = node.getAttribute('data-proto-reveal-value') ?? 'true';
+                const kind = control?.tagName === 'SELECT' ? 'select' : /^(checkbox|radio)$/.test(control?.type) ? control.type : 'click';
+                add({ selector: by, kind, value: kind === 'select' || kind === 'click' ? raw : raw === 'true',
+                    label: node.getAttribute('data-proto-reveal-label') || text(control) || controlLabel(control) || '展开' });
+            } else if (node.tagName === 'DETAILS') {
+                const summary = node.querySelector('summary');
+                if (summary) add({ selector: selector(summary), kind: 'click', value: 'true', label: text(summary) || '展开折叠区' });
+                else problem = '折叠区缺少展开入口，请手动补充';
+            } else if (node.id) {
+                const controls = ariaControls.filter(c => (c.getAttribute('aria-controls') || '').split(/\s+/).includes(node.id));
+                if (controls.length === 1) add({ selector: selector(controls[0]), kind: 'click', value: 'true', label: text(controls[0]) || controlLabel(controls[0]) || '展开' });
+                else if (controls.length > 1) problem = '发现多个不同入口，请选择实际使用的展开路径';
+            }
+        }
+        const report = (rows, reason, extra = {}) => {
+            const broken = rows.find(s => ['missing', 'duplicate', 'disabled'].includes(s.status));
+            const message = broken ? `入口“${broken.label}”${{ missing: '未找到', duplicate: '定位不唯一', disabled: '当前禁用' }[broken.status]}，请检查或手动调整` : problem || (!shown && rows.every(s => s.status === 'hidden') ? '所有入口当前均隐藏，请先展开其所在区域或补充上层入口' : '');
+            return result(message ? 'needed' : 'automatic', message || reason, rows, extra);
+        };
+        if (steps.length) return report(steps, '根据页面展开关系识别，无需重复添加', { source: '页面关联' });
+        if (problem) return result('needed', problem);
+        if (!shown) {
+            // 与运行时优先级一致：显式关系和当前记录条件优先于共用推断。
+            const hint = revealHint(anchor, el);
+            if (hint) {
+                const condition = conditionTrigger(anchor);
+                const rows = hint.sourceNoteIds?.length ? hint.target.revealSteps.map(inspectStep) : [inspectStep(condition?.element === hint.trigger ? { ...condition.condition, label: hint.label } : { selector: selector(hint.trigger), kind: 'click', label: hint.label, value: 'true' })];
+                return report(rows, hint.sourceNoteIds?.length ? '自动共用同一区域的展开路径，无需重复添加' : '已找到当前可用入口，可测试展开确认后续步骤', { source: '当前入口', sourceNoteIds: hint.sourceNoteIds });
+            }
+        }
+        const semantic = chain.slice().reverse().find(n => n.tagName === 'DIALOG' || n.tagName === 'DETAILS' || ['dialog', 'tabpanel'].includes(n.getAttribute('role')) || n.getAttribute('aria-modal') === 'true');
+        const boundary = hiddenContainer(el) || semantic;
+        if (boundary) {
+            const paths = new Map();
+            for (const note of revealNotes) {
+                const path = note.anchor?.revealSteps, peer = resolveHidden(note.anchor);
+                if (!peer || peer === el || !boundary.contains(peer) || (hiddenContainer(el) && hiddenContainer(peer) !== boundary) || !path?.length || path.some(s => s.kind === 'click' && /删除|清空|提交|支付|发布|导出|确定|保存|下单/.test(s.label || ''))) continue;
+                const key = revealPathKey(path);
+                if (!paths.has(key)) paths.set(key, { steps: path, sourceNoteIds: [] });
+                paths.get(key).sourceNoteIds.push(note.id);
+            }
+            if (paths.size > 1) return result('needed', '同一区域有不同展开路径，请选择复用或手动添加');
+            if (paths.size === 1) {
+                const shared = paths.values().next().value;
+                return report(shared.steps.map(inspectStep), '自动共用同一区域的展开路径，无需重复添加', { source: '共用路径', sourceNoteIds: shared.sourceNoteIds });
+            }
+        }
+        return shown && !semantic ? result('visible', '目标当前直接可见，无需添加展开入口') : result('needed', shown ? '目标位于可收起区域，尚未识别打开入口' : '目标已隐藏，尚未识别展开入口');
+    }
     function revealHint(anchor, el = resolveHidden(anchor)) {
         if (el && !hidden(el)) return null; // 目标已显现；若落点异常应走失锚/响应式回退，不能继续显示条件引导
+        if (anchor?.revealSteps?.length) {
+            const manual = manualCondition(anchor);
+            return manual ? { trigger: manual.element, target: anchor, label: manual.label, kind: 'condition' } : null;
+        }
         const declared = el ? declaredCondition(el) : null;
         if (declared) return { trigger: declared.element, target: anchor || el, label: declared.label, kind: 'condition' };
         // 优先语义明确的 details / aria-controls；其次用创建标注时记录的、当前值确实不同的状态条件；
@@ -436,11 +575,27 @@
         if (conditionHint && !condition.satisfied) return conditionHint;
         const fallback = el ? revealTrigger(el) : null;
         if (fallback) return { trigger: fallback, target: el, label: '展开', kind: 'disclosure' };
-        return conditionHint;
+        if (conditionHint) return conditionHint;
+        const shared = sharedReveal(anchor, el), manual = shared && manualCondition({ revealSteps: shared.steps });
+        return manual ? { trigger: manual.element, target: { ...anchor, revealSteps: shared.steps }, label: manual.label, kind: 'condition', sourceNoteIds: shared.sourceNoteIds } : null;
     }
     function reveal(target, attempted = new Set(), notify = true) {
         const anchor = target && target.nodeType === 1 ? null : target;
         let el = target && target.nodeType === 1 ? target : resolveHidden(target);
+        if (anchor?.revealSteps?.length) {
+            if (el && !hidden(el)) return el;
+            for (let i = 0; i < anchor.revealSteps.length; i++) {
+                const hit = manualCondition(anchor, attempted);
+                if (!hit) break;
+                attempted.add(hit.element);
+                applyCondition(hit);
+                el = resolveHidden(anchor);
+                if (el && !hidden(el)) return el;
+            }
+            return null;
+        }
+        const shared = anchor && sharedReveal(anchor, el);
+        if (shared && !revealTrigger(el)) return reveal({ ...anchor, revealSteps: shared.steps }, attempted, notify);
         // 条件控件先恢复到创建标注时的值；change/click 处理器可同步显现，也可由 MutationObserver 在异步渲染后接力。
         const condition = (el ? declaredCondition(el) : null) || (anchor ? conditionTrigger(anchor) : null);
         if (condition && !condition.satisfied && !attempted.has(condition.element)) {
@@ -479,9 +634,18 @@
         return !el || hidden(el) ? null : el;
     }
     const pendingReveals = new Map();
+    const pendingContainerReveals = new WeakMap();
     function revealAndWait(target) {
         const key = target?.nodeType === 1 ? target : `${target?.protoId || ''}\n${target?.selector || ''}`;
         if (pendingReveals.has(key)) return pendingReveals.get(key);
+        const element = target?.nodeType === 1 ? target : resolveHidden(target);
+        const steps = target?.revealSteps?.length ? target.revealSteps : sharedReveal(target, element)?.steps;
+        const container = steps?.length && hiddenContainer(element), pathKey = steps?.length && revealPathKey(steps);
+        const sharedOperation = container && pendingContainerReveals.get(container)?.get(pathKey);
+        if (sharedOperation) return sharedOperation.then(() => {
+            const current = target?.nodeType === 1 ? target : resolveHidden(target);
+            return current && !hidden(current) ? current : null;
+        });
         const operation = (async () => {
             const attempted = new Set(), deadline = Date.now() + 1800;
             do {
@@ -497,7 +661,16 @@
             return null;
         })();
         pendingReveals.set(key, operation);
-        operation.finally(() => { if (pendingReveals.get(key) === operation) pendingReveals.delete(key); }).catch(() => {});
+        if (container) {
+            if (!pendingContainerReveals.has(container)) pendingContainerReveals.set(container, new Map());
+            pendingContainerReveals.get(container).set(pathKey, operation);
+        }
+        operation.finally(() => {
+            if (pendingReveals.get(key) === operation) pendingReveals.delete(key);
+            const paths = container && pendingContainerReveals.get(container);
+            if (paths?.get(pathKey) === operation) paths.delete(pathKey);
+            if (paths && !paths.size) pendingContainerReveals.delete(container);
+        }).catch(() => {});
         return operation;
     }
     globalThis.ProtoAnchors = {
@@ -510,6 +683,9 @@
         resolve,
         resolveHidden,
         revealTrigger,
+        setRevealNotes,
+        sharedReveal,
+        inspectReveal,
         revealHint,
         reveal,
         revealAndWait,

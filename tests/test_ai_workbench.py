@@ -271,19 +271,24 @@ def test_legacy_export_aliases_use_same_builders(api):
     assert review[0] == 200 and review[1].startswith(b'PK')
 
 
-def test_old_publication_identity_and_new_publish_sync(api):
+def test_old_publication_identity_and_new_publish_sync(api, monkeypatch):
     original_url = 'https://fixture.github.io/fixture/projects/ai-20261004/'
     root = make_ai(api, record={'github_url': original_url, 'github_published_at': '2026-10-01', 'github_mode': 'dev'})
     result = connect(api, root)
     pid = result['projectId']
     status = api.request('/api/ext/publish-status?projectId=' + pid)[1]
     assert status['published'] and status['url'] == original_url and status['mode'] == 'review'
-    uploads, listing, remote_queries = [], [], []
+    uploads, listing, unpublishes = [], [], []
 
     class Session:
         def get(self, url, **kwargs):
-            remote_queries.append(url)
             return SimpleNamespace(status_code=200, json=lambda: {'default_branch': 'main'} if url.endswith('/repos/fixture/fixture') else [])
+
+    import github_pages
+    def unpublish(session, owner, repo, remote_id, head, render_index, **kwargs):
+        unpublishes.append((owner, repo, remote_id, kwargs.get('expected_url')))
+        return {'ok': True, 'overview': {'pagesUrl': 'https://fixture.github.io/fixture/'}}
+    monkeypatch.setattr(github_pages, 'unpublish', unpublish)
 
     api.namespace.update(get_github_runtime_config=lambda: {'token': 'isolated-test', 'username': 'fixture', 'repo': 'fixture'},
                          github_api_session=lambda token: Session(), github_ensure_pages=lambda *a: 'main',
@@ -297,7 +302,7 @@ def test_old_publication_identity_and_new_publish_sync(api):
     assert json.loads(api.listing.read_text(encoding='utf-8'))[0]['github_url'] == published['url']
     assert listing[-1]['project_id'] == root.name
     assert api.request('/api/ext/unpublish', {'extId': pid})[0] == 200
-    assert any(url.endswith('/contents/projects/' + root.name) for url in remote_queries)
+    assert unpublishes == [('fixture', 'fixture', root.name, published['url'])]
     assert 'github_url' not in json.loads((root / 'record.json').read_text(encoding='utf-8'))
     assert 'github_url' not in json.loads(api.listing.read_text(encoding='utf-8'))[0]
     assert not api.request('/api/ext/publish-status?projectId=' + pid)[1]['published']

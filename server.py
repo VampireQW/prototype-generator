@@ -40,6 +40,7 @@ import proto_meta  # 原型元数据层（.prototype 三文件 + revision CAS，
 import review_export  # 评审壳导出（GitHub Pages 评审站构建，纯函数模块）
 import design_settings
 import home_thumbnails
+import server_lifecycle
 
 # ==================== PyInstaller 兼容 ====================
 def get_base_path():
@@ -80,6 +81,9 @@ def load_external_registry():
         data = {}
     if not isinstance(data.get('projects'), dict):
         data['projects'] = {}
+    hidden = data.get('hiddenProjects', {})
+    data['hiddenProjects'] = {key: value for key, value in (hidden.items() if isinstance(hidden, dict) else [])
+                              if isinstance(key, str) and isinstance(value, dict) and isinstance(value.get('root'), str) and value['root']}
     data['roots'] = [r for r in data.get('roots', []) if isinstance(r, str) and r.strip()] if isinstance(data.get('roots', []), list) else []
     return data
 
@@ -806,6 +810,8 @@ def github_upload_dir(session, api_base, username, repo, branch, export_dir, rem
                 upload_file(local_path, f"{remote_prefix}/{rel_path}")
     else:
         raise Exception(f"导出目录不存在: {export_dir}")
+    import github_pages
+    github_pages.invalidate()
 
 
 def chinese_to_pinyin(text):
@@ -1305,9 +1311,12 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).replace('\\', '/')
         path = posixpath.normpath('/' + path.lstrip('/'))
         path = '/'.join(part.split(':', 1)[0].rstrip(' .').casefold() for part in path.split('/'))
-        return path.startswith(('/api/external/', '/api/proto/', '/ext/', '/api/ext/', '/api/home/')) or path == '/data/external.json'
+        return path.startswith(('/api/external/', '/api/proto/', '/ext/', '/api/ext/', '/api/home/', '/api/pages/')) or path in ('/data/external.json', '/api/github/unpublish')
 
     def do_HEAD(self):
+        if self.is_server_runtime_request():
+            self.send_error(403)
+            return
         if self.is_local_resource_request() and not self.require_local_origin():
             return
         if self.is_home_cache_request():
@@ -1321,7 +1330,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         path = '/'.join(part.split(':', 1)[0].rstrip(' .').casefold() for part in path.split('/'))
         return path.startswith('/data/home-thumbnails')
 
+    def is_server_runtime_request(self):
+        path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path).replace('\\', '/')
+        path = posixpath.normpath('/' + path.lstrip('/'))
+        path = '/'.join(part.split(':', 1)[0].rstrip(' .').casefold() for part in path.split('/'))
+        return path.startswith(('/data/server-instance-', '/data/server-startup-', '/data/.server-instance-'))
+
     def do_GET(self):
+        if urllib.parse.urlsplit(self.path).path in ('/api/pages/overview', '/api/server-info'):
+            self.dispatch_get()
+            return
         with REQUEST_LOCK:
             self.dispatch_get()
 
@@ -1330,6 +1348,12 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         parsed_path = urllib.parse.urlparse(self.path)
         path = parsed_path.path
         query = urllib.parse.parse_qs(parsed_path.query)
+        if self.is_server_runtime_request():
+            self.send_error(403)
+            return
+        if getattr(self.server, 'restarting', False) and path != '/api/server-info':
+            self.send_json_status({'ok': False, 'error': '服务正在重新启动，请稍后重试'}, 503)
+            return
         if self.is_local_resource_request() and not self.require_local_origin():
             return
 
@@ -1360,6 +1384,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_ext_publish_status(query)
         elif path == '/api/ext/export':
             self.handle_ext_export(query)
+        elif path == '/api/pages/overview':
+            self.handle_pages_overview(query)
         elif path.startswith('/ext/'):
             self.handle_external_file(path)
         # ---- 项目文件访问控制 ----
@@ -1399,6 +1425,9 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
 
     def do_POST(self):
+        if self.path.split('?')[0] == '/api/server/stop':
+            self.handle_server_stop()
+            return
         if self.path.split('?')[0] == '/api/external/pick-folder':
             self.dispatch_post()
         else:
@@ -1407,7 +1436,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
     def dispatch_post(self):
         path = self.path.split('?')[0]  # 去掉查询参数
-        if path.startswith(('/api/external/', '/api/proto/', '/api/ext/')) or path == '/api/projects/workbench':
+        if getattr(self.server, 'restarting', False):
+            self.send_json_status({'ok': False, 'error': '服务正在重新启动，请稍后重试'}, 503)
+            return
+        if path.startswith(('/api/external/', '/api/proto/', '/api/ext/', '/api/pages/')) or path in ('/api/projects/workbench', '/api/github/unpublish'):
             if not self.require_local_origin():
                 return
             if self.headers.get_content_type() != 'application/json':
@@ -1446,8 +1478,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_project_workbench()
         elif path == '/api/external/add':
             self.handle_external_add()
-        elif path == '/api/external/remove':
-            self.handle_external_remove()
+        elif path in ('/api/external/remove', '/api/external/hide'):
+            self.handle_external_visibility(True)
+        elif path == '/api/external/restore':
+            self.handle_external_visibility(False)
         elif path == '/api/external/delete':
             self.handle_external_delete()
         elif path == '/api/external/pick-folder':
@@ -1464,6 +1498,12 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_proto_rename_project()
         elif path == '/api/proto/upload-image':
             self.handle_proto_upload_image()
+        elif path in ('/api/proto/screenshot/create', '/api/proto/screenshot/replace', '/api/proto/screenshot/regions'):
+            self.handle_proto_screenshot(path.rsplit('/', 1)[-1])
+        elif path in ('/api/proto/import-html', '/api/proto/replace-html'):
+            self.handle_proto_import_html(replace=path.endswith('/replace-html'))
+        elif path in ('/api/proto/text/inspect', '/api/proto/text/save', '/api/proto/text/undo'):
+            self.handle_proto_text_edit(path.rsplit('/', 1)[-1])
         # ---- 原有路由 ----
         elif self.path == '/upload':
             self.handle_upload()
@@ -1513,6 +1553,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_ext_publish()
         elif path == '/api/ext/unpublish':
             self.handle_ext_unpublish()
+        elif path == '/api/pages/unpublish':
+            self.handle_pages_unpublish('manager')
         else:
             self.send_error(404, "Not Found")
 
@@ -1958,12 +2000,13 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     import traceback
                     traceback.print_exc()
 
-                    # 更新失败状态
-                    with tasks_lock:
-                        generating_tasks[project_id]['status'] = STATUS_FAILED
-                        generating_tasks[project_id]['error'] = str(e)
-
-                    mark_project_failed(project_id, str(e))
+                    # 完成失败记录的写入后再标记结束，避免实例交接截断落盘。
+                    try:
+                        mark_project_failed(project_id, str(e))
+                    finally:
+                        with tasks_lock:
+                            generating_tasks[project_id]['status'] = STATUS_FAILED
+                            generating_tasks[project_id]['error'] = str(e)
 
             # 启动线程
             thread = threading.Thread(target=generate_in_background, daemon=True)
@@ -3002,10 +3045,50 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         try:
             projects_abs_path = os.path.abspath(PROJECTS_DIR)
             self.send_json_response({
-                'projectsDir': projects_abs_path
+                'projectsDir': projects_abs_path,
+                **(self.server.lifecycle.public_info() if getattr(self.server, 'lifecycle', None) else {})
             })
         except Exception as e:
             self.send_error_response(str(e))
+
+    def handle_server_stop(self):
+        """仅供同目录新实例使用，先等当前写入和异步生成完成。"""
+        if not self.require_local_origin(): return
+        if self.headers.get_content_type() != 'application/json':
+            self.send_json_status({'ok': False, 'error': '此操作需要 JSON 请求'}, 415)
+            return
+        try:
+            length = int(self.headers.get('Content-Length', 0))
+            if not 0 < length <= 1024: raise ValueError()
+            body = self.read_json_body()
+        except (ValueError, TypeError):
+            self.send_json_status({'ok': False, 'error': '交接请求无效'}, 400)
+            return
+        instance = getattr(self.server, 'lifecycle', None)
+        if not instance or not instance.authorized(body):
+            self.send_json_status({'ok': False, 'error': '实例交接身份不匹配'}, 403)
+            return
+        if not REQUEST_LOCK.acquire(blocking=False):
+            self.send_json_status({'ok': False, 'busy': True}, 409)
+            return
+        try:
+            lock = globals().get('tasks_lock')
+            if lock: lock.acquire()
+            try:
+                busy = any(t.get('status') in ('pending', 'generating') for t in globals().get('generating_tasks', {}).values())
+            finally:
+                if lock: lock.release()
+            if busy:
+                self.send_json_status({'ok': False, 'busy': True}, 409)
+                return
+            already = getattr(self.server, 'restarting', False)
+            self.server.restarting = True
+            self.send_json_status({'ok': True, 'stopping': True}, 202)
+            if not already:
+                print('[INFO] 新实例已接管启动，当前服务正在退出…', flush=True)
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+        finally:
+            REQUEST_LOCK.release()
 
     def handle_pptx_parse(self):
         """解析上传的 PPTX，提取文字、图片和基础页面顺序。"""
@@ -3915,10 +3998,17 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     pid = proto_meta.project_id_for(root)  # 复制出来的新目录使用独立身份。
             proto_meta.ensure_project_id(root, bundle, pid)
             proto_meta.ensure_pages_registered(root, bundle)
+            changed = False
             if pid not in reg['projects']:
                 reg['projects'][pid] = {'root': str(root), 'name': root.name,
                                        'createdAt': proto_meta.directory_created_at(root),
                                        'addedAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                changed = True
+            for hidden_id, record in list(reg['hiddenProjects'].items()):
+                if hidden_id != pid and Path(record['root']).resolve() == root.resolve():
+                    reg['hiddenProjects'].setdefault(pid, reg['hiddenProjects'].pop(hidden_id))
+                    changed = True
+            if changed:
                 save_external_registry(reg)
         return {'ok': True, 'connected': True, 'projectId': pid, 'name': reg['projects'][pid]['name'],
                 'pages': len(pages), 'revision': bundle['revision'], 'viewerUrl': f'/src/viewer.html?ext={pid}'}
@@ -4041,9 +4131,24 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                           'pages': len(pages), 'revision': revision})
         items.sort(key=lambda x: x['createdAt'], reverse=True)
         discovered, errors = proto_meta.scan_roots(reg['roots'], reg['projects'])
-        home_thumbnails.discovered = {item['projectId']: item['root'] for item in discovered}
+        known = {item['projectId']: item for item in items + discovered}
+        hidden = []
+        for pid, record in reg['hiddenProjects'].items():
+            entry = known.get(pid)
+            if entry is None and pid not in reg['projects']:
+                root = Path(record['root'])
+                exists = root.is_dir() and not proto_meta.is_linked_path(root)
+                entry = {'projectId': pid, 'root': str(root), 'name': record.get('name') or root.name,
+                         'createdAt': record.get('createdAt', ''), 'discovered': True, 'exists': exists,
+                         'pages': len(proto_meta.discover_pages(root, scan_errors)) if exists else 0}
+            if entry is not None:
+                hidden.append({**entry, 'hidden': True, 'hiddenAt': record.get('hiddenAt', '')})
+        home_thumbnails.discovered = {item['projectId']: item['root'] for item in discovered + hidden if item.get('discovered')}
+        items = [item for item in items if item['projectId'] not in reg['hiddenProjects']]
+        discovered = [item for item in discovered if item['projectId'] not in reg['hiddenProjects']]
+        hidden.sort(key=lambda item: item['hiddenAt'], reverse=True)
         self.send_json_response({'ok': True, 'items': items, 'discovered': discovered,
-                                 'roots': reg['roots'], 'errors': scan_errors + errors})
+                                 'hidden': hidden, 'roots': reg['roots'], 'errors': scan_errors + errors})
 
     def handle_home_thumbnail(self, query):
         try:
@@ -4059,7 +4164,10 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                     root = external_root_for(pid)
                 else:
                     raw = home_thumbnails.discovered.get(pid)
-                    if raw and not any(Path(base).resolve() in {Path(raw).resolve(), Path(raw).resolve().parent} for base in load_external_registry()['roots']):
+                    registry = load_external_registry()
+                    hidden_root = registry['hiddenProjects'].get(pid, {}).get('root')
+                    retained = hidden_root and raw and Path(hidden_root).resolve() == Path(raw).resolve()
+                    if raw and not retained and not any(Path(base).resolve() in {Path(raw).resolve(), Path(raw).resolve().parent} for base in registry['roots']):
                         raw = None
                     root = Path(raw).resolve() if raw else None
                 if root is None or not root.is_dir() or proto_meta.is_linked_path(root):
@@ -4117,19 +4225,47 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             print(f'[外部项目登记错误] {e}')
             self.send_error_response(str(e))
 
-    def handle_external_remove(self):
-        """从登记表移除（不删除磁盘上的项目与 .prototype 元数据）"""
+    def external_library_entry(self, registry, pid):
+        """仅解析已登记、已隐藏或当前监视范围内发现的项目，不接受客户端路径。"""
+        if not isinstance(pid, str) or not pid:
+            raise ValueError('项目 ID 无效')
+        entry = registry['projects'].get(pid)
+        if entry:
+            if entry.get('source') == 'ai':
+                raise ValueError('AI 项目请通过 AI 项目列表管理')
+            return dict(entry)
+        record = registry['hiddenProjects'].get(pid)
+        if record and proto_meta.project_id_for(Path(record['root'])) == pid:
+            return {**record, 'discovered': True}
+        candidates, _ = proto_meta.scan_roots(registry['roots'], registry['projects'])
+        return next((dict(item) for item in candidates if item['projectId'] == pid), None)
+
+    def handle_external_visibility(self, hide):
+        """隐藏不取消连接；恢复新发现项目不初始化元数据。"""
         try:
             data = self.read_json_body()
-            pid = str(data.get('projectId', ''))
+            pid = data.get('projectId')
             with EXTERNAL_LOCK:
                 reg = load_external_registry()
-                if pid in reg['projects']:
-                    del reg['projects'][pid]
-                    save_external_registry(reg)
-            self.send_json_response({'ok': True})
-        except Exception as e:
-            self.send_error_response(str(e))
+                entry = self.external_library_entry(reg, pid)
+                if not entry or not hide and pid not in reg['hiddenProjects']:
+                    self.send_json_status({'ok': False, 'error': '项目不存在或已不在该列表'}, 404)
+                    return
+                if hide:
+                    reg['hiddenProjects'].setdefault(pid, {'root': entry['root'], 'name': entry.get('name', ''),
+                        'createdAt': entry.get('createdAt', ''), 'hiddenAt': proto_meta.now_iso()})
+                else:
+                    if entry.get('discovered'):
+                        root = Path(entry['root'])
+                        if not root.is_dir() or proto_meta.is_linked_path(root) or proto_meta.skip_scan_directory(root) or not proto_meta.discover_pages(root):
+                            raise ValueError('项目目录不存在或没有可用 HTML 页面，暂时无法显示到首页')
+                        if not any(Path(base).resolve() in {root.resolve(), root.resolve().parent} for base in reg['roots']):
+                            reg['roots'].append(str(root.resolve()))
+                    reg['hiddenProjects'].pop(pid)
+                save_external_registry(reg)
+            self.send_json_response({'ok': True, 'hidden': hide})
+        except (ValueError, OSError) as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 400)
 
     def handle_external_delete(self):
         """删除登记项目并连带删除本地文件夹（前端二次确认，服务端再做路径安全校验）"""
@@ -4139,12 +4275,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             pid = str(data.get('projectId', ''))
             with EXTERNAL_LOCK:
                 reg = load_external_registry()
-                entry = reg['projects'].get(pid)
+                entry = self.external_library_entry(reg, pid)
                 if not entry:
-                    self.send_json_status({'ok': False, 'error': '项目未登记或已被移除'}, 404)
+                    self.send_json_status({'ok': False, 'error': '项目未登记、未发现或已被移除'}, 404)
                     return
                 snapshot = dict(entry)
                 others = {k: dict(v) for k, v in reg['projects'].items() if k != pid}
+                others.update({k: dict(v) for k, v in reg['hiddenProjects'].items() if k != pid and k not in others})
+                candidates, _ = proto_meta.scan_roots(reg['roots'], reg['projects'])
+                others.update({item['projectId']: item for item in candidates if item['projectId'] != pid and item['projectId'] not in others})
                 watched_roots = list(reg['roots'])
             source = Path(snapshot.get('root', ''))
             if proto_meta.is_linked_path(source):
@@ -4155,11 +4294,16 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             except OSError:
                 self.send_json_status({'ok': False, 'error': '路径无效'}, 400)
                 return
+            if data.get('expectedRoot') is not None and Path(data['expectedRoot']).resolve() != root:
+                self.send_json_status({'ok': False, 'error': '项目路径已变化，请刷新后重新确认'}, 409)
+                return
             if not root.is_dir():
                 # 目录本就不存在：只移除登记，保持列表与磁盘一致
                 with EXTERNAL_LOCK:
                     reg = load_external_registry()
                     reg['projects'].pop(pid, None)
+                    reg['hiddenProjects'].pop(pid, None)
+                    reg['roots'] = [r for r in reg['roots'] if Path(r).resolve() != root]
                     save_external_registry(reg)
                 self.send_json_response({'ok': True, 'folderDeleted': False, 'root': str(root),
                                          'publishedUrl': snapshot.get('github_url', '')})
@@ -4178,8 +4322,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                         other_root = Path(other.get('root', '')).resolve()
                     except OSError:
                         continue
-                    if root in other_root.parents:
-                        problems.append(f'该文件夹内还有已登记的项目「{other.get("name") or other_root.name}」，请先移除')
+                    if root == other_root or root in other_root.parents:
+                        problems.append(f'该文件夹内还有已登记、新发现或已隐藏的项目「{other.get("name") or other_root.name}」，请先单独处理')
                         break
             if not problems:
                 for text in watched_roots:
@@ -4201,10 +4345,13 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             with EXTERNAL_LOCK:
                 reg = load_external_registry()
                 reg['projects'].pop(pid, None)
-                reg['roots'] = [r for r in reg['roots'] if proto_meta.project_id_for(Path(r)) != pid]
+                reg['hiddenProjects'].pop(pid, None)
+                reg['roots'] = [r for r in reg['roots'] if Path(r).resolve() != root]
                 save_external_registry(reg)
             self.send_json_response({'ok': True, 'folderDeleted': True, 'root': str(root),
                                      'publishedUrl': snapshot.get('github_url', '')})
+        except (ValueError, TypeError) as e:
+            self.send_json_status({'ok': False, 'error': str(e)}, 400)
         except Exception as e:
             print(f'[外部项目删除错误] {e}')
             self.send_error_response(str(e))
@@ -4232,10 +4379,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.send_error(404)
             return
         suffix = target.suffix.lower()
+        screenshot_html = None
         if suffix in ('.html', '.htm'):
             if proto_meta.meta_dir(root).joinpath('project.json').exists():
                 try:
                     bundle = proto_meta.load_bundle(root)
+                    screenshot_page = next((p for p in bundle['project']['pages'] if p.get('kind') == 'screenshot' and p['file'].casefold() == rel.replace('\\', '/').casefold() and not p.get('trashedAt')), None)
+                    if screenshot_page:
+                        import screenshot_pages
+                        screenshot_html = screenshot_pages.render_page(screenshot_page, bundle['project'])
                     if any(p.get('trashedAt') and p['file'].casefold() == rel.replace('\\', '/').casefold() for p in bundle['project']['pages']):
                         self.send_error(404, 'Page is in recycle bin')
                         return
@@ -4249,9 +4401,11 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             ctype = 'text/css; charset=utf-8'
         else:
             ctype = mimetypes.guess_type(str(target))[0] or 'application/octet-stream'
-        raw = target.read_bytes()
+        raw = screenshot_html.encode('utf-8') if screenshot_html is not None else target.read_bytes()
         if suffix in ('.html', '.htm'):
-            raw = review_export.inject_hotspot_bootstrap(raw.decode('utf-8', errors='surrogateescape')).encode('utf-8', errors='surrogateescape')
+            import proto_text_edit
+            text = proto_text_edit.upgrade_runtime_html(raw.decode('utf-8', errors='surrogateescape'))
+            raw = review_export.inject_hotspot_bootstrap(text).encode('utf-8', errors='surrogateescape')
         self.send_response(200)
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(raw)))
@@ -4310,6 +4464,70 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         except (ValueError, OSError) as error:
             self.send_json_status({'ok': False, 'error': str(error)}, 400)
 
+    def handle_proto_import_html(self, replace=False):
+        import html_import
+        try:
+            if int(self.headers.get('Content-Length',0)) > 42 * 1024 * 1024:
+                self.send_json_status({'ok':False,'error':'导入文件合计不能超过 30 MB'},413)
+                return
+            data=self.read_json_body()
+            if not isinstance(data,dict):raise ValueError('导入参数必须为对象')
+            pid=data.get('projectId')
+            if not isinstance(pid,str):raise ValueError('项目无效')
+            if not self.require_registered_project_access(pid):return
+            root=external_root_for(pid)
+            if root is None:raise FileNotFoundError('项目未登记或目录已失效')
+            operation=html_import.replace_page if replace else html_import.import_page
+            self.send_json_response(operation(root,data))
+        except html_import.RevisionConflict as error:
+            self.send_json_status({'ok':False,'conflict':True,'error':str(error),'current':error.current},409)
+        except FileNotFoundError as error:
+            self.send_json_status({'ok':False,'error':str(error)},404)
+        except (ValueError,OSError) as error:
+            self.send_json_status({'ok':False,'error':str(error)},400)
+
+    def handle_proto_screenshot(self, action):
+        import screenshot_pages
+        try:
+            if int(self.headers.get('Content-Length', 0)) > 14 * 1024 * 1024:
+                self.send_json_status({'ok': False, 'error': '截图不能超过 10 MB'}, 413)
+                return
+            data = self.read_json_body()
+            pid = data.get('projectId')
+            if not isinstance(pid, str): raise ValueError('项目无效')
+            if not self.require_registered_project_access(pid): return
+            root = external_root_for(pid)
+            if root is None: raise FileNotFoundError('项目未登记或目录已失效')
+            self.send_json_response(screenshot_pages.mutate(root, action, data))
+        except screenshot_pages.RevisionConflict as error:
+            self.send_json_status({'ok':False, 'conflict':True, 'error':str(error), 'current':error.current}, 409)
+        except FileNotFoundError as error:
+            self.send_json_status({'ok':False, 'error':str(error)}, 404)
+        except (ValueError, OSError) as error:
+            self.send_json_status({'ok':False, 'error':str(error)}, 400)
+
+    def handle_proto_text_edit(self, action):
+        import proto_text_edit
+        try:
+            data = self.read_json_body()
+            pid = data.get('projectId')
+            if not isinstance(pid, str): raise ValueError('项目无效')
+            if not self.require_registered_project_access(pid): return
+            root = external_root_for(pid)
+            if root is None: raise FileNotFoundError('项目未登记或目录已失效')
+            if action == 'inspect': result = proto_text_edit.inspect_text(root, data.get('pageId'), data.get('target'))
+            elif action == 'save': result = proto_text_edit.save_text(root, data.get('pageId'), data.get('target'), data.get('expectedHash'), data.get('edits'))
+            else: result = proto_text_edit.undo_text(root, data.get('pageId'), data.get('undoId'), data.get('expectedHash'))
+            self.send_json_response(result)
+        except proto_text_edit.EditConflict as error:
+            self.send_json_status({'ok': False, 'conflict': True, 'error': str(error)}, 409)
+        except proto_text_edit.UnsupportedText as error:
+            self.send_json_status({'ok': False, 'unsupported': True, 'error': str(error)}, 422)
+        except FileNotFoundError as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 404)
+        except (ValueError, OSError) as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 400)
+
     def handle_proto_page_lifecycle(self):
         import page_lifecycle
         try:
@@ -4351,6 +4569,15 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json_status({'ok': False, 'error': '不能覆盖其他项目'}, 400)
                 return
             incoming_pages = {page['id']: page for page in incoming['project']['pages']}
+            current_pages = {page['id']:page for page in current['project']['pages']}
+            for page in incoming['project']['pages']:
+                old = current_pages.get(page['id'], {})
+                if 'htmlImport' in page or 'htmlImport' in old:
+                    if any(page.get(key) != old.get(key) for key in ('htmlImport','file')):
+                        raise ValueError('HTML 导入资源清单不能通过普通保存修改')
+                if page.get('kind') == 'screenshot' or old.get('kind') == 'screenshot':
+                    if any(page.get(key) != old.get(key) for key in ('kind','screenshot','file')):
+                        raise ValueError('截图资源与矩形热区请使用截图编辑操作')
             if any(page['id'] not in incoming_pages or page.get('trashedAt') != incoming_pages[page['id']].get('trashedAt') for page in current['project']['pages']):
                 raise ValueError('移入回收站、恢复与彻底删除请使用页面回收站操作')
             # confirmed 只锁标注：页面需求文档可随时双击编辑（用户裁定 2026-09-28），故文档不参与已确认保护
@@ -4871,15 +5098,17 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 
     def generate_index_html(self, manifest, username, repo):
         """生成 projects/index.html 列表页 HTML"""
+        import html
         mode_labels = {'preview': '纯净版', 'pure': '纯净版', 'dev': '研发版', 'review': '研发版'}
         mode_colors = {'preview': '#3b82f6', 'pure': '#3b82f6', 'dev': '#8b5cf6', 'review': '#8b5cf6'}
 
         cards_html = ''
         sorted_items = sorted(manifest, key=lambda x: x.get('publishedAt', ''), reverse=True)
         for item in sorted_items:
-            name = item.get('name', '未命名项目')
-            url = item.get('url', '#')
-            published_at = item.get('publishedAt', '')[:10]
+            name = html.escape(str(item.get('name', '未命名项目')), quote=True)
+            raw_url = str(item.get('url', ''))
+            url = html.escape(urllib.parse.quote(raw_url, safe=':/?&=#%@+-._~'), quote=True) if urllib.parse.urlsplit(raw_url).scheme in ('http', 'https') else '#'
+            published_at = html.escape(str(item.get('publishedAt', ''))[:10], quote=True)
             mode = item.get('mode', 'preview')
             mode_label = mode_labels.get(mode, '已发布')
             mode_color = mode_colors.get(mode, '#6b7280')
@@ -5035,102 +5264,14 @@ function copyLink(url, btn) {{
             index_payload['sha'] = existing_index.json().get('sha', '')
         session.put(index_api_url, json=index_payload, timeout=30)
         print(f"[GitHub] projects/index.html 已更新")
+        import github_pages
+        github_pages.invalidate()
 
     # ==================== 取消发布 API ====================
 
     def handle_github_unpublish(self):
-        """取消发布：删除 GitHub 上的项目文件，更新列表页"""
-        try:
-            content_length = int(self.headers['Content-Length'])
-            body = self.rfile.read(content_length)
-            data = json.loads(body.decode('utf-8'))
-
-            project_id = data.get('projectId', '')
-            if not project_id:
-                self.send_error_response("缺少 projectId")
-                return
-
-            gh = get_github_runtime_config()
-            token = gh.get('token', '')
-            username = gh.get('username', '')
-            repo = gh.get('repo', 'my-prototypes')
-
-            if not token or not username:
-                self.send_error_response("请先配置 GitHub Token")
-                return
-
-            from requests.adapters import HTTPAdapter
-            from urllib3.util.retry import Retry
-            retry_strategy = Retry(total=3, backoff_factor=1, connect=3, read=3,
-                                   status_forcelist=[500, 502, 503, 504],
-                                   allowed_methods=["GET", "PUT", "POST", "DELETE"])
-            session = requests.Session()
-            session.mount('https://', HTTPAdapter(max_retries=retry_strategy))
-            session.headers.update({
-                'Authorization': f'token {token}',
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json'
-            })
-
-            api_base = 'https://api.github.com'
-
-            # 获取默认分支
-            repo_info = session.get(f"{api_base}/repos/{username}/{repo}", timeout=15).json()
-            default_branch = repo_info.get('default_branch', 'main')
-
-            # 列出 projects/{id}/ 下的所有文件并逐一删除
-            print(f"[GitHub] 取消发布: {project_id}")
-            folder_url = f"{api_base}/repos/{username}/{repo}/contents/projects/{project_id}"
-            files_resp = session.get(folder_url, timeout=15)
-            if files_resp.status_code == 200:
-                files = files_resp.json()
-                # 如果有子目录（如 images/），需要递归列出
-                all_files = []
-                for f in files:
-                    if f.get('type') == 'file':
-                        all_files.append(f)
-                    elif f.get('type') == 'dir':
-                        sub_resp = session.get(f['url'], timeout=15)
-                        if sub_resp.status_code == 200:
-                            all_files.extend([sf for sf in sub_resp.json() if sf.get('type') == 'file'])
-
-                for f in all_files:
-                    del_resp = session.delete(f['url'], json={
-                        'message': f'Remove prototype: {project_id}',
-                        'sha': f['sha'],
-                        'branch': default_branch
-                    }, timeout=20)
-                    if del_resp.status_code in (200, 201):
-                        print(f"[GitHub] 已删除: {f['path']}")
-                    else:
-                        print(f"[GitHub] 删除失败: {f['path']} ({del_resp.status_code})")
-
-            # 更新列表页（传 remove=True）
-            self.update_github_listing(
-                session, api_base, username, repo, default_branch,
-                project_id=project_id, project_name='', project_url='', mode='', remove=True
-            )
-
-            # 清除本地 record.json 中的 github_url
-            project_dir = os.path.join(PROJECTS_DIR, project_id)
-            record_path = os.path.join(project_dir, 'record.json')
-            if os.path.exists(record_path):
-                with open(record_path, 'r', encoding='utf-8') as f:
-                    record = json.load(f)
-                record.pop('github_url', None)
-                record.pop('github_published_at', None)
-                record.pop('github_mode', None)
-                with open(record_path, 'w', encoding='utf-8') as f:
-                    json.dump(record, f, ensure_ascii=False, indent=2)
-                print(f"[GitHub] 本地 record.json 已清除 github_url")
-
-            self.send_json_response({'success': True, 'message': '已取消发布，GitHub 文件已删除'})
-
-        except Exception as e:
-            print(f"[错误] 取消发布失败: {e}")
-            import traceback
-            traceback.print_exc()
-            self.send_error_response(f"取消发布失败: {str(e)}")
+        """旧 AI 调用方复用原子取消发布。"""
+        self.handle_pages_unpublish('legacy')
 
     # ==================== 导出 API ====================
 
@@ -5666,69 +5807,111 @@ function copyLink(url, btn) {{
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
     def handle_ext_unpublish(self):
-        """取消发布外部项目评审壳：远端删除 + 列表移除 + 本地记录清除。"""
+        """当前原型与发布管理共用远端结果校验。"""
+        self.handle_pages_unpublish('ext')
+
+    def pages_runtime(self):
+        gh = get_github_runtime_config()
+        if not gh.get('token') or not gh.get('username'):
+            raise ValueError('请先配置 GitHub Token 和仓库')
+        return gh, github_api_session(gh['token'])
+
+    def handle_pages_overview(self, query):
+        import github_pages
+        try:
+            gh, session = self.pages_runtime()
+            result = github_pages.read_catalog(session, gh['username'], gh.get('repo', 'my-prototypes'),
+                cache_key=gh['token'], refresh=query.get('refresh', [''])[0] == '1')
+            self.send_json_response(result['public'])
+        except github_pages.PagesError as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, error.status)
+        except ValueError as error:
+            self.send_json_status({'ok': False, 'error': str(error), 'needGithubConfig': True}, 400)
+        except Exception:
+            self.send_json_status({'ok': False, 'error': '无法完整读取远端发布信息，请稍后重试'}, 502)
+
+    def handle_pages_unpublish(self, source):
+        import github_pages
         try:
             data = self.read_json_body()
-        except Exception:
-            self.send_json_status({'ok': False, 'error': '请求体不是有效 JSON'}, 400)
-            return
-        pid = str(data.get('extId', ''))
-        if not self.require_registered_project_access(pid):
-            return
-        registry = load_external_registry()
-        if pid not in registry['projects']:
-            self.send_json_status({'ok': False, 'error': '项目未登记'}, 404)
-            return
-        gh = get_github_runtime_config()
-        token, username, repo = gh.get('token', ''), gh.get('username', ''), gh.get('repo', 'my-prototypes')
-        if not token or not username:
-            self.send_json_status({'ok': False, 'error': '需要先配置 GitHub Token 才能取消发布',
-                                   'needGithubConfig': True}, 400)
-            return
-        try:
-            api_base = 'https://api.github.com'
-            session = github_api_session(token)
-            repo_info = session.get(f"{api_base}/repos/{username}/{repo}", timeout=15).json()
-            default_branch = repo_info.get('default_branch', 'main')
-            print(f"[GitHub] 取消发布评审壳: {pid}")
-            remote_id = registry['projects'][pid].get('github_remote_id') or pid
-            # 递归列出 projects/<extId>/ 下所有文件并逐一删除
-            pending = [f"{api_base}/repos/{username}/{repo}/contents/projects/{remote_id}"]
-            while pending:
-                resp = session.get(pending.pop(), timeout=15)
-                if resp.status_code != 200:
-                    continue
-                for f in resp.json():
-                    if f.get('type') == 'dir':
-                        pending.append(f['url'])
-                    elif f.get('type') == 'file':
-                        del_resp = session.delete(f['url'], json={
-                            'message': f'Remove prototype: {pid}',
-                            'sha': f['sha'],
-                            'branch': default_branch
-                        }, timeout=20)
-                        if del_resp.status_code in (200, 201):
-                            print(f"[GitHub] 已删除: {f['path']}")
-                        else:
-                            print(f"[GitHub] 删除失败: {f['path']} ({del_resp.status_code})")
-            try:
-                self.update_github_listing(session, api_base, username, repo, default_branch,
-                                           project_id=remote_id, project_name='', project_url='', mode='', remove=True)
-            except Exception as e:
-                print(f"[GitHub] 警告: 更新列表页失败（非致命错误）: {e}")
-            item = registry['projects'].get(pid)
-            if item:
-                item.pop('github_url', None)
-                item.pop('github_published_at', None)
-                item.pop('github_publish_mode', None)
+            registry = load_external_registry()
+            if source == 'ext' and data.get('extId') not in registry['projects']:
+                self.send_json_status({'ok': False, 'error': '项目未登记'}, 404)
+                return
+            selected = registry['projects'].get(data.get('extId')) if source == 'ext' else None
+            if selected and selected.get('source') == 'ai' and not self.require_ai_project_access(selected['aiProjectId']): return
+            if source == 'legacy' and not self.require_ai_project_access(data.get('projectId')): return
+            gh, session = self.pages_runtime()
+            owner, repo = gh['username'], gh.get('repo', 'my-prototypes')
+            if source == 'manager':
+                if data.get('repository') != owner+'/'+repo:
+                    raise github_pages.Conflict('GitHub 仓库配置已变化，请刷新管理页后重新确认')
+                if not isinstance(data.get('expectedHead'), str) or not data['expectedHead']:
+                    raise ValueError('缺少远端版本，请刷新后重试')
+                remote_id = data.get('projectId')
+                if not isinstance(remote_id, str) or not remote_id: raise ValueError('项目目录 ID 无效')
+                if globals().get('db'):
+                    user = self.get_current_user()
+                    if user and db.get_project_owner(remote_id) is not None and not db.can_user_access_project(remote_id, user['id']):
+                        self.send_json_status({'ok': False, 'error': '无权管理此历史项目'}, 403)
+                        return
+            elif source == 'ext':
+                pid = data.get('extId')
+                selected = registry['projects'].get(pid)
+                if not selected:
+                    self.send_json_status({'ok': False, 'error': '项目未登记'}, 404)
+                    return
+                remote_id = selected.get('github_remote_id') or pid
+            else:
+                remote_id = data.get('projectId')
+            # 本地文件已删除的历史项目仍可清理；已登记的团队项目继续校验归属。
+            matches = [(pid, item) for pid, item in registry['projects'].items()
+                       if (item.get('github_remote_id') or pid) == remote_id]
+            for _, item in matches:
+                if item.get('source') == 'ai' and not self.require_ai_project_access(item['aiProjectId']): return
+            result = github_pages.unpublish(session, owner, repo, remote_id, data.get('expectedHead'), self.generate_index_html,
+                                            expected_url=selected.get('github_url', '') if selected else '')
+            urls = {f'https://{owner}.github.io/{repo}/projects/{remote_id}/'}
+            pages_url = result['overview'].get('pagesUrl')
+            if pages_url: urls.add(pages_url.rstrip('/')+'/projects/'+str(remote_id)+'/')
+            changed = []
+            for _, item in matches:
+                if item is selected or item.get('github_url') in urls or item.get('github_repository') == owner+'/'+repo:
+                    for key in ('github_url', 'github_published_at', 'github_publish_mode', 'github_repository'):
+                        item.pop(key, None)
+                    changed.append(item)
+            if changed:
                 save_external_registry(registry)
-                self.sync_ai_publication(item)
-            self.send_json_response({'ok': True, 'message': '已取消发布，GitHub 文件已删除'})
-        except Exception as e:
-            print(f"[错误] 取消评审壳发布失败: {e}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_status({'ok': False, 'error': f'取消发布失败: {e}'}, 500)
+                for item in changed:
+                    if item.get('source') != 'ai' or Path(item.get('root', '')).is_dir(): self.sync_ai_publication(item)
+            if globals().get('PROJECTS_DIR'):
+                try:
+                    legacy_root = self.safe_ai_project_root(remote_id)
+                except (ValueError, OSError):
+                    legacy_root = None
+                if legacy_root is not None and (legacy_root / 'record.json').is_file():
+                    record = proto_meta.read_json(legacy_root / 'record.json', {})
+                    if source == 'legacy' or record.get('github_url') in urls or record.get('github_repository') == owner+'/'+repo:
+                        for key in ('github_url', 'github_published_at', 'github_mode', 'github_publish_mode', 'github_repository'):
+                            record.pop(key, None)
+                        proto_meta.write_json_atomic(legacy_root / 'record.json', record)
+                if globals().get('PROJECTS_FILE'):
+                    listing = proto_meta.read_json(Path(PROJECTS_FILE), [])
+                    if isinstance(listing, list):
+                        updated = False
+                        for item in listing:
+                            if isinstance(item, dict) and item.get('id') == remote_id and (source == 'legacy' or item.get('github_url') in urls or item.get('github_repository') == owner+'/'+repo):
+                                for key in ('github_url', 'github_published_at', 'github_mode', 'github_publish_mode', 'github_repository'):
+                                    updated = item.pop(key, None) is not None or updated
+                        if updated: proto_meta.write_json_atomic(Path(PROJECTS_FILE), listing)
+            result.update(success=True, message='已提交取消发布，Pages 重新部署后生效')
+            self.send_json_response(result)
+        except github_pages.PagesError as error:
+            self.send_json_status({'ok': False, 'success': False, 'error': str(error)}, error.status)
+        except (ValueError, TypeError) as error:
+            self.send_json_status({'ok': False, 'success': False, 'error': str(error), 'needGithubConfig': 'gh' not in locals()}, 400)
+        except Exception:
+            self.send_json_status({'ok': False, 'success': False, 'error': '取消发布或后续同步未能完成，请刷新检查远端与本地状态后重试'}, 502)
 
 
 class PrototypeHTTPServer(http.server.ThreadingHTTPServer):
@@ -5740,18 +5923,25 @@ class PrototypeHTTPServer(http.server.ThreadingHTTPServer):
         super().server_bind()
 
 try:
-    with PrototypeHTTPServer(("", PORT), CustomHandler) as httpd:
+    with server_lifecycle.running_server(lambda address: PrototypeHTTPServer(address, CustomHandler), ("", PORT), get_base_path()) as httpd:
         print(f"=" * 50)
         print(f"原型生成器服务启动")
         print(f"地址: http://localhost:{PORT}/src/")
         print(f"项目目录: {os.path.abspath(PROJECTS_DIR)}")
         print(f"=" * 50)
+        if '--open-browser' in sys.argv:
+            import webbrowser
+            webbrowser.open(f'http://localhost:{PORT}/src/index.html')
         httpd.serve_forever()
+        print('[INFO] 旧实例已关闭')
 except KeyboardInterrupt:
     print("\n服务已停止")
+except server_lifecycle.PortInUse as e:
+    print(f"\n启动失败: {e}")
+    sys.exit(1)
 except OSError as e:
     if e.errno in (48, 98, 10013, 10048):
-        print(f"\n端口 {PORT} 已被占用，请先关闭旧的原型生成器服务，再重新启动。")
+        print(f"\n端口 {PORT} 暂时无法使用，请检查其他程序的端口占用。")
     else:
         print(f"\n服务错误: {e}")
     sys.exit(1)

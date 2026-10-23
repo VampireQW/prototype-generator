@@ -14,7 +14,7 @@
     "targets": [{"protoId":"btn-refresh","requirementIds":["R1"]}],
     "stateId": "default",            # 可省，默认 default；必须是该页已登记的状态
     "document": {"goals":[{"requirementId":"R1","text":"便于手动获取当前列表的最新结果。"}]},
-    "hotspots": ["btn-refresh"],      # 仅本次改变的真实交互，省略为无提示
+    "hotspots": ["btn-refresh"],      # 明确替换为本次真实交互；省略保留，[] 清空
     "annotations": [{"protoId":"btn-refresh","items":[{"section":"交互说明","requirementId":"R1","markdown":"1. 点击刷新当前列表。"}]}]
   }],
   "unknowns": ["……"]                 # 待确认清单，只回显不落库
@@ -24,7 +24,7 @@
 - protoId 必须在该页 HTML 中恰好出现一次，否则整份草稿不落库（--skip-missing 改为跳过并报告）。
 - 默认只处理 scope 中本次需求；旧版本或过期草稿拒绝导入。
 - 相同 protoId 默认跳过，显式 update 更新未确认正文，手动删除不自动恢复。
-- 点击提示只按单独列出的本次 hotspots 保存，缺省不提示；整页提示必须独立明确开启。
+- 点击提示独立更新：省略保留，hotspots 替换，[] 或 hotspotAction:clear 清空；新页缺省无提示。
 - 页面文档：目标已有非空正文 → 跳过（--replace-doc 才覆盖）；confirmed 的文档永不覆盖。
 - 新标注 confirmed:false，落点在元素左侧中点（rx=0, ry=0.5），用户可在工作台拖动。
 - 成功后三文件 revision +1，草稿移入 .prototype/imported/ 留档。
@@ -50,6 +50,15 @@ import proto_meta  # noqa: E402
 DRAFT_VERSION = 3
 DRAFT_NAME = 'prd.draft.json'
 VOID_TAGS = {'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr'}
+CONTROL_TAGS = {'button', 'a', 'area', 'input', 'select', 'textarea', 'summary'}
+CONTROL_ROLES = {'button', 'link', 'checkbox', 'radio', 'switch', 'tab', 'menuitem', 'option', 'combobox', 'slider', 'textbox'}
+ACTION_ATTRS = {'onclick', 'onpointerdown', 'onpointerup', 'onmousedown', 'onmouseup', 'ontouchend'}
+
+
+def _control_node(tag, attrs):
+    return (tag in CONTROL_TAGS and not (tag == 'input' and attrs.get('type') == 'hidden')
+            or attrs.get('role') in CONTROL_ROLES or attrs.get('data-proto-hotspot') == 'true'
+            or any(attrs.get(key) for key in ACTION_ATTRS))
 
 
 class ImportError_(ValueError):
@@ -64,15 +73,21 @@ class _ProtoIdScanner(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.found: dict[str, list[dict[str, Any]]] = {}
-        self._open: list[tuple[str, dict[str, Any] | None]] = []   # (tag, record)；非 protoId 元素 record 为 None
+        self._open: list[tuple[str, dict[str, Any] | None, dict]] = []
         self._skip = 0                                              # script/style 深度，内文不算文本
 
     def handle_starttag(self, tag, attrs):
         attrs = dict(attrs)
         record = None
         pid = (attrs.get('data-proto-id') or '').strip()
+        if not self._skip and _control_node(tag, attrs):
+            for _, parent, _ in self._open:
+                if parent is not None:
+                    parent.setdefault('childControls', []).append(pid or tag)
         if pid:
             record = {'tag': tag, 'text': '', 'attrs': attrs}
+            if attrs.get('data-proto-hotspot') == 'false' or any(a.get('data-proto-hotspot') == 'false' for _, _, a in self._open):
+                record['hotspotBlocked'] = True
             self.found.setdefault(pid, []).append(record)
         if tag in VOID_TAGS:
             if record is not None:
@@ -80,7 +95,7 @@ class _ProtoIdScanner(HTMLParser):
             return
         if tag in ('script', 'style'):
             self._skip += 1
-        self._open.append((tag, record))
+        self._open.append((tag, record, attrs))
 
     def handle_startendtag(self, tag, attrs):
         self.handle_starttag(tag, attrs)
@@ -94,14 +109,14 @@ class _ProtoIdScanner(HTMLParser):
         for i in range(len(self._open) - 1, -1, -1):
             if self._open[i][0] == tag:
                 del self._open[i:]
-                self._skip = sum(1 for t, _ in self._open if t in ('script', 'style'))
+                self._skip = sum(1 for t, _, _ in self._open if t in ('script', 'style'))
                 return
 
     def handle_data(self, data):
         if self._skip or not data.strip():
             return
         piece = re.sub(r'\s+', ' ', data)
-        for _tag, rec in self._open:
+        for _tag, rec, _attrs in self._open:
             if rec is not None:
                 rec['text'] += piece
 
@@ -240,6 +255,43 @@ def _state_check(page: dict[str, Any], state_id: str, where: str) -> None:
         raise ImportError_(f'{where}：页面 {page["id"]} 没有状态 {state_id!r}；已登记：{", ".join(s["id"] for s in page["states"])}')
 
 
+def hotspot_action(scope, entry, where):
+    """Omission is a patch; an explicit list is a replacement, never an implicit merge."""
+    action = entry.get('hotspotAction')
+    if action is not None and action not in ('preserve', 'replace', 'clear'):
+        raise ImportError_(f'{where}.hotspotAction 只支持 preserve/replace/clear')
+    mode = scope.get('hotspotMode', 'delta')
+    if mode in ('full', 'off'):
+        required = 'replace' if mode == 'full' else 'clear'
+        if action is not None and action != required:
+            raise ImportError_(f'{where}.hotspotAction 与 scope.hotspotMode 冲突')
+        if mode == 'off' and entry.get('hotspots'):
+            raise ImportError_(f'{where}.hotspots 非空但 hotspotMode 为 off')
+        return required
+    action = action or ('replace' if 'hotspots' in entry else 'preserve')
+    if action == 'preserve' and 'hotspots' in entry:
+        raise ImportError_(f'{where}.hotspotAction 为 preserve 时应省略 hotspots，避免忽略清单')
+    if action == 'replace' and 'hotspots' not in entry:
+        raise ImportError_(f'{where}.hotspotAction 为 replace 时必须提供 hotspots；清空请用 [] 或 clear')
+    if action == 'clear' and entry.get('hotspots'):
+        raise ImportError_(f'{where}.hotspotAction 为 clear 时不能填写非空 hotspots')
+    return action
+
+
+def check_hotspot_node(hit, where):
+    if hit.get('hotspotBlocked'):
+        raise ImportError_(f'{where} 被自身或祖先的 data-proto-hotspot="false" 排除，不能登记为点击提示')
+    if hit.get('childControls') and hit['tag'] not in CONTROL_TAGS:
+        raise ImportError_(f'{where} 是包含其他控件的容器，请改绑具体操作节点：{", ".join(hit["childControls"][:6])}')
+    attrs, tag = hit['attrs'], hit['tag']
+    if (attrs.get('data-proto-hotspot') == 'true' or any(attrs.get(key) for key in ACTION_ATTRS)
+            or tag in ('select', 'summary')
+            or tag == 'input' and attrs.get('type') in ('checkbox', 'radio', 'file', 'color', 'range', 'submit', 'reset')
+            or tag in ('a', 'area') and attrs.get('href', '').strip() not in ('', '#') and not attrs.get('href', '').lower().startswith('javascript:')):
+        return 'declared'
+    return 'runtime-check'
+
+
 def validate_draft_scope(draft):
     if not isinstance(draft, dict) or draft.get('schemaVersion') != DRAFT_VERSION:
         raise ImportError_(f'草稿 schemaVersion 必须为 {DRAFT_VERSION}；旧草稿需按本次需求重写 scope，不能直接重放历史标注')
@@ -281,6 +333,7 @@ def validate_draft_scope(draft):
             raise ImportError_(f'{where} 必须为对象')
         if not (entry.get('file') or entry.get('pageId')):
             raise ImportError_(f'{where}：缺 file 或 pageId')
+        hotspot_action(scope, entry, where)
         removals = entry.get('removals', [])
         if not isinstance(removals, list) or any(not isinstance(item, dict) or not isinstance(item.get('annotationId'), str) or not item['annotationId'].strip() or not isinstance(item.get('reason'), str) or not item['reason'].strip() for item in removals):
             raise ImportError_(f'{where}.removals 必须点名现存 annotationId 并说明误写原因，不能整页清空')
@@ -372,7 +425,8 @@ def import_draft(root: Path, draft: dict[str, Any], *, replace_doc: bool = False
     viewer = viewer_origin.rstrip('/') + '/src/viewer.html'
     report: dict[str, Any] = {'root': str(root), 'projectId': bundle['project']['id'], 'projectName': bundle['project'].get('name') or root.name,
                               'viewerUrl': viewer + '?' + urlencode({'ext': bundle['project']['id']}), 'pages': [], 'revisionBefore': bundle['revision'],
-                              'scope': raw_scope, 'contentRefs': [], 'documents': [], 'annotations': [], 'removedAnnotations': [], 'hints': [], 'skipped': [], 'warnings': [], 'unknowns': list(draft.get('unknowns') or [])}
+                              'scope': raw_scope, 'contentRefs': [], 'documents': [], 'annotations': [], 'removedAnnotations': [], 'hints': [],
+                              'hintActions': [], 'hotspotChecks': [], 'skipped': [], 'warnings': [], 'unknowns': list(draft.get('unknowns') or [])}
     before_import = copy.deepcopy(bundle)
     problems: list[str] = []
     now = proto_meta.now_iso()
@@ -441,6 +495,8 @@ def import_draft(root: Path, draft: dict[str, Any], *, replace_doc: bool = False
                 valid_targets.append(pid)
             elif not skip_missing:
                 problems.append(f'{where}.targets：{pid} 不存在或不唯一')
+            else:
+                report['skipped'].append(f'{where}.targets：{pid} 不存在或不唯一，未登记点击提示')
         existing = [n for n in bundle['prd']['annotations'] if n['pageId'] == page['id'] and n['stateId'] == state_id]
         number = max((n.get('number') or 0 for n in existing), default=0)
         taken = {(n.get('anchor') or {}).get('protoId') for n in existing}
@@ -487,9 +543,26 @@ def import_draft(root: Path, draft: dict[str, Any], *, replace_doc: bool = False
             report['annotations'].append({'scope': scope, 'number': number, 'protoId': pid, 'tag': hit['tag'], 'text': hit['text'][:40]})
 
         hint_mode = draft['scope'].get('hotspotMode', 'delta')
-        hints = {'mode': 'all'} if hint_mode == 'full' else {'mode': 'targets', 'protoIds': [] if hint_mode == 'off' else [pid for pid in entry.get('hotspots', []) if pid in valid_targets]}
-        state = next(s for s in page['states'] if s['id'] == state_id)
-        if state.get('interactionHints') != hints:
+        action = hotspot_action(draft['scope'], entry, where)
+        hints = state.get('interactionHints') or {'mode': 'targets', 'protoIds': []}
+        if action != 'preserve':
+            selected = [] if action == 'clear' else [pid for pid in entry.get('hotspots', []) if pid in valid_targets]
+            for pid in selected:
+                try:
+                    status = check_hotspot_node(ids[pid][0], f'{scope} hotspot {pid}')
+                except ImportError_ as error:
+                    problems.append(str(error))
+                    continue
+                report['hotspotChecks'].append({'scope': scope, 'protoId': pid, 'status': status})
+                if status == 'runtime-check':
+                    report['warnings'].append(f'{scope} hotspot {pid} 静态 HTML 无法确认真实交互，请在工作台用 ProtoHotspots.inspect() 验证；祖先事件代理须在具体控件声明 data-proto-hotspot="true"')
+            hints = {'mode': 'all'} if hint_mode == 'full' else {'mode': 'targets', 'protoIds': selected}
+            previous = state.get('interactionHints') or {}
+            for field in ('manualTargets', 'excludedTargets'):
+                if field in previous and (action != 'clear' or field == 'excludedTargets'):
+                    hints[field] = copy.deepcopy(previous[field])
+        report['hintActions'].append({'scope': scope, 'action': action, **copy.deepcopy(hints)})
+        if action != 'preserve' and state.get('interactionHints') != hints:
             state['interactionHints'] = hints
             report['hints'].append({'scope': scope, **hints})
 
@@ -551,9 +624,14 @@ def format_report(report: dict[str, Any]) -> str:
         lines.append(f'  标注  {a["scope"]}  #{a["number"]}  {a["protoId"]}  <{a["tag"]}> {a["text"]}')
     for item in report.get('removedAnnotations', []):
         lines.append(f'  清理误注  {item["scope"]}  {item["annotationId"]}  {item["reason"]}')
-    for hints in report['hints']:
-        label = '整页（明确要求）' if hints['mode'] == 'all' else '、'.join(hints['protoIds']) or '无'
-        lines.append(f'  点击提示  {hints["scope"]}  {label}')
+    for hints in report.get('hintActions', report['hints']):
+        label = '整页（明确要求）' if hints['mode'] == 'all' else '、'.join(hints.get('protoIds', [])) or '无'
+        if hints.get('manualTargets') or hints.get('excludedTargets'):
+            label += f'（手动 {len(hints.get("manualTargets", []))}，排除 {len(hints.get("excludedTargets", []))}）'
+        action = {'preserve': '保留', 'replace': '替换', 'clear': '清空'}.get(hints.get('action'), '更新')
+        lines.append(f'  点击提示  {hints["scope"]}  {action}：{label}')
+    for item in report.get('hotspotChecks', []):
+        lines.append(f'  控件校验  {item["scope"]}  {item["protoId"]}  {item["status"]}')
     for s in report['skipped']:
         lines.append(f'  跳过  {s}')
     for w in report['warnings']:

@@ -258,7 +258,7 @@ def test_exact_hotspot_scope_never_inherits_container_authorization():
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const context={EventTarget:class{addEventListener(){}removeEventListener(){}}};context.window=context;
 vm.createContext(context);
-const source=fs.readFileSync(process.argv[1],'utf8').replace('window.ProtoHotspots = { init, show, hide, destroy }','window.ProtoHotspots = { init, show, hide, destroy, inScope }');
+const source=fs.readFileSync(process.argv[1],'utf8').replace('window.ProtoHotspots = { init, show, hide, destroy, inspect, candidate }','window.ProtoHotspots = { init, show, hide, destroy, inspect, candidate, inScope }');
 vm.runInContext(source,context);
 const table={getAttribute:()=> 'rs-table'},regrade={parentElement:table,getAttribute:()=> 'regrade'},reason={parentElement:table,getAttribute:()=> 'reason'};
 const scoped=context.ProtoHotspots.inScope;

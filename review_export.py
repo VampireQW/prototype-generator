@@ -13,6 +13,7 @@ copy_source 对齐（跳过点开头项与 EXCLUDED 名，拒绝越出项目根�
 from __future__ import annotations
 
 import html
+import hashlib
 import json
 import re
 import shutil
@@ -106,6 +107,8 @@ def render_shell(template: str, data: dict) -> str:
     out = template.replace("__PROJECT_TITLE__", html.escape(str(data.get("name", "原型项目")), quote=True))
     out = out.replace('__PROJECT_NAV_CSS__', (prototype_manifest.ASSETS_DIR / 'project-navigation.css').read_text(encoding='utf-8'))
     out = out.replace('__PROJECT_NAV_JS__', (prototype_manifest.ASSETS_DIR / 'project-navigation.js').read_text(encoding='utf-8'))
+    out = out.replace('__SIDEBAR_RESIZE_CSS__', (BASE_DIR / 'src/sidebar-resize.css').read_text(encoding='utf-8'))
+    out = out.replace('__SIDEBAR_RESIZE_JS__', (BASE_DIR / 'src/sidebar-resize.js').read_text(encoding='utf-8'))
     return out.replace("__REVIEW_DATA__", payload)
 
 
@@ -132,7 +135,7 @@ def inject_hotspot_bootstrap(text: str, *, inline: bool = False) -> str:
             raise ValueError(f'脚本 {name} 含 </script，无法内嵌')
         tag = f'<script data-prototype-owned {marker} data-proto-review="{key}">\n{source}\n</script>\n'
     else:
-        tag = f'<script data-prototype-owned {marker} src="/src/proto-hotspots.js?v=20261016-exact-hints"></script>\n'
+        tag = f'<script data-prototype-owned {marker} src="/src/proto-hotspots.js?v=20261016-manual-interactions"></script>\n'
     first_script = re.search(r'<script\b', text, re.I)
     head_end = re.search(r'</head\s*>', text, re.I)
     positions = [match.start() for match in (first_script, head_end) if match]
@@ -195,11 +198,20 @@ def build_review_export(root: Path, bundle: dict, out_dir: Path, published_at: s
     proto_dir.mkdir(parents=True, exist_ok=True)
     if not any(not p.get('trashedAt') and p.get('role') != 'launcher' for p in bundle['project']['pages']):
         raise ValueError('没有可导出的业务页面，请先从回收站恢复页面')
-    copied = copy_proto(root, proto_dir, ai_project=(bundle.get('project') or {}).get('source') == 'ai', excluded_files=[p['file'] for p in bundle['project']['pages'] if p.get('trashedAt')])
+    import screenshot_pages
+    import html_import
+    copied = copy_proto(root, proto_dir, ai_project=(bundle.get('project') or {}).get('source') == 'ai', excluded_files=[p['file'] for p in bundle['project']['pages'] if p.get('trashedAt')] + screenshot_pages.trashed_assets(bundle) + html_import.trashed_assets(bundle))
+    screenshot_pages.refresh_export(proto_dir, bundle)
     copied = sorted(set(copied + prototype_manifest.build_launcher(proto_dir, bundle)))
     injected = inject_proto_scripts(proto_dir, copied, bundle)
+    data = review_data(bundle, published)
+    # 版本包含最终 HTML 内嵌的工作台脚本；只改运行时、PRD revision 不变时也必须刷新 iframe。
+    data['prototypeVersions'] = {
+        rel: hashlib.sha256((proto_dir / rel).read_bytes()).hexdigest()[:20]
+        for rel in injected
+    }
     (out_dir / "index.html").write_text(
-        render_shell(template, review_data(bundle, published)), encoding="utf-8"
+        render_shell(template, data), encoding="utf-8"
     )
     return {
         "files": ["index.html", *(f"proto/{rel}" for rel in copied)],
@@ -221,10 +233,13 @@ def build_pure_export(root: Path, bundle: dict, out_dir: Path) -> dict:
         raise ValueError(f"项目目录不存在：{root}")
     if not any(not p.get('trashedAt') and p.get('role') != 'launcher' for p in bundle['project']['pages']):
         raise ValueError('没有可导出的业务页面，请先从回收站恢复页面')
-    copied = copy_proto(root, out_dir, ai_project=(bundle.get('project') or {}).get('source') == 'ai', excluded_files=[p['file'] for p in bundle['project']['pages'] if p.get('trashedAt')])
+    import screenshot_pages
+    import html_import
+    copied = copy_proto(root, out_dir, ai_project=(bundle.get('project') or {}).get('source') == 'ai', excluded_files=[p['file'] for p in bundle['project']['pages'] if p.get('trashedAt')] + screenshot_pages.trashed_assets(bundle) + html_import.trashed_assets(bundle))
+    screenshot_pages.refresh_export(out_dir, bundle)
     launcher_files = prototype_manifest.build_launcher(out_dir, bundle)
     copied = sorted(set(copied + launcher_files))
-    html_files = [rel for rel in copied if rel.lower().endswith(".html")]
+    html_files = [rel for rel in copied if rel.lower().endswith(HTML_SUFFIXES)]
     if not html_files:
         raise ValueError("项目里没有可发布的 HTML 页面")
     entry = "index.html"

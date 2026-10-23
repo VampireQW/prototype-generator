@@ -147,14 +147,14 @@ python -m playwright install chromium
 #### Windows
 双击 `启动项目.bat`
 
-更新后端功能后，先关闭旧服务，再重新启动，使新增接口生效。Windows 上重复启动会提示端口已被占用。
+更新后端后直接再次双击即可：新实例会自动通知同目录、同端口的旧实例退出，再启动新服务。正在保存或生成时先等待完成，最长约 5 分半，超时保留旧任务；不会按端口强杀其他程序。旧服务正常退出后，启动脚本不再停在“按任意键继续”。
 
 #### macOS/Linux
 ```bash
 python server.py
 ```
 
-启动成功后，浏览器会自动打开 `http://localhost:8080`
+Windows 启动脚本在新服务启动成功后自动打开首页，使用 `config.json` 中配置的端口（默认 `http://localhost:8080/src/index.html`）。直接运行 Python 时可附加 `--open-browser` 自动打开浏览器。
 
 ---
 
@@ -362,7 +362,7 @@ PROTOTYPE_GITHUB_TOKEN=你的_GitHub_Token python server.py
 3. 尝试使用代理或中转服务
 
 ### Q: 端口 8080 被占用
-**A:** 修改 `config.json` 中的 `port` 为其他端口（如 8888）。
+**A:** 同目录的新版原型生成器会自动完成交接。若被其他程序、另一份工具或不支持交接的历史版本占用，会保留原进程并显示原因；关闭明确的冲突程序，或修改 `config.json` 的 `server.port`（如 8888）。
 
 ---
 

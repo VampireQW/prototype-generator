@@ -98,13 +98,8 @@
                 border-left: 1px solid var(--border);
                 padding: 12px 16px 16px;
             }
-            /* PRD 区左缘拖拽条：拖动放大/缩小右栏（与编辑态一致）。中部常显一枚短握把，让“可拖”可被发现；悬停/拖动时整条亮主色。 */
+            /* PRD 区左缘保留透明拖动区域。 */
             #prd-resizer { position: absolute; left: 0; top: 0; bottom: 0; width: 10px; margin-left: -5px; cursor: ew-resize; touch-action: none; z-index: 6; }
-            #prd-resizer::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 2px; background: transparent; transition: background .12s ease-out; }
-            #prd-resizer::after { content: ""; position: absolute; left: 3px; top: 50%; width: 4px; height: 40px; margin-top: -20px; border-radius: 2px; background: var(--control); opacity: .55; transition: background .12s ease-out, opacity .12s ease-out; }
-            @media (hover: hover) { #prd-resizer:hover::before { background: var(--accent); } #prd-resizer:hover::after { background: var(--accent); opacity: 1; } }
-            #prd-resizer.resizing::before { background: var(--accent); }
-            #prd-resizer.resizing::after { background: var(--accent); opacity: 1; }
             .right-closed #prd-resizer, .prd-empty #prd-resizer { display: none; }
             aside h2 { font-size: 17px; margin: 0 0 4px; }
             details { border-bottom: 1px solid var(--border); padding: 7px 0; }
@@ -145,6 +140,8 @@
             .note .markdown > :last-child { margin-bottom: 0; }
             .note.stale { opacity: .55; cursor: default; }
             .note.flash { animation: note-flash 1.2s ease; }
+            .note.selected .note-head { background: var(--soft); border-radius: 6px; box-shadow: 0 0 0 4px var(--soft); }
+            .note.selected .note-no { outline: 2px solid var(--accent); outline-offset: 3px; }
             @keyframes note-flash { 0%, 45% { background: var(--soft); } 100% { background: transparent; } }
             .empty { margin: 40px; padding: 24px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
             [hidden] { display: none !important; }
@@ -154,15 +151,17 @@
             }
         </style>
         <style>__PROJECT_NAV_CSS__
-        :root{--left:256px}
-        .layout nav{display:flex;flex-direction:column;overflow:hidden}
+        .layout:not(.left-closed){--left:var(--page-nav-width,256px)}
+        .layout nav{position:relative;display:flex;flex-direction:column;overflow:hidden}
         .review-nav-header{display:flex;align-items:center;gap:8px;height:56px;flex:none;border-bottom:1px solid var(--border);padding:0 8px 0 16px}
         .review-project-name{flex:1;min-width:0;margin:0;font-size:14px;line-height:24px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .review-nav-header button{display:grid;place-items:center;flex:none;width:32px;height:32px;padding:7px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--muted)}
         #tree{flex:1;min-height:0;overflow:auto}.layout.left-closed .review-nav-header{padding:0 4px}
         .layout.left-closed .review-project-name{display:none}
         </style>
+        <style>__SIDEBAR_RESIZE_CSS__</style>
         <script>__PROJECT_NAV_JS__</script>
+        <script>__SIDEBAR_RESIZE_JS__</script>
     </head>
     <body>
         <header class="topbar">
@@ -173,6 +172,7 @@
         <main class="layout" id="layout">
             <nav class="ppn-nav-panel" aria-label="页面列表">
                 <div class="review-nav-header"><h2 class="review-project-name" title="__PROJECT_TITLE__">__PROJECT_TITLE__</h2><button id="toggle-pages" aria-label="展开或收起页面列表"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button></div><div id="tree"></div>
+                <div id="page-nav-resizer" class="page-nav-resizer" role="separator" aria-label="页面列表宽度" aria-orientation="vertical" aria-controls="tree" tabindex="0" title="拖动调整页面列表宽度，双击恢复默认"></div>
             </nav>
             <section class="canvas">
                 <iframe id="frame" title="交互原型" sandbox="allow-same-origin allow-scripts" hidden></iframe>
@@ -297,12 +297,19 @@
             let loadedFile = null;
             let frameReady = false;     // 当前 iframe 页已握手（收到 ready 且已下发 init）
             let projectNavigation = null;
+            let selectedNoteId = null;
 
             const safePath = (path) => {
                 const parts = String(path || '').replace(/\\/g, '/').split('/');
                 if (parts.some((p) => !p || p.startsWith('.') || p.includes(':'))) throw new Error('原型文件路径无效');
                 return parts.map(encodeURIComponent).join('/');
             };
+            function prototypeUrl(page) {
+                const file = String(page.file || '').replace(/\\/g, '/');
+                const path = 'proto/' + safePath(file);
+                const version = data.prototypeVersions?.[file];
+                return typeof version === 'string' && /^[a-f0-9]{20}$/.test(version) ? path + '?v=' + version : path;
+            }
 
             /* file:// 下 iframe 源为 opaque（'null'），targetOrigin 只能用 '*'；接收侧以 e.source === frame.contentWindow 校验。 */
             function post(msg) {
@@ -340,6 +347,7 @@
             // ---------- 页面 / 状态切换 ----------
             function selectPage(page, stateId) {
                 const samePage = current.page?.id === page.id && loadedFile === page.file;
+                if (current.page?.id !== page.id || current.stateId !== stateId) selectedNoteId = null;
                 current = { page, stateId };
                 buildTree();
                 ProtoProjectNavigation.applyPreview(frame,page.states?.find(s=>s.id===stateId)?.previewType || page.previewType || data.clients?.find(c=>c.id===page.clientId)?.previewType || data.previewType || 'web');
@@ -354,14 +362,14 @@
                     frameReady = false;
                     frame.hidden = false;
                     $('empty').hidden = true;
-                    frame.src = 'proto/' + safePath(page.file);
+                    frame.src = prototypeUrl(page);
                 }
             }
             function syncChrome() {
                 const { page, stateId } = current;
                 const st = page.states?.find((s) => s.id === stateId);
                 $('scope').textContent = (page.states?.length || 0) > 1 ? `${page.title} / ${st?.title || stateId}` : page.title;
-                try { $('source').href = 'proto/' + safePath(page.file); } catch (_) { $('source').removeAttribute('href'); }
+                try { $('source').href = prototypeUrl(page); } catch (_) { $('source').removeAttribute('href'); }
                 for (const b of $('tree').querySelectorAll('button'))
                     b.setAttribute('aria-current', String(b.dataset.scope === page.id + '\n' + stateId));
                 history.replaceState(null, '', '#' + new URLSearchParams({ p: page.id, s: stateId }).toString());
@@ -377,11 +385,13 @@
                 if (actual && actual.id !== current.page.id) {
                     /* 原型内部导航到了另一个已登记页面：跟随。 */
                     current = { page: actual, stateId: actual.states.some((s) => s.id === ids.stateId) ? ids.stateId : actual.states[0].id };
+                    selectedNoteId = null;
                     orders = {};
                     pendingState = null;
                     syncChrome();
                 } else if (ids.stateId && ids.stateId !== current.stateId && current.page.states?.some((s) => s.id === ids.stateId)) {
                     current.stateId = ids.stateId;
+                    selectedNoteId = null;
                     syncChrome();
                 }
                 let enterState = null;
@@ -392,16 +402,22 @@
                 frameReady = true;
                 // 先按当前页/状态判定 PRD 是否为空，再把真实侧栏开合态下发给 iframe；避免切页瞬间沿用上一页状态。
                 renderAside();
-                post({ type: 'init', notes: pageNotes(), asideOpen: prdAsideOpen(), enterState,
+                post({ type: 'init', notes: pageNotes(), asideOpen: prdAsideOpen(), enterState, selectedNoteId,
                     hintScopes: (current.page?.states || []).map(state => ({id: state.id, interactionHints: state.interactionHints})) });
             }
             window.addEventListener('message', (e) => {
+                if (e.source === frame.contentWindow && e.data?.__protoScreenshot === 1 && e.data.type === 'navigate' && current.page?.kind === 'screenshot') {
+                    const target = data.pages.find(p => p.id === e.data.pageId);
+                    if(target) selectPage(target, target.states[0]?.id || 'default');
+                    return;
+                }
                 if (e.source !== frame.contentWindow || !e.data || e.data.__review !== 1) return;
                 const m = e.data;
                 if (m.type === 'ready') { onFrameReady(m.ids || {}); return; }
                 if (!frameReady) return;   // 握手前的空 sync 丢掉，免右栏闪一下“–”
                 if (m.type === 'sync') onPinSync(m.map || {}, m.state || 'default', m.stale || []);
                 else if (m.type === 'focus') onPinFocus(m.noteId);
+                else if (m.type === 'selection') selectReviewNote(m.noteId);
             });
 
             // ---------- 气泡层回调 ----------
@@ -410,11 +426,13 @@
                 if (current.page && state !== current.stateId && current.page.states?.some((s) => s.id === state)) {
                     /* 原型自身切换了状态（页内交互）：右栏与页面树跟随。 */
                     current.stateId = state;
+                    selectedNoteId = null;
                     syncChrome();
                 }
                 if (state === current.stateId) renderAside();
             }
             function onPinFocus(noteId) {
+                selectReviewNote(noteId);
                 const row = $('notes').querySelector(`[data-note-id="${CSS.escape(noteId)}"]`);
                 if (!row) return;
                 // 与 viewer extScrollNoteIntoView 同语义（单套同源）：定位行首（序号）进视口，行首已可见则不滚。
@@ -428,7 +446,17 @@
             }
             function reveal(note) {
                 // 定位在原型页内完成（review-bridge.js：目标被折叠隐藏时先联动展开再滚到位）
+                selectReviewNote(note.id);
                 post({ type: 'reveal', note });
+            }
+            function selectReviewNote(noteId) {
+                selectedNoteId = data.annotations.some(n => n.id === noteId && n.pageId === current.page?.id && n.stateId === current.stateId) ? noteId : null;
+                for (const row of $('notes').querySelectorAll('.note')) {
+                    const selected = row.dataset.noteId === selectedNoteId;
+                    row.classList.toggle('selected', selected);
+                    row.setAttribute('aria-current', String(selected));
+                }
+                post({ type: 'select', noteId: selectedNoteId });
             }
 
             // ---------- 右栏 PRD ----------
@@ -466,8 +494,9 @@
                 host.replaceChildren();
                 for (const [note, num, stale] of rows) {
                     const row = document.createElement('section');
-                    row.className = 'note' + (stale ? ' stale' : '');
+                    row.className = 'note' + (stale ? ' stale' : '') + (note.id === selectedNoteId ? ' selected' : '');
                     row.dataset.noteId = note.id;
+                    row.setAttribute('aria-current', String(note.id === selectedNoteId));
                     row.tabIndex = 0;
                     row.setAttribute('aria-label', `标注 ${num}${stale ? '，已失锚' : '，回车定位到原型位置'}`);
                     const no = document.createElement('span');
@@ -505,7 +534,12 @@
                 const stateId = page.states?.some((s) => s.id === params.get('s')) ? params.get('s') : (page.states?.[0]?.id || 'default');
                 selectPage(page, stateId);
             }
-            $('toggle-pages').onclick = () => $('layout').classList.toggle('left-closed');
+            const pageNavSizer = ProtoSidebarResize.attach($('page-nav-resizer'), {
+                storageKey: 'prototype-page-nav-width', isOpen: () => !$('layout').classList.contains('left-closed'),
+                getMax: () => $('layout').clientWidth - document.querySelector('aside').getBoundingClientRect().width - 240,
+                setWidth: width => $('layout').style.setProperty('--page-nav-width', width + 'px')
+            });
+            $('toggle-pages').onclick = () => { $('layout').classList.toggle('left-closed'); pageNavSizer.refresh(); };
             /* PRD 宽度：拖拽调节 + localStorage 记忆；收起时清除内联宽度让 --right 归 0。 */
             const PRD_KEY = 'proto-review-prd-width';
             const applyPrdWidth = () => {
@@ -518,6 +552,7 @@
                 $('toggle-prd').textContent = closed ? '显示 PRD' : '收起 PRD';
                 if (closed) $('layout').style.removeProperty('--right');
                 else applyPrdWidth();
+                pageNavSizer.refresh();
                 post({ type: 'aside', open: !closed });
                 // 与 viewer 同源（约定 11/12）：收起态开的序号 popover，展开右栏时迁移为右栏定位——关 popover + 行首定位 + 高亮。
                 if (!closed) {
@@ -538,6 +573,7 @@
                     prdResizer.removeEventListener('pointermove', move);
                     prdResizer.removeEventListener('pointerup', up);
                     prdResizer.classList.remove('resizing');
+                    pageNavSizer.refresh();
                     const w = parseInt($('layout').style.getPropertyValue('--right'), 10);
                     if (w >= 280) { try { localStorage.setItem(PRD_KEY, String(w)); } catch (_) { /* 存储异常忽略 */ } }
                 };

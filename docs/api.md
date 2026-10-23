@@ -1,5 +1,35 @@
 # API 参考 (API Reference)
 
+## HTML 页面导入（2026-10-21）
+
+`POST /api/proto/import-html`，要求本机同源 JSON 与项目访问权限。
+
+请求：`{projectId,expectedRevision,title?,previewType?,clientId?,parentId?,entryFile,files:[{path,dataUrl}]}`。入口为 UTF-8 `.html/.htm`，路径必须为包内相对路径；仅接受入口 HTML 及配套静态资源，不允许其他 HTML、隐藏 / 依赖目录、Windows 保留名称、重复路径、链接或越界路径。文件写入项目内独立 `pages/html-<id>/`，不会覆盖同名既有页面。
+
+最多 300 个文件，入口最大 5 MB、资源单个最大 10 MB、合计 30 MB，请求体最大 42 MB。成功返回 `{ok,bundle,page,fileCount}`，409 返回 `{ok:false,conflict:true,current,error}`，400 为非法参数或文件失败，404 为项目无效，413 为请求过大。
+
+页面额外记录 `htmlImport:{directory,files}`，三文件协议版本仍为 2。`proto/save` 可改名称、导航、跟踪和 PRD，但不能改 file 或导入资源清单；回收站永久删除按清单清理本页资源，导出排除回收资源。
+
+### 重新导入替换（2026-10-23）
+
+`POST /api/proto/replace-html`，要求与导入相同的本机同源 JSON、项目权限和体积限制。请求 `{projectId,expectedRevision,pageId,entryFile,files:[{path,dataUrl}]}`；仅支持已有 `htmlImport` 登记且不在回收站的页面。返回及错误格式与导入相同。
+
+保留页面 ID、名称、导航设置、层级、跟踪、状态、PRD 和标注 / 热区配置，在原专属目录内更新入口及资源清单；新入口文件名可以不同。旧资源备份后移除，不覆盖目录中的未登记文件；文件或元数据保存失败恢复旧内容，中断记录包含 `beforeFiles` 供恢复。截图替换继续使用 `/api/proto/screenshot/replace`。
+
+## 截图页面（2026-10-20）
+
+三个 POST 接口均要求本机同源 JSON、项目访问权限和 `projectId,expectedRevision`。成功返回 `{ok,bundle,page,layoutChanged}`；409 返回 `{ok:false,conflict:true,current,error}`，400 为非法数据或文件失败，404 为项目失效，413 为请求超过 14 MB。图片净载荷最大 10 MB。
+
+| 接口 | 其他请求字段 |
+|---|---|
+| `/api/proto/screenshot/create` | `title,dataUrl,previewType?`（web / mobile / pad）、`clientId?,parentId?` |
+| `/api/proto/screenshot/replace` | `pageId,dataUrl`，保留标注和热区 |
+| `/api/proto/screenshot/regions` | `pageId,regions`，完整替换本页矩形列表，最多 200 个 |
+
+`regions[] = {id,label,x,y,width,height,targetPageId?}`。坐标为图片内 0–1 有限数字，宽高大于零且不得越界；id 为 1–80 位字母、数字、下划线或连字符，label 非空且最多 120 字。targetPageId 为空只提示，指定时必须是项目内活动页面。
+
+页面记录新增 `kind:"screenshot"` 和 `screenshot:{image,width,height,regions}`，状态为 default，schemaVersion 保持 2。`proto/save` 可修改页面名称、层级、跟踪状态与 PRD，但拒绝修改截图资源 / file / kind，须用专用接口。图片经 Pillow 校验，拒绝动画、SVG、伪造格式与超过 4000 万像素的数据。
+
 ## PRD 草稿版本 3（2026-10-16）
 
 本节替代旧版草稿内容格式；工作台三文件元数据 schemaVersion 仍为 2。`scope.requirements[]` 必须有 id、text、sourceQuote；原文引用须来自 scope.request，delta 模式另需非空且不同的 before / after。full 模式另以 fullRequest 引用整页 PRD 授权，“重新落库”不自动开启。可选 exclusions 为本期不涉及内容的字符串数组。
@@ -20,7 +50,15 @@ targets 使用 `{protoId,requirementIds:[...]}`。document 不再接受字符串
 
 `proto_import.py` 的新草稿标注须为结构化 Markdown：三级标题按页面显示 / 数据流转 / 业务规则 / 交互说明 / 异常情况选择适用小节，每节至少有列表或状态表，不重复或留空。document 为可选背景说明，含“研发实现”等标题的新增草稿拒绝导入。该校验不追溯修改历史 PRD，也不限制工作台手工编辑。
 
-hotspots 缺省为空清单，不再从 targets 推导。runtime 仅匹配 interactionHints.protoIds 中控件自身的稳定 ID，不沿父元素授权后代。完整 PRD 与全页提示仍各自显式授权。
+hotspots 不从 targets 推导。版本 3 的页面支持 `hotspotAction: preserve | replace | clear`：省略操作与清单时保留既有状态；提供 hotspots 默认替换，[] 清空；显式 replace 必须带清单，preserve 不能带清单，clear 不能带非空清单。新页缺省无提示。scope.hotspotMode 的 full / off 分别对应 replace / clear；完整 PRD 与全页提示仍各自显式授权。
+
+runtime 仅匹配 interactionHints.protoIds 中控件自身的稳定 ID，不沿父元素授权后代。导入拒绝包含其他操作的非原生容器，以及自身 / 祖先声明 false 的目标；动态绑定无法静态确认时报告 runtime-check。导入报告的 `hintActions` 记录每页状态的操作及最终范围，`hotspotChecks` 记录逐控件静态检查，`hints` 仍只记录实际变更，不因保留而递增 revision。
+
+原型窗口提供只读 `ProtoHotspots.inspect()`，返回 `{mode, enabled, items:[{protoId, status, rect?}]}`，不执行任何业务操作。status 包括 ready、missing、duplicate、no-action、container、oversized、excluded、disabled、hidden、offscreen、occluded、unsupported、contains-target 和 limit。隐藏、屏外或遮挡需在实际可操作状态验收；诊断不代表自动修改配置。事件代理在实际控件声明 data-proto-hotspot="true"，仍须列入提示清单。
+
+工作台手动编辑仍使用 `POST /api/proto/save` 的 expectedRevision / bundle，不增加文件写入接口。状态 interactionHints 可带 `manualTargets`、`excludedTargets`，均为 `[{id, label?, anchor:{protoId?,selector?,tag?,text?,parentText?}}]`，定位至少提供 protoId 或 selector。inspect 额外返回 key / source / label / anchor，用于编辑和删除。manualTargets 只授权具体目标，仍受禁用、可见性、容器与面积检查；excludedTargets 优先于自动和手动热点。Agent replace 保留这两个手动层，clear 移除 manualTargets，保留 excludedTargets。
+
+标注 anchor 可带 `revealSteps`，最多 12 步且入口唯一；每步为 `{protoId?, selector, kind, value, label?}`。kind 支持 click / select / checkbox / radio 及 ARIA 状态；checkbox / radio 的 value 必须为布尔，其余为字符串。配置只改锚点关联，保留 body / number / confirmed；工作台拒绝修改已确认标注。非空手动路径优先于自动声明，逐层执行并等待显现；空路径移除手动关联恢复自动识别。研发版数据保留手动字段，源 HTML 不添加属性。
 
 导入报告新增 projectName / viewerUrl / pages，pages 包含 pageId、pageTitle、file、stateId、stateTitle、viewerUrl；接入脚本也返回项目和页面定位。两脚本的 `--viewer-origin` 默认为工具默认来源 http://localhost:8080，可指定实际来源。页面 URL 支持 ext / page / state / mode=annotate，直接打开已登记状态与标注模式；项目仍需已登记。
 
@@ -241,6 +279,28 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 
 ## 7. 微调模式
 
+### 手动修改文案
+
+以下接口适用已登记的本机项目，沿用 `/api/proto/*` 的 loopback、同源和 JSON 约束；AI 项目沿用归属校验。
+
+- `POST /api/proto/text/inspect`：Body `{ projectId, pageId, target }`，返回 `{ ok, file, hash, fields: [{ slot, text }], undoId }`。`target` 包含 `tag`、`texts` 和定位信息：优先唯一 `protoId`（data-proto-id），其次唯一 `id`，否则严格 `path: [{ tag, index }]`（同标签兄弟序号从 1 起）。需匹配完整静态文字列表；支持浏览器隐式 html / body / tbody 包装。
+- `POST /api/proto/text/save`：Body `{ projectId, pageId, target, expectedHash, edits: [{ slot, text }] }`，返回 `{ ok, file, hash, fields, undoId }`。仅替换指定文本节点，文本按 HTML 转义；单字段最多 4096 字符、最多 8 个文字片段、文件最多 4 MiB、UTF-8 HTML / HTM。`expectedHash` 使用 inspect 的 SHA256，保存后下一次使用新 hash 与新 texts。
+- `POST /api/proto/text/undo`：Body `{ projectId, pageId, undoId, expectedHash }`，返回 `{ ok, file, hash }`。仅当前文件仍与该次修改的 afterHash 一致时还原，不覆盖后续 Agent 修改。客户端应重载原型。
+
+脚本生成文字可额外提供 `target.bindings: [{ anchor, path }]`，最多 12 个候选、路径最多 16 层。anchor 可为源码中的唯一 `{ tag, key: "id" | "data-proto-id", value }` 或 `{ tag: "body" }`。
+
+路径节点支持：
+
+- `{ tag, key, value }`：稳定属性键；包括 `data-proto-id` / `id` / `data-q` / `data-key` / `data-id` / `data-row-id` / `data-row-key` / `data-item-id` / `data-column-key` / `data-field` / `data-testid` / `name`。
+- `{ tag, match: [{ path: [{ tag, index }], text, own?: true }] }`：未编辑的相邻内容特征，最多 3 个，每个路径最多 3 层、文字最多 160 字符。空路径只允许 own=true（当前节点的直接文字）。
+- `{ tag: "td" | "th", column: [分组标题, 列标题] }`：完整表头路径，最多 8 层、每层 256 字符。
+- `{ tag, text }`：唯一短控件的原文，最多 160 字符。
+- `{ tag, index }`：已识别容器内的位置；不能单独作为源码缺失动态条目的身份。
+
+第一个源码缺失节点必须具备稳定键或语义特征，不支持仅按行号绑定动态条目。动态保存额外返回 `runtimeEdits: [{ binding, before: [text], after: [text] }]`，客户端立即安装到当前原型文档；服务端同步将 JSON 和内嵌脚本写进同一 HTML，最多 200 条控件记录。静态字段仍只按原区间替换，不改业务 JavaScript 的共享数据。工作台 HTML 响应会更新旧内嵌运行代码，源文件、记录和 hash 不因读取而改变。
+
+源文件变化返回 409 / `conflict: true`；无法通过键 / 内容特征唯一识别、框架绑定或不支持的目标返回 422 / `unsupported: true`；未登记项目或文件缺失返回 404；参数无效返回 400。检查接口不写文件，保存与撤销不更改 PRD / 元数据 revision。撤销记录位于项目私有 `.prototype/text-edits/`，不随纯净 / 研发版发布。
+
 ### 应用 AI 修改
 `POST /api/inspector/apply`
 - Body: 
@@ -258,6 +318,13 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 
 ### 获取服务器路径信息
 `GET /api/server-info`
+- 保留 `projectsDir` 和原访问方式，受生命周期管理的实例额外返回 `{ service: "prototype-generator", instanceId, root, pid, port }`，不含交接密钥。启动验证绕过业务请求锁，避免正在生成时无法识别旧实例。
+
+### 本机实例交接（内部启动协议）
+`POST /api/server/stop`
+- 仅本机同源 JSON。Body `{ instanceId, token }`，token 来自应用私有 `data/server-instance-<port>.json`，每次启动更新，不通过 HTTP 提供，不供前端调用。
+- 身份 / 密钥不匹配返回 403；当前有写入或后台生成时返回 `409 { ok:false, busy:true }`；可交接时返回 `202 { ok:true, stopping:true }`，关闭监听，后续业务请求返回 503。新实例等待旧端口释放后独占绑定。
+- `/data/server-instance-*`、`/data/server-startup-*` 和实例临时文件禁止 GET / HEAD，兼容 Windows 路径别名检查。
 - Returns: `{ projectsDir }`
 - 说明：供预览器生成微调提示词时动态定位项目文件路径。
 
@@ -302,17 +369,22 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 - `createdAt` 为目录创建时间（UTC ISO 8601），优先文件系统 birth time，未提供时取 ctime；失效路径回退已存创建时间或 `addedAt`，无法取得时为空字符串。两组分别按创建时间倒序返回，首页合并两组整体倒序；搜索在前端按名称 / 绝对路径过滤，不改变扫描范围与登记数据。
 - 每次读取重新扫描；扫描错误单独返回，不静默删除登记。`data/external.json` 向后兼容扩展为 `{ projects: {...}, roots: [...] }`，旧登记表不会自动增加监视根。
 
-### 移除登记
-`POST /api/external/remove`
+### 隐藏 / 显示到首页
+`POST /api/external/hide`，旧 `/api/external/remove` 为隐藏的兼容别名。
 - Body: `{ projectId }`
-- Returns: `{ ok: true }`
-- 说明：只移除登记，不删除磁盘上的项目与 `.prototype` 元数据；仍在监视根内的项目，下次列表读取可再次作为候选出现。
+- Returns: `{ ok: true, hidden: true }`
+- 支持已登记本地项目、当前监视范围内发现的项目及已隐藏项目；不存在 404，无效 ID 或 AI 项目 400。保留登记与磁盘文件，独立写入 `hiddenProjects[projectId]` 的 root / name / createdAt / hiddenAt。新发现项目不初始化元数据。
+
+`POST /api/external/restore`
+- Body: `{ projectId }`；Returns: `{ ok: true, hidden: false }`。仅恢复已隐藏项，其他 404。
+- 保留连接状态。新发现项目的目录必须存在且有 HTML 页面，否则 400 并保留隐藏记录；若原监视范围已移除，仅重新加入该项目根目录，不自动连接。
+- 列表接口额外返回 `hidden: [项目记录 + hidden:true + hiddenAt]`，items / discovered 不包含隐藏项；失效目录保留在 hidden 中。登记表扩展为 `{ projects, roots, hiddenProjects }`，旧数据按空隐藏表兼容。
 
 ### 删除项目（连同本地文件夹）
 `POST /api/external/delete`
-- Body: `{ projectId }`
-- Returns: `{ ok: true, folderDeleted, root, publishedUrl }`；未登记 404。
-- 说明：在 `remove` 之上连带删除本地项目文件夹（含 `.prototype` 元数据与全部页面），前端两级确认后调用。服务端再做路径安全校验：拒绝磁盘根目录、包含本工具的目录、工具目录内部、仍包含其他已登记项目或监视根目录的文件夹（400），符号链接/junction 同样拒绝；文件夹删除失败保留登记（500）。目录本就不存在时只移除登记并返回 `folderDeleted: false`；项目根同为监视根时一并从 `roots` 清理。`publishedUrl` 为已发布评审站地址（若有），远端不自动下线。
+- Body: `{ projectId, expectedRoot? }`，首页传入确认框展示的目录；路径已变化返回 409。
+- Returns: `{ ok: true, folderDeleted, root, publishedUrl }`；不在登记、发现或隐藏范围的项目 404。不接受客户端提供任意删除路径。
+- 说明：删除本地项目文件夹（含 `.prototype` 与全部页面），前端两级确认后调用。服务端拒绝磁盘根目录、包含本工具的目录、工具目录内部、仍包含其他已登记 / 新发现 / 已隐藏项目或监视根的目录（400），符号链接/junction 同样拒绝；文件夹删除失败保留记录（500）。新发现项目无需先接入。成功后清除登记、隐藏记录及项目本身的监视根；目录已不存在时只清理记录并返回 `folderDeleted: false`。`publishedUrl` 为原发布地址（若有），远端不自动下线。
 
 ### 读取项目元数据
 `GET /api/proto/read?projectId=p-xxx`
@@ -360,8 +432,9 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 ### 取消发布评审壳
 `POST /api/ext/unpublish`
 - Body: `{ extId: "p-xxx" }`
-- Returns: `{ ok: true, message }`；未登记 404、缺 Token/用户名 400（含 `needGithubConfig: true`）、远端操作失败 500。
-- 递归删除远端 `projects/<extId>/` 全部文件（含嵌套目录），作品集列表页移除该项目，登记表清除 `github_url` / `github_published_at`。
+- Returns: `{ ok:true, success:true, message, overview }`；未登记 404、缺配置 / 参数 400、并发冲突 409、远端失败 502。
+- 与 `/api/pages/unpublish` 共用单次提交及远端结果校验，支持嵌套目录；验证成功后清除匹配发布字段，本地文件 / PRD 保留。旧 `/api/github/unpublish` 同样复用，兼容 success 字段。
+- 当前 ext 原型还会校验原发布地址与配置仓库 / Pages 地址一致，不一致 409 且不执行远端写入。
 
 ### 白名单文件服务
 `GET /ext/<projectId>/<相对路径>`
@@ -369,6 +442,19 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 - HTML 响应在业务脚本前载入热区事件记账模块，不修改源文件；只初始化后才出现提示 UI。字符编码声明、doctype 及非 HTML 资源保持原样，响应 Content-Length 按处理后字节计算。
 
 ## 9. GitHub 发布配置
+
+### 容量概览与远端项目
+`GET /api/pages/overview?refresh=1`
+- 仅本机同源，凭据由服务端既有 GitHub 配置提供，不接收客户端 Token / 仓库参数。缺配置 400，上游权限 / 网络 / 数据不完整 502，不把失败视为零占用。
+- 返回 `{ok, repository, repositoryUrl, branch, sourcePath, head, pagesUrl, overviewUrl, checkedAt, usage, projects}`。usage 为 `{estimated:true, limitBytes:1000000000, usedBytes, remainingBytes, reason}`，无法可靠估算时大小为 null 并说明原因。
+- projects 每项含 id / name / mode / publishedAt / bytes / listed / hasFiles / canUnpublish / url / directoryUrl，合并实际目录与清单，不要求本地登记。文件树截断时逐层读取完整结果。
+- 缓存按仓库及凭据摘要隔离，120 秒有效，refresh=1 强制重读；只读请求不持全局写锁，避免阻塞 PRD 保存。
+
+### 从管理页取消历史发布
+`POST /api/pages/unpublish`
+- Body: `{projectId, repository:"owner/repo", expectedHead}`。使用服务端配置仓库；repository 和 head 校验确认时的上下文，缺版本 400、配置或远端变化 409。
+- 仅删除发布源下 `projects/<合法单层ID>/` 的文件，并在同一 Git tree / commit 中更新 manifest.json / index.html，force:false 更新分支，再重新读取验证。成功返回 `{ok:true, success:true, message, overview}` 后同步匹配本地发布状态。保留本地文件 / PRD，历史团队项目执行归属校验。
+- 上游失败 502，远端版本冲突 / 分支禁止更新 409，远端失败不清除本地发布记录。需要 Contents 写权限，站点等待 Pages 重新部署生效，不清理 Git 历史。公开 Pages 不携带凭据或管理接口。
 
 ### 读取配置
 `GET /api/github/config`

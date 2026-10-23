@@ -120,25 +120,43 @@ def change_page(root, page_id, action, expected_revision, confirm_file=None):
             raise ValueError('元数据目录不能是链接')
         pending = folder / PENDING
         staged = folder / ('page-delete-' + uuid.uuid4().hex + '.html')
+        import screenshot_pages
+        import html_import
+        owned = []
+        for relative in screenshot_pages.owned_images(page) + html_import.owned_assets(page):
+            if any(p['id'] != page_id and p.get('screenshot', {}).get('image') == relative for p in before['project']['pages']):
+                raise ValueError('截图资源仍被其他页面使用，不能删除')
+            asset = screenshot_pages.safe_path(root, relative)
+            if asset.is_file():
+                owned.append((asset, folder / ('page-delete-' + uuid.uuid4().hex + asset.suffix)))
         proto_meta.write_json_atomic(pending, {'before': before, 'after': bundle, 'file': page['file'], 'staged': staged.name,
+                                             'assets': [{'file':a.relative_to(root).as_posix(), 'staged':b.name} for a,b in owned],
                                              'manifestBefore': manifest_before.decode('utf-8-sig') if manifest_before else None})
         moved = False
+        moved_assets = []
         try:
             if path.exists():
                 os.replace(path, staged)
                 moved = True
+            for asset, backup in owned:
+                os.replace(asset, backup)
+                moved_assets.append((asset, backup))
             if manifest_after is not None:
                 proto_meta.write_json_atomic(manifest_path, manifest_after)
             proto_meta.save_bundle(root, bundle)
-            if moved:
-                staged.unlink()
         except Exception:
             if manifest_before is not None:
                 manifest_path.write_bytes(manifest_before)
             proto_meta.save_bundle(root, before)
             if moved and staged.exists():
                 os.replace(staged, path)
+            for asset, backup in moved_assets:
+                if backup.exists(): os.replace(backup, asset)
             pending.unlink()
             raise
+        # 提交后临时文件清理失败不能回滚到已删除的备份。
+        for backup in ([staged] if moved else []) + [b for _,b in moved_assets]:
+            try: backup.unlink(missing_ok=True)
+            except OSError: pass
         pending.unlink()
         return bundle

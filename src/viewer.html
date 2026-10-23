@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>原型预览器</title>
     <link rel="stylesheet" href="/src/proto-markdown.css?v=20261016-toolbar-single-row">
+    <link rel="stylesheet" href="/src/proto-interactions.css?v=20261023-reveal-compact">
+    <link rel="stylesheet" href="/src/proto-screenshot-editor.css?v=20261020-screenshots">
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1271,9 +1273,11 @@
         #extReadingScroll { overflow-y: auto; min-height: 0; flex: 1; scroll-padding-top: 16px; }
         #extAnnotList { display: flex; flex-direction: column; }
         #extDocPane { padding: 16px 12px 24px; border-bottom: 1px solid var(--ext-border); }
-        .ext-reading-heading { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
-        .ext-reading-heading h2 { font-size: 16px; font-weight: 600; }
+        .ext-reading-heading { display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 8px; }
+        .ext-reading-heading h2 { flex: none; font-size: 22px; font-weight: 600; line-height: 1.7; white-space: nowrap; }
         #extDocStatus, #extDocPageName { font-size: 12px; color: var(--ext-muted); }
+        #extDocPageName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #extDocStatus { flex: none; margin-left: auto; white-space: nowrap; }
         .ext-reading-nav { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 6px 12px; border-bottom: 1px solid var(--ext-border); }
         .ext-nav-anchor { border: 0; background: none; margin: 0; padding: 4px 6px; border-radius: 6px; color: var(--ext-muted); font-size: 12px; line-height: 1.5; cursor: pointer; }
         .ext-nav-anchor:hover { color: var(--ext-text); background: var(--ext-hover); }
@@ -1282,7 +1286,7 @@
         .ext-icon-action:hover { background: var(--ext-hover); color: var(--ext-text); }
         .ext-icon-action[aria-pressed="true"] { background: var(--ext-accent); color: var(--ext-on-accent); }
         .prd-header-tools button:focus-visible { outline: 2px solid var(--ext-accent); outline-offset: 2px; }
-        .ext-shortcut-card { display: flex; flex-direction: column; padding: 4px 12px 6px; border-bottom: 1px solid var(--ext-border); background: var(--ext-soft); }
+        .ext-shortcut-card { flex: none; display: flex; flex-direction: column; padding: 4px 12px 6px; border-bottom: 1px solid var(--ext-border); background: var(--ext-soft); font-family: var(--ext-font); }
         /* 外观三选一：与「发布 / 导出」同款 segmented，但全部走 --ext-* token，暗色下随右栏一起变 */
         .ext-theme-seg { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--ext-border); border-radius: 8px; background: var(--ext-surface); }
         .ext-theme-opt { position: relative; }
@@ -1304,7 +1308,7 @@
         .ext-shortcut-row button.ext-shortcut-primary { background: var(--ext-accent); border-color: var(--ext-accent); color: var(--ext-on-accent); }
         .ext-shortcut-row button.ext-shortcut-primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--ext-accent); }
         .ext-shortcut-row button.ext-shortcut-primary:disabled { background: var(--ext-border); border-color: var(--ext-border); color: var(--ext-muted); opacity: 1; }
-        #extNotesHeading { padding: 16px 12px 0; font-size: 16px; font-weight: 600; }
+        #extNotesHeading { padding: 16px 12px 0; font-size: 22px; font-weight: 600; line-height: 1.7; }
         /* 「更多」坐在首行右端与序号平行；行悬停 / 聚焦 / 选中 / 菜单展开时显现（平时隐身不扰乱） */
         .ext-note-more { flex: none; width: 22px; height: 22px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ext-muted); cursor: pointer; font-size: 16px; line-height: 1; opacity: 0; transition: opacity .12s ease-out; }
         .ext-note:hover .ext-note-more, .ext-note:focus-within .ext-note-more, .ext-note.flash .ext-note-more, .ext-note-more[aria-expanded="true"] { opacity: 1; }
@@ -1337,8 +1341,8 @@
         #extPanel button:focus-visible, #extPanel [tabindex]:focus-visible, #extPanel textarea:focus-visible, .ext-note-menu button:focus-visible, #devSidebarToggle:focus-visible { outline: 2px solid var(--ext-accent); outline-offset: 2px; }
         #devSidebar { flex-shrink: 0; z-index: 30; }
         #devSidebar[data-expanded="false"] { width: 0; border: 0; }
-        #devSidebar[data-expanded="true"] { width: 256px; }
-        #devSidebarContent { height: 100%; }
+        #devSidebar[data-expanded="true"] { width: var(--page-nav-width, 256px); }
+        #devSidebarContent { height: 100%; width: 100%; }
         #devSidebarContent > :first-child { min-height: 64px; padding-right: 60px; }
         #devSidebarToggle { position: absolute; top: var(--viewer-floating-inset); left: var(--viewer-floating-inset); width: var(--viewer-floating-size); height: var(--viewer-floating-size); padding: 0; box-sizing: border-box; display: grid; place-items: center; border: 1px solid var(--ext-border); border-radius: 6px; background: var(--ext-surface); color: var(--ext-text); box-shadow: var(--ext-shadow); cursor: pointer; }
         #devSidebarToggle svg { width: var(--viewer-floating-icon-size); height: var(--viewer-floating-icon-size); }
@@ -1406,7 +1410,9 @@
     </style>
     <link rel="stylesheet" href="/agent-skills/prototype-flow/assets/project-navigation.css?v=20261016-compact-nav">
     <script src="/agent-skills/prototype-flow/assets/project-navigation.js?v=20261015-page-tree"></script>
-    <link rel="stylesheet" href="/src/workbench.css?v=20261016-project-name-hover">
+    <link rel="stylesheet" href="/src/workbench.css?v=20261021-quiet-resize">
+    <link rel="stylesheet" href="/src/sidebar-resize.css?v=20261021-quiet-resize">
+    <link rel="stylesheet" href="/src/pages-manager.css?v=20261021-publish-links">
 </head>
 
 <body class="bg-gray-100 h-screen flex flex-col overflow-hidden">
@@ -1465,13 +1471,22 @@
             </div>
             <!-- 发布 / 导出（仅外部项目标注模式显示） -->
             <div id="extPublishBlock" style="display: none; border-top: 1px solid #e5e7eb; margin-top: 8px; padding-top: 8px;">
-                <div class="text-xs text-gray-400 mb-2">发布 / 导出</div>
+                <div class="pages-publish-heading">
+                    <span class="text-xs text-gray-400">发布 / 导出</span>
+                    <div class="pages-summary" data-pages-summary></div>
+                </div>
                 <div class="ext-pub-mode" role="radiogroup" aria-label="版本">
                     <label class="ext-pub-opt"><input type="radio" name="extPubMode" value="review" checked><span>研发版</span></label>
                     <label class="ext-pub-opt"><input type="radio" name="extPubMode" value="pure"><span>纯净版</span></label>
                 </div>
-                <div id="extPublishStatus" class="text-xs text-gray-500 mb-1">未发布</div>
                 <div id="extPublishRepo" class="text-[11px] text-gray-400 mb-1 truncate" style="display: none; cursor: pointer;" title="修改 GitHub 配置" onclick="extOpenGithubSetup()"></div>
+                <div id="extPublishState" class="ext-publish-state" data-state="unpublished">
+                    <div class="ext-publish-state-label"><i class="fas fa-check-circle" aria-hidden="true"></i><span id="extPublishStatus" role="status">未发布</span></div>
+                    <div id="extPublishLinks" class="ext-publish-links" style="display: none;">
+                        <button type="button" onclick="extCopyPublishLink()" title="复制链接" aria-label="复制发布链接"><i class="fas fa-copy" aria-hidden="true"></i></button>
+                        <button type="button" onclick="extOpenPublishLink()" title="打开链接" aria-label="打开发布链接"><i class="fas fa-external-link-alt" aria-hidden="true"></i></button>
+                    </div>
+                </div>
                 <div id="extPublishHint" class="text-xs text-amber-600 mb-2" style="display: none;">
                     <i class="fas fa-info-circle" aria-hidden="true"></i><span id="extPublishHintText">配置 Token 后即可发布</span>
                 </div>
@@ -1479,19 +1494,19 @@
                     title="配置 GitHub Token">
                     <i class="fas fa-cog" aria-hidden="true"></i><span>配置 GitHub Token</span>
                 </button>
-                <button type="button" id="extPublishBtn" class="compact-mode-btn" onclick="extPublishEntry()">
-                    <i class="fas fa-cloud-upload-alt" aria-hidden="true"></i>
-                    <span>发布到 GitHub Pages</span>
-                </button>
+                <div class="ext-publish-actions">
+                    <button type="button" id="extPublishBtn" class="compact-mode-btn" onclick="extPublishEntry()">
+                        <i class="fas fa-cloud-upload-alt" aria-hidden="true"></i>
+                        <span>发布到 GitHub Pages</span>
+                    </button>
+                    <button type="button" id="extUnpublishBtn" onclick="extUnpublish()" style="display: none;" title="取消发布并删除 GitHub 上的文件">
+                        <i class="fas fa-trash-alt" aria-hidden="true"></i><span>取消发布</span>
+                    </button>
+                </div>
                 <button type="button" id="extDownloadBtn" class="compact-mode-btn" onclick="extDownloadLocal()">
                     <i class="fas fa-download" aria-hidden="true"></i>
                     <span>下载到本地</span>
                 </button>
-                <div id="extPublishLinks" class="ext-publish-links" style="display: none;">
-                    <button type="button" onclick="extCopyPublishLink()"><i class="fas fa-link"></i>复制链接</button>
-                    <button type="button" onclick="extOpenPublishLink()"><i class="fas fa-external-link-alt"></i>打开链接</button>
-                    <button type="button" onclick="extUnpublish()"><i class="fas fa-ban"></i>取消发布</button>
-                </div>
             </div>
             <!-- 返回按钮 -->
             <div style="border-top: 1px solid #e5e7eb; margin-top: 8px; padding-top: 8px;">
@@ -1659,10 +1674,10 @@
             </button>
 
             <!-- 展开时的内容 -->
-            <div id="devSidebarContent" class="flex-col hidden overflow-hidden" style="width: 256px;">
-                <div class="wb-project-header border-b border-gray-100">
+            <div id="devSidebarContent" class="flex-col hidden overflow-hidden">
+                <div class="wb-project-header wb-page-header border-b border-gray-100">
                     <div class="wb-project-heading"><h2 id="navProjectName" title="项目名称">页面导航</h2><button id="renameProjectButton" type="button" onclick="openProjectRename()" aria-label="修改项目名称" title="修改项目名称" hidden><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m16 3 5 5L8 21H3v-5L16 3Z M13 6l5 5"/></svg></button></div>
-                    <span id="navProjectCaption" hidden>页面导航</span>
+                    <div class="ps-page-actions"><span id="navProjectCaption" hidden>页面导航</span><button id="addPageButton" class="ps-page-add" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="addPageMenu" hidden><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>添加页面</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button></div>
                 </div>
 
                 <!-- 流程图入口 -->
@@ -1679,6 +1694,7 @@
                     <div class="p-4 text-center text-gray-400 text-sm">加载中...</div>
                 </div>
             </div>
+            <div id="pageNavResizer" class="page-nav-resizer" role="separator" aria-label="页面列表宽度" aria-orientation="vertical" aria-controls="devSidebarContent" tabindex="0" title="拖动调整页面列表宽度，双击恢复默认" hidden></div>
         </aside>
 
         <!-- 中间预览区 -->
@@ -1750,7 +1766,7 @@
         <!-- 右侧 PRD 侧边栏 -->
         <aside id="prdSidebar"
             class="prd-sidebar collapsed hidden-mode bg-white border-l border-gray-200 flex flex-col">
-            <div id="prdResizer" aria-hidden="true"></div>
+            <div id="prdResizer" title="拖动调整 PRD 宽度" aria-hidden="true"></div>
             <!-- 展开时的内容 -->
             <div id="prdContent" class="flex-1 flex-col hidden overflow-hidden">
                 <!-- 头部 -->
@@ -1761,8 +1777,38 @@
                     <span id="prdPanelTitle">PRD 文档</span>
                     <div class="prd-header-tools" role="group" aria-label="PRD 工具">
                         <button id="extPickToggle" type="button" class="ext-icon-action hidden" aria-pressed="false" aria-keyshortcuts="Alt+Shift+A" aria-label="添加标注" title="添加标注（Alt+Shift+A）"><i class="fas fa-comment-medical" aria-hidden="true"></i></button>
+                        <button id="extHotspotBtn" type="button" class="ext-icon-action hidden" aria-pressed="false" aria-expanded="false" aria-controls="extInteractionsPanel" aria-label="热区与展开联动" title="热区与展开联动"><i class="fas fa-bullseye" aria-hidden="true"></i></button>
                         <button id="extShortcutBtn" type="button" class="ext-icon-action hidden" aria-expanded="false" aria-controls="extShortcutCard" aria-label="自定义标注快捷键" title="自定义标注快捷键"><i class="fas fa-keyboard" aria-hidden="true"></i></button>
                         <button id="extThemeBtn" type="button" class="ext-icon-action hidden" aria-expanded="false" aria-controls="extThemeCard" aria-label="外观设置" title="外观：跟随系统 / 浅色 / 暗色"><i class="fas fa-circle-half-stroke" aria-hidden="true"></i></button>
+                    </div>
+                </div>
+
+                <div id="extShortcutCard" class="ext-shortcut-card hidden" aria-label="标注快捷键设置">
+                    <div id="extShortcutView" class="ext-shortcut-row">
+                        <span>标注快捷键</span>
+                        <kbd id="extShortcutNow">Alt+Shift+A</kbd>
+                        <span class="ext-shortcut-spacer"></span>
+                        <button id="extShortcutModify" type="button">修改</button>
+                        <button id="extShortcutReset" type="button">恢复默认</button>
+                    </div>
+                    <div id="extShortcutEdit" class="ext-shortcut-row hidden">
+                        <span>按下新组合键</span>
+                        <kbd id="extShortcutEcho" class="is-waiting">等待按键…</kbd>
+                        <span class="ext-shortcut-spacer"></span>
+                        <button id="extShortcutApply" type="button" class="ext-shortcut-primary" disabled>确定</button>
+                        <button id="extShortcutResetEdit" type="button">恢复默认</button>
+                        <button id="extShortcutCancel" type="button">取消</button>
+                    </div>
+                </div>
+                <div id="extThemeCard" class="ext-shortcut-card hidden" role="group" aria-label="外观设置">
+                    <div class="ext-shortcut-row">
+                        <span>外观</span>
+                        <span class="ext-shortcut-spacer"></span>
+                        <div class="ext-theme-seg" role="radiogroup" aria-label="外观">
+                            <label class="ext-theme-opt"><input type="radio" name="extTheme" value="system" checked><span><i class="fas fa-desktop"></i>跟随系统</span></label>
+                            <label class="ext-theme-opt"><input type="radio" name="extTheme" value="light"><span><i class="fas fa-sun"></i>浅色</span></label>
+                            <label class="ext-theme-opt"><input type="radio" name="extTheme" value="dark"><span><i class="fas fa-moon"></i>暗色</span></label>
+                        </div>
                     </div>
                 </div>
 
@@ -1772,38 +1818,10 @@
                         <button id="extDocTab" type="button" class="ext-nav-anchor">页面需求</button>
                         <button id="extAnnotTab" type="button" class="ext-nav-anchor">标注明细 <span id="extAnnotCount" class="ext-count"></span></button>
                     </nav>
-                    <div id="extShortcutCard" class="ext-shortcut-card hidden" aria-label="标注快捷键设置">
-                        <div id="extShortcutView" class="ext-shortcut-row">
-                            <span>标注快捷键</span>
-                            <kbd id="extShortcutNow">Alt+Shift+A</kbd>
-                            <span class="ext-shortcut-spacer"></span>
-                            <button id="extShortcutModify" type="button">修改</button>
-                            <button id="extShortcutReset" type="button">恢复默认</button>
-                        </div>
-                        <div id="extShortcutEdit" class="ext-shortcut-row hidden">
-                            <span>按下新组合键</span>
-                            <kbd id="extShortcutEcho" class="is-waiting">等待按键…</kbd>
-                            <span class="ext-shortcut-spacer"></span>
-                            <button id="extShortcutApply" type="button" class="ext-shortcut-primary" disabled>确定</button>
-                            <button id="extShortcutResetEdit" type="button">恢复默认</button>
-                            <button id="extShortcutCancel" type="button">取消</button>
-                        </div>
-                    </div>
-                    <div id="extThemeCard" class="ext-shortcut-card hidden" role="group" aria-label="外观设置">
-                        <div class="ext-shortcut-row">
-                            <span>外观</span>
-                            <span class="ext-shortcut-spacer"></span>
-                            <div class="ext-theme-seg" role="radiogroup" aria-label="外观">
-                                <label class="ext-theme-opt"><input type="radio" name="extTheme" value="system" checked><span><i class="fas fa-desktop"></i>跟随系统</span></label>
-                                <label class="ext-theme-opt"><input type="radio" name="extTheme" value="light"><span><i class="fas fa-sun"></i>浅色</span></label>
-                                <label class="ext-theme-opt"><input type="radio" name="extTheme" value="dark"><span><i class="fas fa-moon"></i>暗色</span></label>
-                            </div>
-                        </div>
-                    </div>
+                    <section id="extInteractionsPanel" class="ei-panel" aria-label="热区与展开联动" hidden></section>
                     <div id="extReadingScroll" class="scrollbar-thin">
                         <section id="extDocPane" aria-labelledby="extDocHeading">
-                            <div class="ext-reading-heading"><h2 id="extDocHeading">页面需求</h2><span id="extDocStatus"></span></div>
-                            <div id="extDocPageName"></div>
+                            <div class="ext-reading-heading"><h2 id="extDocHeading">页面需求</h2><span id="extDocPageName"></span><span id="extDocStatus"></span></div>
                             <div id="extDocBody" class="proto-md"></div>
                         </section>
                         <h2 id="extNotesHeading">标注明细</h2>
@@ -1862,7 +1880,7 @@
             <div class="inspector-modal-header">
                 <h3 style="font-weight: 600; color: #1f2937; display: flex; align-items: center; gap: 8px;">
                     <i class="fas fa-magic" style="color: #ec4899;"></i>
-                    微调请求
+                    原型微调
                 </h3>
                 <button onclick="closeInspectorModal()"
                     style="background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 18px;">
@@ -1871,9 +1889,16 @@
             </div>
             <div class="inspector-modal-body">
                 <div id="selectedElementsPreview" class="selected-elements-preview"></div>
-                <textarea id="inspectorInput" placeholder="描述你想要的修改，例如：把这个按钮改成圆角，背景色改为蓝色，字体加大"></textarea>
+                <div class="inspector-edit-tabs" role="tablist" aria-label="修改方式">
+                    <button type="button" id="inspectorManualTab" role="tab" aria-selected="true" aria-controls="inspectorManualPane" onclick="setInspectorEditMode('manual')">手动修改</button>
+                    <button type="button" id="inspectorAiTab" role="tab" aria-selected="false" aria-controls="inspectorAiPane" tabindex="-1" onclick="setInspectorEditMode('ai')">AI 修改</button>
+                </div>
+                <section id="inspectorManualPane" class="inspector-text-editor" role="tabpanel" aria-labelledby="inspectorManualTab"></section>
+                <section id="inspectorAiPane" role="tabpanel" aria-labelledby="inspectorAiTab" hidden>
+                    <textarea id="inspectorInput" placeholder="描述你想要的修改，例如：把这个按钮改成圆角，背景色改为蓝色，字体加大"></textarea>
+                </section>
             </div>
-            <div class="inspector-modal-footer">
+            <div id="inspectorAiFooter" class="inspector-modal-footer" hidden>
                 <button class="inspector-btn inspector-btn-secondary" onclick="copyPrompt()">
                     <i class="fas fa-copy"></i>
                     复制 Prompt
@@ -1959,6 +1984,12 @@
     <script src="/src/vendor/vditor/dist/index.min.js"></script>
     <script src="/src/vendor/dompurify/dist/purify.min.js"></script>
     <script src="/src/proto-markdown.js?v=20261016-toolbar-single-row"></script>
+    <script src="/src/proto-interactions.js?v=20261023-reveal-compact"></script>
+    <script src="/src/proto-screenshot-editor.js?v=20261023-replace-page"></script>
+    <script src="/src/proto-text-runtime.js?v=20261021-semantic-text"></script>
+    <script src="/src/proto-text-edit.js?v=20261021-semantic-text"></script>
+    <script src="/src/pages-manager.js?v=20261021-publish-links"></script>
+    <script src="/src/sidebar-resize.js?v=20261021-nav-width"></script>
     <script>
         console.log('%c[MAIN VIEWER] Script 开始加载', 'background: blue; color: white; font-weight: bold');
         // ==================== 状态管理 ====================
@@ -1983,13 +2014,18 @@
         let extNoteMenu = null;
         let extSaveQueue = Promise.resolve();
         let extPickActive = false;
+        let extInteractions = null;
+        let extScreenshot = null;
         let extDisplayNotes = [];
+        let extPickPreview = null; // 未保存的新标注只参与展示编号，不写入 PRD。
         const extScopeKey = () => JSON.stringify([extId, extPage, extStateId]);
         const extDeleting = new Set();
 
         // ==================== 微调模式 (Inspector) 状态 ====================
         let inspectorActive = false;
         let selectedElements = [];
+        let inspectorTextEditor = null;
+        let inspectorEditMode = 'manual';
         let isBoxSelecting = false;
         let boxStartX = 0, boxStartY = 0;
         let inspectorEventHandlers = {}; // 存储事件处理器引用，便于移除
@@ -2363,7 +2399,14 @@
             const label = devSidebarExpanded ? '收起页面列表' : '展开页面列表';
             toggleBtn.setAttribute('aria-label', label);
             toggleBtn.title = label;
+            pageNavSizer.refresh();
         }
+
+        const pageNavSizer = ProtoSidebarResize.attach($('pageNavResizer'), {
+            storageKey: 'prototype-page-nav-width', isOpen: () => devSidebarExpanded,
+            getMax: () => document.documentElement.clientWidth - (prdExpanded && !prdSidebar.classList.contains('hidden-mode') ? prdSidebar.getBoundingClientRect().width : 0) - 240,
+            setWidth: width => devSidebar.style.setProperty('--page-nav-width', width + 'px')
+        });
 
         // ==================== PRD 侧边栏 ====================
         function syncPrdControls() {
@@ -2377,6 +2420,7 @@
         }
         function togglePrdSidebar() {
             const restoreFloatingFocus = prdSidebar.contains(document.activeElement);
+            try { previewFrame?.contentWindow?.ProtoAnnotate?.closePendingPick?.(); } catch (_) { /* iframe 切页中 */ }
             prdExpanded = !prdExpanded;
             if (prdExpanded) {
                 prdSidebar.classList.remove('collapsed');
@@ -2399,12 +2443,14 @@
                 } catch (_) { /* iframe 未注入或跳转中 */ }
             } else {
                 prdSidebar.classList.remove('expanded');
+                extInteractions?.cancelPick();
                 prdSidebar.classList.add('collapsed');
                 prdSidebar.style.width = '';
                 prdContentEl.classList.add('hidden');
                 prdContentEl.classList.remove('flex');
             }
             syncPrdControls();
+            pageNavSizer.refresh();
             if (!prdExpanded && restoreFloatingFocus) prdFloatingToggle.focus({preventScroll:true});
         }
 
@@ -2420,6 +2466,7 @@
                 prdResizer.removeEventListener('pointermove', move);
                 prdResizer.removeEventListener('pointerup', up);
                 prdSidebar.classList.remove('resizing');
+                pageNavSizer.refresh();
                 try { localStorage.setItem('prototype-prd-width', String(prdSidebar.offsetWidth)); } catch (_) { /* 忽略存储异常 */ }
             };
             prdResizer.addEventListener('pointermove', move);
@@ -2502,6 +2549,7 @@
 
         // ==================== 模式切换 ====================
         function switchMode(mode) {
+            extInteractions?.cancelPick();
             if(extId && extBundle && !extPage && mode!=='preview'){showToast('请先从回收站恢复页面','warning');return;}
             if (extId && !['preview', 'inspector', 'annotate'].includes(mode)) mode = 'annotate';
             // 在函数内获取 DOM 元素，确保 DOM 已加载
@@ -2788,23 +2836,32 @@
         async function extRefreshPublishStatus() {
             const statusEl = $('extPublishStatus'), btn = $('extPublishBtn'), links = $('extPublishLinks');
             if (!statusEl || !btn || !links) return;
+            const state = $('extPublishState'), unpublish = $('extUnpublishBtn');
             try {
                 const res = await fetch(`/api/ext/publish-status?projectId=${encodeURIComponent(extId)}`);
                 const data = await res.json();
                 if (data.ok && data.published) {
                     extPublishUrl = data.url;
                     const modeLabel = { review: '研发版', pure: '纯净版' }[data.mode] || '';
-                    statusEl.textContent = `已发布${modeLabel ? `（${modeLabel}）` : ''} · ${data.publishedAt || ''}`;
+                    statusEl.textContent = '已发布';
+                    statusEl.title = [modeLabel, data.publishedAt].filter(Boolean).join(' · ');
+                    state.dataset.state = 'published';
                     btn.querySelector('span').textContent = '重新发布';
                     links.style.display = 'flex';
+                    unpublish.style.display = '';
                 } else {
                     extPublishUrl = '';
                     statusEl.textContent = '未发布';
+                    statusEl.title = '';
+                    state.dataset.state = 'unpublished';
                     btn.querySelector('span').textContent = '发布到 GitHub Pages';
                     links.style.display = 'none';
+                    unpublish.style.display = 'none';
                 }
             } catch (_) {
                 statusEl.textContent = '发布状态查询失败';
+                statusEl.title = '';
+                state.dataset.state = 'error';
             }
         }
 
@@ -2812,6 +2869,7 @@
             if (extPublishing) return;
             const btn = $('extPublishBtn');
             extPublishing = true;
+            btn.disabled = true; $('extUnpublishBtn').disabled = true;
             btn.classList.add('publishing');
             btn.querySelector('span').textContent = '发布中…';
             try {
@@ -2824,6 +2882,7 @@
                 if (data.ok) {
                     showToast(`发布成功（${extPubMode() === 'pure' ? '纯净版' : '研发版'}），约 1-3 分钟生效`, 'success', 3500);
                     extPublishUrl = data.url || '';
+                    window.PagesManager?.publicationChanged();
                 } else {
                     showToast(data.error || '发布失败', 'error', 4000);
                     if (data.needGithubConfig) {
@@ -2836,6 +2895,7 @@
                 showToast('发布请求失败：' + e.message, 'error', 4000);
             } finally {
                 extPublishing = false;
+                btn.disabled = false; $('extUnpublishBtn').disabled = false;
                 btn.classList.remove('publishing');
                 extRefreshPublishStatus();
             }
@@ -2856,6 +2916,7 @@
             if (!extPublishUrl || extPublishing) return;
             if (!confirm('确定取消发布？GitHub 上的评审页面将被删除。')) return;
             extPublishing = true;
+            $('extPublishBtn').disabled = true; $('extUnpublishBtn').disabled = true;
             try {
                 const res = await fetch('/api/ext/unpublish', {
                     method: 'POST',
@@ -2864,8 +2925,9 @@
                 });
                 const data = await res.json();
                 if (data.ok) {
-                    showToast('已取消发布');
+                    showToast(data.message || '已提交取消发布，重新部署后生效');
                     extPublishUrl = '';
+                    window.PagesManager?.publicationChanged();
                 } else {
                     showToast(data.error || '取消发布失败', 'error', 4000);
                     if (data.needGithubConfig) {
@@ -2878,11 +2940,13 @@
                 showToast('取消发布请求失败：' + e.message, 'error', 4000);
             } finally {
                 extPublishing = false;
+                $('extPublishBtn').disabled = false; $('extUnpublishBtn').disabled = false;
                 extRefreshPublishStatus();
             }
         }
 
         async function initExternalMode() {
+            window.addEventListener('storage', event => { if (event.key === 'prototype-pages-updated') { extRefreshPublishStatus(); window.PagesManager?.refreshSummaries(); } });
             document.body.classList.add('ext-mode');
             let hotspotPointer = null;
             previewContainer.addEventListener('pointerdown', e => { hotspotPointer = { x: e.clientX, y: e.clientY, moved: false }; }, true);
@@ -2921,6 +2985,11 @@
             const fc = $('flowchartEntry');
             if (fc) fc.style.display = 'none';
             setupExtPanel();
+            window.addEventListener('message', event => {
+                if(event.source !== previewFrame.contentWindow || event.origin !== location.origin || event.data?.__protoScreenshot !== 1 || event.data.type !== 'navigate' || extPageRecord()?.kind !== 'screenshot') return;
+                const target = extBundle?.project.pages.find(page => page.id === event.data.pageId && !page.trashedAt);
+                if(target) void openExtState(target.id, target.states[0]?.id || 'default');
+            });
             // 「发布」区仅标注工作台显示；加载既有发布状态
             const publishBlock = $('extPublishBlock');
             if (publishBlock) publishBlock.style.display = '';
@@ -2935,6 +3004,7 @@
                     e.preventDefault(); extTogglePick(); return;
                 }
                 if (e.key === 'Escape') {
+                    if (extInteractions?.isPicking()) { e.preventDefault(); extInteractions.cancelPick(); return; }
                     if (extNoteMenu) { e.preventDefault(); closeExtNoteMenu(); return; }
                     if (editing) return;
                     // 气泡卡挂在本文档：焦点落在卡上（阅读态）时 Esc 先关卡，再退出标注模式
@@ -2942,7 +3012,7 @@
                     if (pa?.cardOpen?.()) { e.preventDefault(); pa.closeInputCard(true); return; }
                     if (extPickActive) { e.preventDefault(); extAnnotateDeactivate(); }
                 }
-                if (e.key === 'Backspace' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && extSelectedNoteId && !extNoteMenu && !e.target.closest('input,textarea,select,[contenteditable],[role="dialog"]')) {
+                if (e.key === 'Backspace' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && extSelectedNoteId && !extNoteMenu && !e.target.closest('input,textarea,select,[contenteditable],[role="dialog"],#extInteractionsPanel')) {
                     e.preventDefault();
                     extDeleteNote(extSelectedNoteId);
                 }
@@ -3065,10 +3135,12 @@
         }
 
         function openExtPage(pageId) {
+            if (extScreenshot && !extScreenshot.canLeave()) return false;
             const page = extBundle.project.pages.find(p => p.id === pageId);
             if (!page || page.trashedAt) return;
             if (previewFrame.contentWindow.ProtoAnnotate?.isBusy() || ProtoMarkdown.isBusy()) { showToast('正在保存，请稍后切页', 'warning'); return; }
             extAnnotateDeactivate();
+            extInteractions?.close();
             extSuspendNoteEdit();
             extDisplayNotes = [];
             extSelectedNoteId = null;
@@ -3125,6 +3197,7 @@
 
         let extPageActionBusy=false;
         async function runExtPageAction(page,action) {
+            if (extScreenshot && !extScreenshot.canLeave()) return false;
             if(extPageActionBusy)return false;
             if(previewFrame.contentWindow?.ProtoAnnotate?.isBusy() || ProtoMarkdown.isBusy() || ProtoMarkdown.current()){
                 showToast('请先结束 PRD 编辑或等待保存完成','warning');return false;
@@ -3215,6 +3288,14 @@
             const nameInput=dialog.querySelector('#extPageNavigationName'), nameError=dialog.querySelector('#extPageNavigationNameError');
             nameInput.value=page.title || page.id;
             nameInput.oninput=()=>{nameInput.removeAttribute('aria-invalid');nameError.hidden=true;};
+            if(page.kind==='screenshot'||page.htmlImport){
+                const source=document.createElement('div');source.className='ppn-settings-field';
+                const label=document.createElement('span');label.textContent=page.kind==='screenshot'?'截图页面':'已导入 HTML';
+                const replace=document.createElement('button');replace.type='button';replace.className='ppn-button ppn-button-quiet';replace.dataset.replacePage='';
+                replace.textContent=page.kind==='screenshot'?'重新导入截图':'重新导入 HTML';
+                replace.onclick=()=>{if(saving)return;if(extScreenshot?.openReplace(page.id,()=>Array.from(pageList.querySelectorAll('.ppn-edit')).find(n=>n.dataset.ppnKey==='edit:'+page.id)?.focus({preventScroll:true})))close(false);};
+                source.append(label,replace);dialog.querySelector('.ppn-settings-fields').append(source);
+            }
             dialog.querySelector('[data-trash-page]').onclick=async()=>{
                 if(saving)return;saving=true;
                 form.querySelectorAll('button').forEach(b=>b.disabled=true);
@@ -3338,7 +3419,7 @@
                 if (!w.ProtoHotspots) {
                     if (!w.__protoHotspotsLoad) w.__protoHotspotsLoad = new Promise((resolve, reject) => {
                         const script = d.createElement('script');
-                        script.src = '/src/proto-hotspots.js?v=20261016-exact-hints';
+                        script.src = '/src/proto-hotspots.js?v=20261016-manual-interactions';
                         script.setAttribute('data-prototype-owned', '');
                         script.onload = resolve; script.onerror = () => { w.__protoHotspotsLoad = null; script.remove(); reject(new Error('热区提示载入失败')); };
                         d.head.appendChild(script);
@@ -3348,7 +3429,8 @@
                 if (previewFrame.contentDocument !== d) return;
                 w.ProtoHotspots.init({ scope: () => extPageRecord()?.states?.find(state => state.id === extStateId)?.interactionHints,
                     isEnabled: () => ['preview', 'annotate'].includes(currentMode)
-                    && !inspectorActive && !extPickActive && !ProtoMarkdown.current() && !w.ProtoAnnotate?.cardOpen?.() });
+                    && !inspectorActive && !extPickActive && !extInteractions?.isPicking() && !extScreenshot?.isEditing() && !ProtoMarkdown.current() && !w.ProtoAnnotate?.cardOpen?.() });
+                extInteractions?.refresh();
             } catch (e) { console.warn('[热区提示]', e.message); }
         }
 
@@ -3384,15 +3466,16 @@
                 mdStyle.setAttribute('data-prototype-owned', ''); d.head.appendChild(mdStyle);
                 await new Promise((resolve,reject)=>{
                 const s1 = d.createElement('script');
-                s1.src = '/src/proto-anchors.js?v=20261016-reveal-path';
+                s1.src = '/src/proto-anchors.js?v=20261023-reveal-status';
                 s1.onload = () => {
                     if (previewFrame.contentDocument !== d) {resolve();return;}
                     const s2 = d.createElement('script');
-                    s2.src = '/src/proto-annotate.js?v=20261016-reveal-path';
+                    s2.src = '/src/proto-annotate.js?v=20261023-shared-auto';
                     s2.onload = () => {
                         if (previewFrame.contentDocument !== d) {resolve();return;}
                         extRenderPins();
                         renderExtAnnotList();
+                        extInteractions?.refresh();
                         extWatchState();
                         w.addEventListener('pagehide', () => { extSuspendNoteEdit(); w.ProtoAnnotate.deactivate(); });
                         // 点击原型页面（iframe 吞掉顶层 pointerdown）：右侧栏正在编辑的标注自动保存并回到阅读态。
@@ -3438,6 +3521,7 @@
                         extRenderPins();
                         renderExtAnnotList();
                         renderExtDoc();
+                        extInteractions?.refresh();
                     }
                 } catch (e) { /* 页面跳转中，下轮重试 */ }
             };
@@ -3461,7 +3545,25 @@
                 if (w && w.ProtoAnnotate) {
                     w.ProtoAnnotate.setTheme?.(extTheme());
                     w.ProtoAnnotate.setVisible?.(extPinsVisible());
-                    extDisplayNotes = ProtoOrder.project(extPageNotes(), w);
+                    const notes = extPageNotes();
+                    const preview = extPickPreview?.scopeKey === extScopeKey() ? extPickPreview : null;
+                    const saved = preview && notes.some(note => note.id === preview.note.id);
+                    const projected = ProtoOrder.project(preview && !saved ? [...notes, preview.note] : notes, w);
+                    extDisplayNotes = projected.filter(note => !preview || saved || note.id !== preview.note.id);
+                    if (preview) {
+                        const number = projected.find(note => note.id === preview.note.id)?.displayNumber;
+                        preview.displayNumber = number;
+                        if (preview.row && number) {
+                            preview.row.style.order = number - 1;
+                            const badge = preview.row.querySelector('.ext-note-no'); badge.textContent = number;
+                            badge.setAttribute('aria-label', `${saved ? '定位' : '新增'}标注 ${number}`);
+                            if (saved) {
+                                preview.row.dataset.noteId = preview.note.id;
+                                preview.row.classList.remove('ext-pick-draft');
+                                preview.row.querySelector('.ext-note-more').hidden = false;
+                            }
+                        }
+                    }
                     w.ProtoAnnotate.renderPins(extDisplayNotes);
                 }
             } catch (e) { /* ignore */ }
@@ -3615,6 +3717,8 @@
         }
 
         function extAnnotateActivate() {
+            if (extScreenshot && !extScreenshot.canLeave()) return;
+            extInteractions?.close();
             extPickActive = true;
             extUpdatePickButton();
             try {
@@ -3642,6 +3746,68 @@
             setupExtShortcut();
             $('extThemeBtn').classList.remove('hidden');
             $('extThemeBtn').onclick = extToggleThemeCard;
+            $('extHotspotBtn').classList.remove('hidden');
+            const prepareScreenshot = () => {
+                extAnnotateDeactivate(); extSuspendNoteEdit(); closeExtNoteMenu();
+                if (currentMode === 'inspector') switchMode('annotate');
+                try { previewFrame.contentWindow.ProtoAnnotate?.closeInputCard(true); previewFrame.contentWindow.ProtoHotspots?.hide(); } catch (_) {}
+            };
+            extScreenshot = ProtoScreenshotEditor.create({
+                frame: previewFrame, trigger: $('addPageButton'), page: extPageRecord,
+                project: () => extBundle?.project || {pages:[]}, notice: showToast, prepare: prepareScreenshot,
+                openPage: pageId => { openExtPage(pageId); },
+                save(action,payload) {
+                    const projectId = extId;
+                    const run = extSaveQueue.then(async () => {
+                        if(projectId !== extId) throw new Error('项目已切换，请重试');
+                        const endpoint=['import-html','replace-html'].includes(action)?'/api/proto/'+action:'/api/proto/screenshot/'+action;
+                        const response = await fetch(endpoint, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...payload,projectId,expectedRevision:extBundle.revision})});
+                        const result = await response.json();
+                        if(!response.ok || !result.ok) {
+                            if(result.conflict && result.current) extBundle = result.current;
+                            throw new Error(result.error || '页面保存失败');
+                        }
+                        extBundle = result.bundle; extRefreshSidebar(); return result;
+                    });
+                    extSaveQueue = run.catch(() => false); return run;
+                }
+            });
+            $('addPageButton').hidden = false;
+            $('addPageButton').onclick = () => extScreenshot.openMenu();
+            $('addPageButton').onkeydown = event => {if(event.key==='ArrowDown'){event.preventDefault();extScreenshot.openMenu();}};
+            extInteractions = ProtoInteractions.create({
+                screenshot: extScreenshot,
+                container: $('extInteractionsPanel'), trigger: $('extHotspotBtn'), frame: previewFrame,
+                scopeKey: extScopeKey,
+                scope: () => extPageRecord()?.states?.find(state => state.id === extStateId)?.interactionHints,
+                notes: () => extDisplayNotes.length ? extDisplayNotes : extPageNotes(),
+                notice: showToast,
+                preparePick() {
+                    extAnnotateDeactivate(); extSuspendNoteEdit(); closeExtNoteMenu();
+                    if (currentMode === 'inspector') switchMode('annotate');
+                    try { previewFrame.contentWindow.ProtoAnnotate?.closeInputCard(true); previewFrame.contentWindow.ProtoHotspots?.hide(); } catch (_) { /* loading */ }
+                },
+                picking(value) { if (value) { try { previewFrame.contentWindow.ProtoHotspots?.hide(); } catch (_) { /* loading */ } } },
+                saveScope(value, key) {
+                    const [projectId, pageId, stateId] = JSON.parse(key);
+                    return protoSave(draft => {
+                        if (projectId !== extId) throw new Error('项目已切换，请重试');
+                        const state = draft.project.pages.find(page => page.id === pageId && !page.trashedAt)?.states.find(state => state.id === stateId);
+                        if (!state) throw new Error('页面或状态已移除');
+                        state.interactionHints = value;
+                    }, { silent: true });
+                },
+                saveReveal(noteId, steps, key) {
+                    const [projectId, pageId, stateId] = JSON.parse(key);
+                    return protoSave(draft => {
+                        if (projectId !== extId) throw new Error('项目已切换，请重试');
+                        const note = draft.prd.annotations.find(note => note.id === noteId && note.pageId === pageId && note.stateId === stateId);
+                        const next = ProtoInteractions.model.setReveal(note, steps);
+                        note.anchor = next.anchor; note.updatedAt = new Date().toISOString();
+                    }, { silent: true });
+                },
+                testReveal: extTestReveal,
+            });
             document.querySelectorAll('#extThemeCard input[name="extTheme"]').forEach(r => { r.onchange = () => { if (r.checked) extSetThemePref(r.value); }; });
             extApplyTheme();
             $('prdPanelTitle').textContent = 'PRD · 标注';
@@ -3666,6 +3832,7 @@
             renderExtPageList();
             renderExtAnnotList();
             renderExtDoc();
+            extInteractions?.refresh();
         }
 
         function extAnchorAlive(note) {
@@ -3684,29 +3851,34 @@
             return true;
         }
 
+        function extCreateNoteRow(noteId) {
+            const row = document.createElement('section'); row.className = 'ext-note'; row.dataset.noteId = noteId;
+            row.innerHTML = '<div class="ext-note-line"><div class="ext-note-head"><button type="button" class="ext-note-no"></button><button type="button" class="ext-note-more" aria-haspopup="menu" aria-expanded="false">···</button></div><div class="ext-note-content"><div class="ext-note-body"></div></div></div>';
+            row.onclick = () => { if (!row.classList.contains('ext-pick-draft')) extSelectNote(row.dataset.noteId); };
+            row.querySelector('.ext-note-no').onclick = e => { e.stopPropagation(); if (!row.classList.contains('ext-pick-draft')) extFocusNote(row.dataset.noteId); };
+            row.querySelector('.ext-note-more').onclick = e => { e.stopPropagation(); extSelectNote(row.dataset.noteId); openExtNoteMenu(row.dataset.noteId, e.currentTarget); };
+            return row;
+        }
+
         function renderExtAnnotList() {
             const list = $('extAnnotList');
             if (!list || !extBundle) return;
             const notes = extDisplayNotes.length ? extDisplayNotes : extPageNotes().map((n, i) => ({ ...n, displayNumber: i + 1 }));
-            $('extAnnotCount').textContent = `${notes.length} 条`;
-            const rows = new Map([...list.querySelectorAll('.ext-note')].map(row => [row.dataset.noteId, row]));
+            $('extAnnotCount').textContent = `${notes.length + (list.querySelector('.ext-pick-draft') ? 1 : 0)} 条`;
+            const rows = new Map([...list.querySelectorAll('.ext-note:not(.ext-pick-draft)')].map(row => [row.dataset.noteId, row]));
             rows.forEach((row, id) => { if (!notes.some(n => n.id === id)) { ProtoMarkdown.suspend(row); row.remove(); } });
             list.querySelector('[data-empty]')?.remove();
-            if (!notes.length) {
+            if (!notes.length && !list.querySelector('.ext-pick-draft')) {
                 const empty = document.createElement('p'); empty.dataset.empty = ''; empty.className = 'p-6 text-sm';
                 empty.textContent = `本页暂无标注。点击「添加标注」或按 ${extShortcutText()} 后，在原型上落点。`; list.appendChild(empty); return;
             }
-            notes.forEach((n, index) => {
+            notes.forEach(n => {
                 let row = rows.get(n.id);
                 if (!row) {
-                    row = document.createElement('section'); row.className = 'ext-note'; row.dataset.noteId = n.id;
-                    row.innerHTML = '<div class="ext-note-line"><div class="ext-note-head"><button type="button" class="ext-note-no"></button><button type="button" class="ext-note-more" aria-haspopup="menu" aria-expanded="false">···</button></div><div class="ext-note-content"><div class="ext-note-body"></div></div></div>';
-                    row.onclick = () => extSelectNote(n.id);
-                    row.querySelector('.ext-note-no').onclick = e => { e.stopPropagation(); extFocusNote(n.id); };
-                    row.querySelector('.ext-note-more').onclick = e => { e.stopPropagation(); extSelectNote(n.id); openExtNoteMenu(n.id, e.currentTarget); };
+                    row = extCreateNoteRow(n.id);
                     list.appendChild(row);
                 }
-                row.style.order = index;
+                row.style.order = n.displayNumber - 1;
                 row.classList.toggle('flash', n.id === extSelectedNoteId);
                 const number = row.querySelector('.ext-note-no'); number.textContent = n.displayNumber;
                 ProtoAppearance.applyPin(number, n);
@@ -3803,6 +3975,21 @@
             }
         }
 
+        async function extTestReveal(noteId, steps, key) {
+            if (key !== extScopeKey()) return { ok: false, message: '页面已切换，请重新测试' };
+            const note = extPageNotes().find(note => note.id === noteId);
+            if (!note?.anchor) return { ok: false, message: '标注尚未绑定目标，请先重新绑定' };
+            extAnnotateDeactivate(); extSuspendNoteEdit();
+            if (currentMode === 'inspector') switchMode('annotate');
+            const pa = previewFrame.contentWindow.ProtoAnnotate;
+            if (!pa?.testReveal) return { ok: false, message: '页面尚未加载测试功能，请刷新后重试' };
+            const anchor = { ...note.anchor };
+            if (steps.length) anchor.revealSteps = steps; else delete anchor.revealSteps;
+            const result = await pa.testReveal(anchor);
+            if (result.ok && key === extScopeKey()) extSelectNote(noteId);
+            return result;
+        }
+
         function extCanChange(noteId) {
             const note = extPageNotes().find(n => n.id === noteId);
             if (!note) return false;
@@ -3856,12 +4043,14 @@
             menu.innerHTML = '<div class="ext-note-menu-actions">'
                 + (reopenable ? '<button type="button" role="menuitem" data-act="reopen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11a9 9 0 1 1 3 7M3 4v7h7"/></svg><span>重新打开任务</span></button>' : '')
                 + '<button type="button" role="menuitem" data-act="rebind"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10 13 4-4M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0M16 8l1-1a4 4 0 0 1 6 6l-4 4a4 4 0 0 1-6 0"/></svg><span>重新绑定</span></button></div>'
+                + '<div class="ext-note-menu-actions"><button type="button" role="menuitem" data-act="reveal"><i class="fas fa-diagram-project" aria-hidden="true"></i><span>关联展开入口</span></button></div>'
                 + '<div class="ext-note-menu-danger"><button type="button" role="menuitem" data-act="delete" class="danger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg><span>删除标注</span></button></div>';
             const noteConfirmed = !!extPageNotes().find(n => n.id === noteId)?.confirmed;
             menu.querySelectorAll('button').forEach(button => { button.disabled = noteConfirmed && !['reopen'].includes(button.dataset.act); });
             const reopenBtn = menu.querySelector('[data-act="reopen"]');
             if (reopenBtn) reopenBtn.onclick = () => { closeExtNoteMenu(); extSetTaskStatus(noteId, 'pending'); };
             menu.querySelector('[data-act="rebind"]').onclick = () => { closeExtNoteMenu(); extRebindNote(noteId); };
+            menu.querySelector('[data-act="reveal"]').onclick = () => { closeExtNoteMenu(); extSuspendNoteEdit(); extInteractions?.openReveal(noteId); };
             menu.querySelector('[data-act="delete"]').onclick = () => { closeExtNoteMenu(); extDeleteNote(noteId); };
             const palette = document.createElement('div'); palette.className = 'ext-pin-palette';
             palette.innerHTML = '<div class="ext-pin-palette-label">序号颜色</div>';
@@ -4057,6 +4246,7 @@ ${JSON.stringify(task.targets || [], null, 2)}
             // 页面需求永远可双击编辑（用户裁定 2026-09-28）：confirmed 只锁标注，不锁文档，故状态不再显示「已确认 · 只读」
             $('extDocStatus').textContent = ProtoMarkdown.getDraft(key) ? '有未提交草稿' : doc ? '已保存' : '未填写';
             $('extDocPageName').textContent = `${extPageRecord()?.title || pageId} · ${stateId}`;
+            $('extDocPageName').title = $('extDocPageName').textContent;
             ProtoMarkdown.render($('extDocBody'), { key, value: doc?.markdown || '', readonly: false, theme: extTheme(),
                 ...extImageOptions(),
                 label: '页面需求', allowEmpty: true, autosave: true, onEnd: renderExtDoc,
@@ -4071,11 +4261,10 @@ ${JSON.stringify(task.targets || [], null, 2)}
         window.ProtoExtHost = {
             appearance: ProtoAppearance,
             openNoteMenu: openExtNoteMenu,
-            async submitPick({ anchor, placement, body, scopeKey }) {
+            async submitPick({ anchor, placement, body, scopeKey, id = crypto.randomUUID() }) {
                 if (!extBundle) return false;
                 const [project, pageId, stateId] = scopeKey ? JSON.parse(scopeKey) : [extId, extPage, extStateId];
                 if (project !== extId) return false;
-                const id = crypto.randomUUID();
                 const ok = await protoSave(draft => {
                     const number = draft.prd.annotations.filter(n => n.pageId === pageId && n.stateId === stateId).reduce((m, n) => Math.max(m, n.number || 0), 0) + 1;
                     draft.prd.annotations.push({
@@ -4099,7 +4288,8 @@ ${JSON.stringify(task.targets || [], null, 2)}
                 return protoSave(draft => {
                     const note = draft.prd.annotations.find(n => n.id === noteId);
                     if (note && !note.confirmed) {
-                        note.anchor = anchor;
+                        const revealSteps = note.anchor?.revealSteps;
+                        note.anchor = { ...anchor, ...(revealSteps?.length ? { revealSteps } : {}) };
                         if (placement) note.placement = placement;
                         delete note.stale;
                         note.updatedAt = new Date().toISOString();
@@ -4120,15 +4310,49 @@ ${JSON.stringify(task.targets || [], null, 2)}
             markdown: ProtoMarkdown,
             renderNote(region, note) { ProtoMarkdown.render(region, extNoteOptions(note)); },
             editNote: extEditNote,
+            beginSidebarPick(pick, done, cancelled) {
+                if (!prdExpanded || pick.scopeKey !== extScopeKey()) return null;
+                const list = $('extAnnotList'), row = extCreateNoteRow('$new');
+                row.classList.add('ext-pick-draft', 'flash');
+                const number = this.previewNumber(pick.x, pick.y);
+                row.style.order = number - 1;
+                const badge = row.querySelector('.ext-note-no'); badge.textContent = number;
+                badge.setAttribute('aria-label', `新增标注 ${number}`);
+                row.querySelector('.ext-note-more').hidden = true;
+                list.querySelector('[data-empty]')?.remove(); list.appendChild(row);
+                closeExtNoteMenu();
+                const region = row.querySelector('.ext-note-body');
+                if (!this.beginPick(region, pick, done, cancelled)) { row.remove(); renderExtAnnotList(); return null; }
+                extScrollNoteIntoView(row);
+                return () => ProtoMarkdown.suspend(region);
+            },
             beginPick(region, pick, done, cancelled) {
                 const [project, pageId, stateId] = JSON.parse(pick.scopeKey);
                 let createdId = null;
-                return ProtoMarkdown.begin(region, { key: ProtoMarkdown.key(project, pageId, stateId, '$new'),
+                const sidebarRow = region.closest('.ext-pick-draft');
+                pick.noteId = pick.noteId || crypto.randomUUID();
+                const preview = { scopeKey: pick.scopeKey, row: sidebarRow, pick,
+                    note: { id: pick.noteId, pageId, stateId, anchor: pick.anchor, placement: pick.placement } };
+                extPickPreview = preview;
+                extRenderPins(); renderExtAnnotList();
+                const syncSidebarRow = () => {
+                    if (!sidebarRow) return;
+                    if (pick.scopeKey !== extScopeKey()) { sidebarRow.remove(); return; }
+                    if (!createdId) return;
+                    // 首次自动保存已刷新列表：复用正在编辑的行，移除同时生成的阅读行。
+                    for (const row of $('extAnnotList').querySelectorAll('.ext-note')) {
+                        if (row !== sidebarRow && row.dataset.noteId === createdId) row.remove();
+                    }
+                    sidebarRow.dataset.noteId = createdId;
+                    sidebarRow.classList.remove('ext-pick-draft');
+                    sidebarRow.querySelector('.ext-note-more').hidden = false;
+                };
+                const started = ProtoMarkdown.begin(region, { key: ProtoMarkdown.key(project, pageId, stateId, '$new'),
                     ...extImageOptions(),
                     value: '', extra: pick, theme: extTheme(), label: '添加标注', autosave: true, minHeight: 120,
                     save: async body => {
                         if (!createdId) {
-                            const id = await this.submitPick({ ...pick, body });
+                            const id = await this.submitPick({ ...pick, id: preview.note.id, body });
                             if (!id) return false;
                             createdId = id;
                             return { ok: true, key: ProtoMarkdown.key(project, pageId, stateId, id) };
@@ -4136,8 +4360,19 @@ ${JSON.stringify(task.targets || [], null, 2)}
                         return extSaveNoteBody(createdId, body);
                     },
                     onSaved: () => done(createdId),
-                    onAutosaved: () => { extRenderPins(); renderExtAnnotList(); },
-                    onEnd: saved => { if (!saved) cancelled(); } });
+                    onAutosaved: () => { syncSidebarRow(); extRenderPins(); renderExtAnnotList(); },
+                    onEnd: saved => {
+                        syncSidebarRow();
+                        if (sidebarRow && !createdId) sidebarRow.remove();
+                        if (extPickPreview === preview) extPickPreview = null;
+                        if (!saved) cancelled();
+                        if (pick.scopeKey === extScopeKey()) { extRenderPins(); renderExtAnnotList(); }
+                    } });
+                if (!started && extPickPreview === preview) {
+                    extPickPreview = null;
+                    extRenderPins(); renderExtAnnotList();
+                }
+                return started;
             },
             storePickDraft(draft, scope = extScopeKey()) {
                 const [project, pageId, stateId] = JSON.parse(scope);
@@ -4147,7 +4382,10 @@ ${JSON.stringify(task.targets || [], null, 2)}
                 const draft = ProtoMarkdown.getDraft(ProtoMarkdown.key(extId, extPage, extStateId, '$new'));
                 return draft?.extra ? { ...draft.extra, body: draft.value } : null;
             },
-            previewNumber(x, y) { return ProtoOrder.previewNumber(extPageNotes(), previewFrame.contentWindow, x, y); }
+            previewNumber(x, y) {
+                if (extPickPreview?.scopeKey === extScopeKey() && extPickPreview.pick.x === x && extPickPreview.pick.y === y && extPickPreview.displayNumber) return extPickPreview.displayNumber;
+                return ProtoOrder.previewNumber(extPageNotes(), previewFrame.contentWindow, x, y);
+            }
         };
 
         // ==================== 页面列表 ====================
@@ -4662,6 +4900,7 @@ ${JSON.stringify(task.targets || [], null, 2)}
         let dragStartY = 0;
 
         function onBoxSelectStart(e) {
+            if (inspectorTextEditor?.isBusy()) return;
             // 检查区域
             const wrapperRect = previewWrapper.getBoundingClientRect();
             if (e.clientX < wrapperRect.left || e.clientX > wrapperRect.right ||
@@ -4737,6 +4976,7 @@ ${JSON.stringify(task.targets || [], null, 2)}
         }
 
         function handleInspectorClick(e) {
+            if (inspectorTextEditor?.isBusy()) return;
             // 获取点击位置元素
             const iframeDoc = previewFrame.contentDocument;
             const iframeRect = previewFrameGeometry();
@@ -4898,11 +5138,11 @@ ${JSON.stringify(task.targets || [], null, 2)}
             const preview = $('selectedElementsPreview');
             preview.innerHTML = selectedElements.map((el, i) => {
                 const selector = generateSelector(el);
-                const summary = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (el.className ? '.' + el.className.split(' ')[0] : '');
+                const summary = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (typeof el.className === 'string' && el.className ? '.' + el.className.split(' ')[0] : '');
 
                 return `<div class="selected-element-item">
                     <div class="selected-element-tag">
-                         <span class="font-bold text-primary">${i + 1}. ${summary}</span>
+                         <span class="font-bold text-primary">${i + 1}. ${escapeHtml(summary)}</span>
                     </div>
                 </div>`;
             }).join('');
@@ -4910,16 +5150,47 @@ ${JSON.stringify(task.targets || [], null, 2)}
             const modal = $('inspectorModal');
             modal.classList.remove('hidden');
             modal.classList.add('active');
+            setInspectorEditMode(inspectorEditMode);
 
             // 不自动聚焦 input，以便用户继续操作
             // $('inspectorInput').focus(); 
         }
 
         function closeInspectorModal() {
+            inspectorTextEditor?.close();
             const modal = $('inspectorModal');
             modal.classList.add('hidden');
             modal.classList.remove('active');
             $('inspectorInput').value = '';
+        }
+
+        function setInspectorEditMode(mode) {
+            if (inspectorTextEditor?.isBusy()) { showToast('正在保存，请稍候'); return; }
+            inspectorEditMode = mode;
+            $('inspectorManualPane').hidden = mode !== 'manual';
+            $('inspectorAiPane').hidden = $('inspectorAiFooter').hidden = mode !== 'ai';
+            for (const [id, value] of [['inspectorManualTab', 'manual'], ['inspectorAiTab', 'ai']]) {
+                const tab = $(id); tab.setAttribute('aria-selected', String(mode === value)); tab.tabIndex = mode === value ? 0 : -1;
+                tab.onkeydown = event => {
+                    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                    event.preventDefault(); const next = event.key === 'Home' ? 'manual' : event.key === 'End' ? 'ai' : mode === 'manual' ? 'ai' : 'manual';
+                    setInspectorEditMode(next); $(next === 'manual' ? 'inspectorManualTab' : 'inspectorAiTab').focus();
+                };
+            }
+            if (mode === 'ai') { inspectorTextEditor?.close(); return; }
+            if (!inspectorTextEditor) inspectorTextEditor = ProtoTextEdit.create({
+                container: $('inspectorManualPane'),
+                scope: () => extId && extPage ? { projectId: extId, pageId: extPage, stateId: extStateId } : null,
+                request: async (action, payload) => {
+                    const response = await fetch('/api/proto/text/' + action, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                    const result = await response.json();
+                    if (!response.ok || !result.ok) throw Error(result.error || '文案修改失败');
+                    return result;
+                },
+                onSaved: () => { extRenderPins(); renderExtAnnotList(); },
+                onUndo: () => { closeInspectorModal(); clearAllSelections(); previewFrame.src = previewFrame.src; showToast('已撤销，正在刷新原型'); }
+            });
+            void inspectorTextEditor.select(selectedElements.slice());
         }
 
         function generateSelector(el) {

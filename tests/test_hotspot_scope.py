@@ -16,6 +16,7 @@ class El extends Target {
  getAttribute(k){return this.attrs[k]??null;}
  appendChild(el){this.children.push(el);el.parentElement=this;return el;}
  contains(el){return el===this||this.children.some(c=>c.contains(el));}
+ querySelectorAll(){return this.children.flatMap(c=>[c,...c.querySelectorAll('*')]);}
  closest(selector){for(let el=this;el;el=el.parentElement){if(el.matches(selector))return el;}return null;}
  matches(selector){return selector.split(',').some(s=>s===':disabled'?!!this.disabled:s==='input[type="checkbox"]'?this.tagName==='INPUT'&&this.type==='checkbox':s==='button'?this.tagName==='BUTTON':s==='input'?this.tagName==='INPUT':s==='[data-proto-hotspot="false"]'?this.dataset.protoHotspot==='false':s==='[data-prototype-owned]'?this.attrs['data-prototype-owned']!==undefined:false);}
  getBoundingClientRect(){return this.rect;}
@@ -65,3 +66,27 @@ def test_state_and_scope_changes_clear_previous_hints():
 
 def test_full_page_hints_require_explicit_all_mode():
     run_case("api.init({scope:{mode:'all'}});api.show();assert.deepEqual(shown(),['changed','group-check','old-explicit','old-export']);api.init({scope:{mode:'targets',protoIds:['changed']}});api.show();assert.deepEqual(shown(),['changed']);")
+
+
+def test_delegated_control_uses_its_explicit_marker_without_authorizing_siblings():
+    run_case("group.onclick=()=>{};inert.dataset.protoHotspot='true';group.appendChild(inert);api.init({scope:{mode:'targets',protoIds:['inert']}});api.show();assert.deepEqual(shown(),['inert']);assert.equal(api.inspect().items[0].status,'ready');")
+
+
+def test_clickable_container_never_becomes_a_region_sized_hint():
+    run_case("group.onclick=()=>{};api.init({scope:{mode:'targets',protoIds:['changed-group']}});assert.equal(api.show(),0);assert.equal(api.inspect().items[0].status,'container');")
+
+
+def test_large_custom_target_is_reported_instead_of_painting_a_panel():
+    run_case("explicit.rect={left:10,top:30,right:610,bottom:230,width:600,height:200};api.init({scope:{mode:'targets',protoIds:['old-explicit']}});assert.equal(api.show(),0);assert.equal(api.inspect().items[0].status,'oversized');")
+
+
+def test_diagnostics_distinguish_missing_duplicate_and_unbound_targets():
+    run_case("old.setAttribute('data-proto-id','changed');api.init({scope:{mode:'targets',protoIds:['missing','changed','inert']}});assert.equal(api.show(),0);assert.deepEqual(api.inspect().items.map(e=>e.status),['missing','duplicate','no-action']);")
+
+
+def test_manual_mapping_supports_delegated_control_without_editing_source_html():
+    run_case("api.init({scope:{mode:'targets',protoIds:[],manualTargets:[{id:'manual-save',label:'保存',anchor:{protoId:'inert'}}]}});assert.equal(api.show(),1);assert.deepEqual(shown(),['inert']);assert.equal(inert.dataset.protoHotspot,undefined);assert.equal(api.inspect().items[0].source,'manual');")
+
+
+def test_precise_manual_exclusion_overrides_full_mode():
+    run_case("api.init({scope:{mode:'all',excludedTargets:[{id:'exclude',anchor:{protoId:'changed'}}]}});api.show();assert.ok(!shown().includes('changed'));assert.ok(shown().includes('old-export'));")

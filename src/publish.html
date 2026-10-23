@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>发布管理 · 原型生成器</title>
+    <script src="home-theme.js?v=20261021-system-theme"></script>
+    <link rel="stylesheet" href="home.css?v=20261021-publish-theme"><link rel="stylesheet" href="pages-manager.css?v=20261021-publish-links">
+</head>
+<body class="home-app">
+    <header class="app-topbar"><a class="app-brand" href="index.html#projects">原型生成器</a><span class="app-context">发布管理</span></header>
+    <main id="pagesManager" class="pages-main">
+        <div class="pages-heading"><div><h1>发布管理</h1><p>查看远端原型，清理已经完成的发布内容。</p></div><div class="pages-heading-actions"><a id="pagesOverview" class="app-button app-secondary" target="_blank" rel="noopener noreferrer" hidden>Pages 总览 ↗</a><button id="pagesRefresh" type="button" class="app-button app-secondary">刷新远端</button></div></div>
+        <div class="pages-repository"><a id="pagesRepo" target="_blank" rel="noopener noreferrer">正在读取仓库…</a><span id="pagesSource"></span></div>
+        <p id="pagesError" class="pages-error" role="alert" hidden></p><p id="pagesMessage" class="pages-message" role="status"></p>
+        <section class="pages-stats" aria-label="容量概览"><div class="pages-stat"><h2>发布文件占用 · 估算</h2><strong id="pagesUsed">—</strong></div><div class="pages-stat"><h2>参考剩余 · 上限 1 GB</h2><strong id="pagesRemaining">—</strong></div><div class="pages-stat"><h2>远端项目</h2><strong id="pagesTotal">—</strong></div></section>
+        <div class="pages-usage"><div id="pagesUsageTrack" class="pages-usage-track" role="img" hidden><span id="pagesUsageBar"></span></div><p id="pagesUsageReason">容量按当前发布源文件估算。</p><p id="pagesChecked"></p></div>
+        <div class="pages-toolbar"><input id="pagesSearch" type="search" placeholder="搜索项目名称或目录" aria-label="搜索远端项目" disabled><select id="pagesSort" aria-label="远端项目排序" disabled><option value="size">占用从大到小</option><option value="date">最近发布</option><option value="name">项目名称</option></select></div>
+        <p id="pagesCount" class="pages-count" role="status">正在读取远端项目…</p><section id="pagesList" class="pages-list" aria-label="远端发布项目" aria-busy="true"><p class="pages-empty">正在读取发布信息…</p></section>
+        <p class="pages-notice">取消发布仅移除远端项目及总览记录，本地文件与 PRD 保留。Pages 重新部署后生效；Git 历史中的文件不会随之清除。</p>
+    </main>
+    <dialog id="pagesConfirm" class="pages-confirm" aria-labelledby="pagesConfirmTitle"><h2 id="pagesConfirmTitle">取消发布</h2><p>确定取消发布「<strong id="pagesConfirmName"></strong>」？对应的远端目录和总览记录将被移除：</p><code id="pagesConfirmPath"></code><p>本地文件与 PRD 保留。原有访问链接将在站点重新部署后失效。</p><footer><button id="pagesConfirmCancel" type="button" class="app-button app-secondary">保留发布</button><button id="pagesConfirmAccept" type="button" class="pages-remove">确认取消发布</button></footer></dialog>
+    <script src="pages-manager.js?v=20261021-publish-links"></script>
+</body>
+</html>

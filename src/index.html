@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI 原型生成器</title>
+    <script src="home-theme.js?v=20261021-system-theme"></script>
     <link rel="stylesheet" href="vendor/home-utilities.css?v=20261004">
     <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
     <style>
@@ -173,7 +174,8 @@
         }
     </style>
     <link rel="stylesheet" href="/agent-skills/prototype-flow/assets/project-navigation.css?v=20261015-vercel-workbench">
-    <link rel="stylesheet" href="home.css?v=20261015-model-manager-theme">
+    <link rel="stylesheet" href="home.css?v=20261021-publish-theme">
+    <link rel="stylesheet" href="pages-manager.css?v=20261021-publish-links">
 </head>
 
 <body class="home-app">
@@ -185,7 +187,7 @@
         <span class="app-context">工作空间</span>
         <div class="app-topbar-actions">
             <button class="app-icon-button" type="button" onclick="openModelManager()" aria-label="管理模型" title="管理模型"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8M1 12h3M20 12h3"/></svg></button>
-            <button id="homeThemeButton" class="app-icon-button" type="button" onclick="HomeUI.toggleTheme()" aria-label="切换外观" title="切换外观"></button>
+            <button id="homeThemeButton" class="app-icon-button" type="button" onclick="HomeUI.toggleTheme()" aria-label="外观" title="外观" aria-haspopup="menu" aria-expanded="false"></button>
                         <div class="relative" id="userMenuContainer">
                 <button id="userMenuBtn" onclick="toggleUserMenu()" class="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-semibold hover:bg-indigo-200 transition" title="用户菜单">
                     <i class="fas fa-user"></i>
@@ -249,7 +251,10 @@
                         </div>
                     </div>
                 </div>
-                <div class="library-results-line"><span id="externalSearchStatus" role="status" hidden></span><span id="localResultCount">正在读取项目…</span><span class="library-sort"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 4v16m-4-4 4 4 4-4M14 6h6M14 11h4"/></svg>最近创建</span></div>
+                <div class="library-results-line">
+                    <div class="library-results-summary"><button id="externalHiddenBack" type="button" class="library-hidden-button" onclick="toggleHiddenExternalProjects(false)" hidden><span aria-hidden="true">←</span>返回项目</button><span id="externalSearchStatus" role="status" hidden></span><span id="localResultCount">正在读取项目…</span></div>
+                    <div class="library-results-actions"><a class="library-hidden-button" href="publish.html" target="_blank" rel="noopener noreferrer">发布管理 ↗</a><button id="externalHiddenToggle" type="button" class="library-hidden-button" onclick="toggleHiddenExternalProjects()" aria-pressed="false" aria-controls="externalList"><span data-home-icon="hidden" aria-hidden="true"></span>已隐藏<span id="hiddenProjectCount" class="hidden-project-count">0</span></button><span class="library-sort"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 4v16m-4-4 4 4 4-4M14 6h6M14 11h4"/></svg>最近创建</span></div>
+                </div>
                 <div id="externalStatus" class="library-status" role="status"></div>
                 <div id="externalList" class="project-grid" aria-label="本地原型项目"><div class="library-loading">正在读取项目…</div></div>
             </section>
@@ -589,18 +594,18 @@
     <!-- 项目导出与分享弹窗 -->
     <div id="extPublishModal" class="fixed inset-0 z-50 hidden items-center justify-center">
         <div class="absolute inset-0 bg-gray-900/60 backdrop-blur-sm" onclick="closeExtPublishModal()"></div>
-        <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+        <div class="home-publish-dialog relative bg-white rounded-2xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
             <!-- 头部 -->
             <div
-                class="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-purple-50">
+                class="home-publish-header flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-indigo-50 to-purple-50">
                 <div>
                     <h3 class="font-bold text-lg text-gray-900 flex items-center gap-2">
                         <i class="fas fa-rocket text-indigo-500"></i> 发布 & 导出
                     </h3>
                     <p id="extPubProjectName" class="text-sm text-gray-500 mt-0.5"></p>
                 </div>
-                <button onclick="closeExtPublishModal()"
-                    class="text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-white/60 transition" aria-label="关闭发布与导出">
+                <button type="button" class="home-publish-close text-gray-400 hover:text-gray-600 p-2 rounded-lg hover:bg-white/60 transition" onclick="closeExtPublishModal()"
+                    aria-label="关闭发布与导出">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -662,19 +667,19 @@
                     <!-- 未配置 GitHub 时显示 -->
                     <div id="extPubNotConfigured" class="hidden">
                         <div
-                            class="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 flex items-start gap-2 text-sm text-amber-700">
+                            class="home-publish-warning bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3 flex items-start gap-2 text-sm text-amber-700">
                             <i class="fas fa-exclamation-triangle mt-0.5 flex-shrink-0"></i>
                             <span>需要先配置 GitHub Token 才能使用发布功能</span>
                         </div>
-                        <button onclick="openGithubSetup()"
-                            class="w-full border-2 border-dashed border-indigo-300 text-indigo-600 hover:border-indigo-500 hover:bg-indigo-50 py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2">
+                        <button class="home-publish-setup w-full border-2 border-dashed border-indigo-300 text-indigo-600 hover:border-indigo-500 hover:bg-indigo-50 py-2.5 rounded-lg text-sm font-medium transition flex items-center justify-center gap-2" onclick="openGithubSetup()"
+                            type="button">
                             <i class="fas fa-cog"></i> 配置 GitHub（一次配置永久使用）
                         </button>
                     </div>
 
                     <!-- 已配置 GitHub 时显示 -->
                     <div id="extPubConfigured" class="hidden space-y-3">
-                        <div class="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
+                        <div class="home-publish-repo flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 text-sm">
                             <span class="text-gray-600 flex items-center gap-1.5">
                                 <i class="fab fa-github text-gray-500"></i>
                                 <span id="extPubRepoDisplay" class="font-mono text-xs"></span>
@@ -683,6 +688,7 @@
                                 class="text-xs text-indigo-500 hover:text-indigo-700 transition">修改配置</button>
                         </div>
 
+                        <div class="pages-summary" data-pages-summary></div>
                         <!-- 发布链接（已发布时显示） -->
                         <div id="extPubPublishedInfo" class="hidden bg-green-50 border border-green-200 rounded-lg p-3">
                             <div class="flex items-center gap-2 mb-2">
@@ -694,15 +700,15 @@
                                 <input id="extPubPublishedUrl" type="text" readonly aria-label="发布链接"
                                     class="flex-1 text-xs bg-white border border-green-200 rounded px-2 py-1.5 text-gray-700 font-mono truncate cursor-pointer"
                                     onclick="this.select()">
-                                <button onclick="copyExtPubUrl()"
+                                <button type="button" onclick="copyExtPubUrl()"
                                     class="flex-shrink-0 px-2 py-1.5 bg-green-600 text-white text-xs rounded hover:bg-green-700 transition"
-                                    title="复制链接">
-                                    <i class="fas fa-copy"></i>
+                                    title="复制链接" aria-label="复制发布链接">
+                                    <i class="fas fa-copy" aria-hidden="true"></i>
                                 </button>
-                                <button onclick="openExtPubUrl()"
+                                <button type="button" onclick="openExtPubUrl()"
                                     class="flex-shrink-0 px-2 py-1.5 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 transition"
-                                    title="在浏览器打开">
-                                    <i class="fas fa-external-link-alt"></i>
+                                    title="在浏览器打开" aria-label="打开发布链接">
+                                    <i class="fas fa-external-link-alt" aria-hidden="true"></i>
                                 </button>
                             </div>
                         </div>
@@ -970,9 +976,10 @@
     </div>
 
     <script src="/agent-skills/prototype-flow/assets/project-navigation.js?v=20261015-vercel-workbench"></script>
-    <script src="home-ui.js?v=20261015-thumbnail-badges"></script>
+    <script src="home-ui.js?v=20261021-system-theme"></script>
     <script src="design-settings.js?v=20261005-visual-presets"></script>
-    <script src="script.js?v=20261015-model-manager-theme"></script>
+    <script src="pages-manager.js?v=20261021-publish-links"></script>
+    <script src="script.js?v=20261020-hidden-projects"></script>
 </body>
 
 </html>

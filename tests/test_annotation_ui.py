@@ -67,7 +67,7 @@ const assert=require('node:assert/strict'),vm=require('node:vm');
 const picked={tagName:'BUTTON',classList:{add(){}}},points=[];
 const frame={offsetWidth:1200,offsetHeight:840,clientLeft:10,clientTop:10,getBoundingClientRect:()=>({left:200,top:50,width:600,height:420}),contentDocument:{elementFromPoint:(x,y)=>{points.push({x,y});return picked;}}};
 const document={},parentDocument={};
-const context={console,previewFrame:frame,selectedElements:[],clearAllSelections(){},showInspectorModal(){},document,window:{frameElement:frame},cardDoc:()=>parentDocument};
+const context={console,previewFrame:frame,inspectorTextEditor:null,selectedElements:[],clearAllSelections(){},showInspectorModal(){},document,window:{frameElement:frame},cardDoc:()=>parentDocument};
 vm.createContext(context);vm.runInContext(GEOMETRY+CLICK+TO_CARD,context);
 context.handleInspectorClick({clientX:355,clientY:155});
 assert.deepEqual(points,[{x:300,y:200}]);
@@ -83,12 +83,13 @@ def test_prd_toggle_preserves_width_and_moves_focus_out_of_collapsed_panel():
 const assert=require('node:assert/strict'),vm=require('node:vm');
 function element(initial=[]){const classes=new Set(initial);return {style:{},attributes:{},classList:{add:v=>classes.add(v),remove:v=>classes.delete(v),contains:v=>classes.has(v),toggle(v,on){if(on===undefined)on=!classes.has(v);if(on)classes.add(v);else classes.delete(v);}},setAttribute(k,v){this.attributes[k]=v;},focus(){this.focused=true;},contains(){return true;}};}
 const sidebar=element(['expanded']),floating=element(),toggle=element(),content=element(['flex']);
-let refreshes=0;
+let refreshes=0,cancelledPicks=0;
 const context={prdSidebar:sidebar,prdFloatingToggle:floating,prdToggle:toggle,prdContentEl:content,prdExpanded:true,
-localStorage:{getItem:()=> '512'},document:{activeElement:{}},extId:'fixture',extRefreshSidebar:()=>refreshes++,previewFrame:null};
+localStorage:{getItem:()=> '512'},document:{activeElement:{}},pageNavSizer:{refresh(){}},extId:'fixture',extRefreshSidebar:()=>refreshes++,previewFrame:null,extInteractions:{cancelPick(){cancelledPicks++;}}};
 vm.createContext(context);vm.runInContext(SOURCE,context);
 context.togglePrdSidebar();
 assert.equal(context.prdExpanded,false);assert.equal(sidebar.classList.contains('collapsed'),true);
+assert.equal(cancelledPicks,1);
 assert.equal(sidebar.style.width,'');assert.equal(content.classList.contains('hidden'),true);
 assert.equal(floating.focused,true);assert.equal(floating.attributes['aria-expanded'],'false');
 assert.equal(floating.attributes['aria-label'],'展开 PRD 面板');assert.equal(floating.classList.contains('hidden'),false);
@@ -589,7 +590,7 @@ def annotation_harness(test):
         if ('hoverBox' in values) hoverBox = values.hoverBox;
         if ('pinLayer' in values) pinLayer = values.pinLayer;
     };
-    globalThis.testAPI = { onKeyDown, onClick, placeCard, startDrag, moveDrag, endDrag, cancelDrag, closeInputCard, hideHover, setVisible, layoutPins };
+    globalThis.testAPI = { onKeyDown, onClick, onMouseMove, openInputCard, placeCard, startDrag, moveDrag, endDrag, cancelDrag, closeInputCard, hideHover, setVisible, layoutPins };
 """
     instrumented = ANNOTATE.replace('    window.ProtoAnnotate = {', hook + '\n    window.ProtoAnnotate = {')
     return node("""
@@ -605,12 +606,13 @@ global.window = { addEventListener() {}, parent: { ProtoExtHost: {
     markdown: { isBusy: () => false, current: () => null, focus: () => calls.push(['focus']), suspend: card => calls.push(['suspend', card]) }
 } } };
 global.document = { documentElement: { clientWidth: 276, clientHeight: 600 }, addEventListener() {}, removeEventListener() {} };
+global.ProtoAnchors = { point: note => ({ point: {x:note.x,y:note.y,visible:true} }) };
 global.matchMedia = () => ({ matches: true });
 """ + instrumented + '\n' + test)
 
 
-def test_frozen_preview_number_survives_mouseleave_until_card_closes():
-    """点击落点后序号冻结（pending）：鼠标移出 iframe 触发的 mouseleave 不得藏掉它；关卡清掉 pending 后才隐藏。"""
+def test_pending_number_survives_mouseleave_until_draft_closes():
+    """鼠标移出 iframe 不隐藏已落点序号；结束新增会话后隐藏。"""
     annotation_harness("""
 const box={style:{display:''}};
 testState({active:true, hoverBox:box, pending:{anchor:null,x:10,y:10}, inputCard:{remove(){}}});
@@ -618,6 +620,98 @@ testAPI.hideHover(); assert.equal(box.style.display,'');
 testAPI.closeInputCard(true); assert.equal(box.style.display,'none');
 box.style.display=''; testState({pending:null}); testAPI.hideHover(); assert.equal(box.style.display,'none');
 """)
+
+
+def test_activating_pick_mode_never_restores_an_old_location_or_creates_a_number():
+    annotation_harness(r'''
+const h=window.parent.ProtoExtHost;let restored=0,opened=0;
+h.getPickDraft=()=>{restored++;return {x:30,y:90,scopeKey:'page-a',body:'保留的草稿'};};
+h.prdExpanded=()=>true;h.beginSidebarPick=()=>{opened++;return ()=>{};};
+document.getElementById=()=>true;
+const box={style:{display:'none'}};
+testState({active:false,pending:null,hoverBox:box,pinLayer:{querySelectorAll:()=>[]}});
+window.ProtoAnnotate.activate();
+assert.equal(window.ProtoAnnotate.isActive(),true);assert.equal(restored,0);assert.equal(opened,0);assert.equal(box.style.display,'none');
+''')
+
+
+def test_moving_mouse_shows_number_cursor_without_creating_an_annotation():
+    annotation_harness(r'''
+let previews=0,opened=0;const attributes=new Set(),h=window.parent.ProtoExtHost;
+h.previewNumber=()=>{previews++;return 3;};h.beginSidebarPick=()=>opened++;h.beginPick=()=>opened++;
+document.documentElement.toggleAttribute=(key,on)=>on?attributes.add(key):attributes.delete(key);
+const box={style:{display:'none'},offsetWidth:36};testState({active:true,pending:null,hoverBox:box});
+testAPI.onMouseMove({clientX:40,clientY:120,target:{closest:()=>false}});
+assert.equal(previews,1);assert.equal(box.textContent,3);assert.equal(box.style.display,'');assert.equal(box.style.left,'40px');assert.equal(box.style.top,'120px');
+assert.equal(attributes.has('data-proto-pick-cursor'),true);assert.equal(opened,0);assert.equal(window.ProtoAnnotate.cardOpen(),false);
+testAPI.onMouseMove({clientX:90,clientY:170,target:{closest:()=>false}});
+assert.equal(box.style.left,'90px');assert.equal(box.style.top,'170px');assert.equal(opened,0);
+testAPI.hideHover();assert.equal(box.style.display,'none');assert.equal(attributes.has('data-proto-pick-cursor'),false);
+''')
+
+
+@pytest.mark.parametrize('kind', ['document', 'element'])
+def test_unsaved_number_tracks_its_anchor_before_any_text_is_entered(kind):
+    annotation_harness(r'''
+const h=window.parent.ProtoExtHost,pick={x:10,y:10,scopeKey:'page-a',placement:{kind:KIND,x:90,y:230}};
+let scrollTop=0,scrollLeft=0,visible=true;
+ProtoAnchors.point=note=>{assert.equal(note,pick);return {point:{x:90-scrollLeft,y:230-scrollTop,visible}};};
+h.prdExpanded=()=>true;h.previewNumber=()=>3;h.beginSidebarPick=()=>()=>{};
+const box={style:{},offsetWidth:36};testState({active:true,pending:pick,hoverBox:box,pinLayer:{querySelectorAll:()=>[]}});
+testAPI.openInputCard(10,10);assert.equal(box.style.left,'90px');assert.equal(box.style.top,'230px');
+scrollTop=60;scrollLeft=20;testAPI.layoutPins();assert.equal(box.style.left,'70px');assert.equal(box.style.top,'170px');
+visible=false;testAPI.layoutPins();assert.equal(box.style.display,'none');
+visible=true;scrollTop=30;testAPI.layoutPins();assert.equal(box.style.display,'');assert.equal(box.style.top,'200px');
+assert.equal(calls.some(call=>call[0]==='move'),false);
+'''.replace('KIND', repr(kind)))
+
+
+def test_number_cursor_becomes_a_bound_marker_only_on_click():
+    annotation_harness(r'''
+const h=window.parent.ProtoExtHost,attributes=new Set();let opened=0;
+document.documentElement.toggleAttribute=(key,on)=>on?attributes.add(key):attributes.delete(key);
+h.previewNumber=()=>2;h.prdExpanded=()=>true;h.scopeKey=()=> 'page-a';
+h.beginSidebarPick=pick=>{opened++;assert.equal(pick.placement.y,200);return ()=>{};};
+ProtoAnchors.at=()=>({});ProtoAnchors.serialize=()=>({protoId:'target'});
+ProtoAnchors.placement=(el,x,y)=>({kind:'document',x,y});
+ProtoAnchors.point=note=>({point:{x:note.placement.x,y:note.placement.y,visible:true}});
+const box={style:{display:'none'},offsetWidth:36},target={closest:()=>false};
+testState({active:true,hoverBox:box,pinLayer:{querySelectorAll:()=>[]}});
+testAPI.onMouseMove({clientX:40,clientY:120,target});assert.equal(opened,0);assert.equal(attributes.has('data-proto-pick-cursor'),true);
+testAPI.onClick({clientX:80,clientY:200,target,preventDefault(){},stopImmediatePropagation(){}});
+assert.equal(opened,1);assert.equal(box.style.left,'80px');assert.equal(box.style.top,'200px');assert.equal(attributes.has('data-proto-pick-cursor'),false);
+testAPI.onMouseMove({clientX:160,clientY:300,target});assert.equal(box.style.left,'80px');assert.equal(box.style.top,'200px');assert.equal(opened,1);
+''')
+
+
+def test_new_annotation_uses_sidebar_without_creating_a_floating_card():
+    annotation_harness(r'''
+const host=window.parent.ProtoExtHost, pick={x:20,y:90,scopeKey:'page-a'};
+const box={style:{}};let done,cancelled,closed=0;
+host.prdExpanded=()=>true;host.scopeKey=()=> 'page-a';host.previewNumber=()=>4;
+host.beginSidebarPick=(value,onDone,onCancel)=>{assert.equal(value,pick);done=onDone;cancelled=onCancel;return ()=>closed++;};
+host.focusNote=id=>calls.push(['sidebar',id]);
+testState({active:true,pending:pick,hoverBox:box});
+// document.createElement intentionally absent: a floating card must never be made.
+testAPI.openInputCard(20,90);
+assert.equal(window.ProtoAnnotate.cardOpen(),false);assert.equal(box.textContent,4);assert.equal(closed,0);
+done('note-new');assert.equal(closed,1);assert.equal(box.style.display,'none');
+assert.deepEqual(calls.at(-1),['sidebar','note-new']);
+cancelled();assert.equal(closed,1);
+''')
+
+
+def test_sidebar_new_annotation_closes_on_escape_and_ignores_late_save_callback():
+    annotation_harness(r'''
+const host=window.parent.ProtoExtHost,pick={x:20,y:90,scopeKey:'page-a'};
+let done,closed=0;host.prdExpanded=()=>true;host.scopeKey=()=> 'page-a';host.previewNumber=()=>2;
+host.beginSidebarPick=(value,onDone)=>{done=onDone;return ()=>closed++;};
+host.focusNote=id=>calls.push(['sidebar',id]);
+testState({active:true,pending:pick,hoverBox:{style:{}}});testAPI.openInputCard(20,90);
+testAPI.onKeyDown({key:'Escape',target:{closest:()=>false},preventDefault(){},stopPropagation(){}});
+assert.equal(closed,1);assert.equal(window.ProtoAnnotate.isActive(),true);
+done('late-note');assert.equal(calls.some(c=>c[0]==='sidebar'),false);
+''')
 
 
 def test_pins_hidden_in_preview_and_inspector_modes():
@@ -985,11 +1079,9 @@ def test_export_prd_area_resizable():
     # 宽度记忆回放 + 收起时清除内联宽度让 --right 归 0
     assert 'const applyPrdWidth' in shell
     assert "$('layout').style.removeProperty('--right')" in shell
-    # 拖拉条常显握把（中部 4×40 圆角条），不再只靠 hover 才能发现；悬停/拖动时整条亮主色
-    resizer_after = shell.split('#prd-resizer::after {', 1)[1].split('}', 1)[0]
-    assert 'width: 4px' in resizer_after and 'height: 40px' in resizer_after and 'background: var(--control)' in resizer_after
-    assert '#prd-resizer:hover::before { background: var(--accent); }' in shell
-    assert '#prd-resizer.resizing::before' in shell
+    # 最新交互保留透明拖动热区，移除握把图标与悬浮 / 拖动时的蓝色高亮。
+    assert '#prd-resizer::after' not in shell and '#prd-resizer::before' not in shell
+    assert '#prd-resizer:hover' not in shell and '#prd-resizer.resizing::before' not in shell
 
 
 def test_review_shell_prd_compact_spacing_and_empty_sections_hidden():
@@ -1153,8 +1245,8 @@ def test_hidden_pins_stay_hidden_and_guide_is_transparent_overlay():
     # 点击绑在整个 <button> 框上（不只标签），透明区域同样可点；标签由 revealHint 动态给出（展开 / 选择值 / 切换 Tab 等）
     assert 'marker.onclick = async (e) => { e.stopPropagation(); await revealThrough(marker.__paTarget); scheduleLayout(); }' in annotate
     assert 'await window.ProtoAnchors.revealAndWait(guide.__rvTarget)' in pins
-    assert '<span class="pa-guide-tag">${ICON}<span>${g.label} · ${g.notes.length}</span></span>' in annotate
-    assert '<span class="__review_guide_tag">\' + GICON + \'<span>\' + g.label + \' · \' + g.notes.length + \'</span></span>' in pins
+    assert '<span class="pa-guide-tag">${ICON}<span>${safeLabel} · ${g.notes.length}</span></span>' in annotate
+    assert '<span class="__review_guide_tag">\' + GICON + \'<span>\' + safeLabel + \' · \' + g.notes.length + \'</span></span>' in pins
 
 
 def test_reveal_click_passes_through_annotate_capture():
@@ -1170,16 +1262,17 @@ def test_reveal_click_passes_through_annotate_capture():
     assert 'await revealThrough(note.anchor);' in annotate
 
 
-def test_pick_preview_number_stays_visible_before_and_after_click():
-    """添加标注的预览序号必须稳定：DOM 重排不隐藏；点击后即使输入卡打开、鼠标移入卡内也冻结在落点旁。"""
+def test_pick_cursor_preview_is_separate_from_bound_annotation_layout():
+    """移动鼠标只显示序号指针；落点后使用页面锚点参与重排。"""
     annotate = (SRC / 'proto-annotate.js').read_text(encoding='utf-8')
     assert 'function ensureHoverBox()' in annotate and 'function showPreviewNumber(x, y)' in annotate
-    # 点击前：普通 mousemove 更新序号；点击后：pending/inputCard 分支直接 return，不能执行 hideHover
+    # 点击前显示指针预览；点击后的移动不改变绑定位置。
     on_move = annotate.split('function onMouseMove(e) {', 1)[1].split('\n    }', 1)[0]
     assert 'if (!active || drag || saving) { hideHover(); return; }' in on_move
     assert 'if (pending || inputCard) return;' in on_move
     assert 'if (pending || inputCard) { hideHover(); return; }' not in on_move
-    assert 'showPreviewNumber(e.clientX, e.clientY);' in on_move
+    assert 'showPreviewNumber(e.clientX, e.clientY);' not in on_move
+    assert 'showPickCursor(e.clientX, e.clientY);' in on_move
     # 点击后即便此前没有 hoverBox，也主动创建并显示；关闭输入卡才隐藏
     open_card = annotate.split('function openInputCard(x, y) {', 1)[1].split('function makeCard()', 1)[0]
     assert 'showPreviewNumber(x, y);' in open_card
@@ -1214,8 +1307,8 @@ def test_conditional_visibility_guidance_is_generic():
     assert 'ProtoAnchors.revealHint?.(note.anchor, el)' in annotate
     assert 'window.ProtoAnchors.revealHint?.(n.anchor, el)' in pins
     assert "label: '展开', kind: 'disclosure'" in annotate and "label: '展开', kind: 'disclosure'" in pins
-    assert '${g.label} · ${g.notes.length}' in annotate
-    assert "g.label + ' · ' + g.notes.length" in pins
+    assert '${safeLabel} · ${g.notes.length}' in annotate
+    assert "safeLabel + ' · ' + g.notes.length" in pins
     # 新落点保存 rx/ry；旧落点在控件响应式缩小时用 anchor.rect 比例回退，不因绝对 x 越界误判失锚
     placement = anchors.split('function placement(', 1)[1].split('function point(', 1)[0]
     point = anchors.split('function point(', 1)[1].split('function inBox(', 1)[0]

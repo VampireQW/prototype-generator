@@ -377,7 +377,7 @@ def test_full_prd_does_not_implicitly_enable_full_page_hotspots(proj):
     data['pages'][0]['targets'] = []
     proto_import.import_draft(proj, data)
     state = next(p for p in proto_meta.load_bundle(proj)['project']['pages'] if p['id'] == 'home')['states'][0]
-    assert state['interactionHints'] == {'mode': 'targets', 'protoIds': []}
+    assert state.get('interactionHints', {'mode': 'targets', 'protoIds': []}) == {'mode': 'targets', 'protoIds': []}
 
 
 def test_new_round_replaces_only_its_state_hint_scope(proj):
@@ -461,7 +461,7 @@ def test_structured_markdown_preserved_and_no_background_or_hints_invented(proj)
     assert saved['prd']['annotations'][0]['body'] == body
     assert not saved['prd']['documents']
     page = next(p for p in saved['project']['pages'] if p['id'] == 'home')
-    assert page['states'][0]['interactionHints'] == {'mode': 'targets', 'protoIds': []}
+    assert page['states'][0].get('interactionHints', {'mode': 'targets', 'protoIds': []}) == {'mode': 'targets', 'protoIds': []}
 
 
 def test_display_only_annotation_does_not_require_other_sections_or_click_hints(proj):
@@ -471,7 +471,7 @@ def test_display_only_annotation_does_not_require_other_sections_or_click_hints(
     saved = proto_meta.load_bundle(proj)
     assert saved['prd']['annotations'][0]['body'] == body
     assert not saved['prd']['documents'] and len(report['annotations']) == 1
-    assert saved['project']['pages'][0]['states'][0]['interactionHints']['protoIds'] == []
+    assert not saved['project']['pages'][0]['states'][0].get('interactionHints', {}).get('protoIds')
 
 
 def test_new_page_document_cannot_repeat_development_implementation(proj):

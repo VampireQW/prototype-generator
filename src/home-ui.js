@@ -7,6 +7,7 @@
         open: '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z"/><circle cx="12" cy="12" r="3"/>',
         publish: '<path d="M12 16V3m-4 4 4-4 4 4M4 14v6h16v-6"/>',
         remove: '<path d="m4 4 16 16M8 8l-2 2a4 4 0 0 0 6 6l2-2M16 16l2-2a4 4 0 0 0-6-6l-2 2"/>',
+        hidden: '<path d="m3 3 18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M8.5 5.6A11 11 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.1 3.8M6.3 6.3A18 18 0 0 0 2 12s4 7 10 7a11 11 0 0 0 5.7-1.7"/>',
         delete: '<path d="M4 7h16M9 7V4h6v3M6 7l1 14h10l1-14M10 11v6M14 11v6"/>',
         edit: '<path d="m15 4 5 5M4 20l5-1L20 8a3.5 3.5 0 0 0-5-5L4 14v6Z"/>',
         copy: '<rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/>',
@@ -21,6 +22,7 @@
         model: '<rect x="4" y="7" width="16" height="13" rx="3"/><path d="M12 3v4M8 12h.01M16 12h.01M8 16h8"/>',
         sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M5 19l1.5-1.5M17.5 6.5 19 5"/>',
         moon: '<path d="M20 14a8.5 8.5 0 0 1-10-10A9 9 0 1 0 20 14Z"/>',
+        system: '<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
         more: '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
         user: '<circle cx="12" cy="8" r="3"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/>'
     };
@@ -46,36 +48,41 @@
         if (restore && trigger.isConnected) trigger.focus({ preventScroll: true });
     }
     function more(name, items) {
-        const trigger = action('more', `更多操作 ${name}`, () => {
-            if (activeMenu?.trigger === trigger) { closeMenu(true); return; }
-            closeMenu();
-            const menu = node('div', 'project-menu'); menu.setAttribute('role', 'menu');
-            menu.setAttribute('aria-label', `${name}的操作`);
-            items.forEach(item => {
-                const button = node('button', 'project-menu-item'); button.type = 'button';
-                button.setAttribute('role', 'menuitem'); button.disabled = !!item.disabled;
-                button.innerHTML = icon(item.icon); button.append(node('span', '', item.label));
-                if (item.danger) button.dataset.danger = 'true';
-                button.onclick = () => { closeMenu(true); item.handler?.(); };
-                menu.append(button);
-            });
-            document.body.append(menu); trigger.setAttribute('aria-expanded', 'true');
-            activeMenu = { menu, trigger };
-            const r = trigger.getBoundingClientRect(), m = menu.getBoundingClientRect();
-            menu.style.left = Math.max(8, Math.min(r.right - m.width, innerWidth - m.width - 8)) + 'px';
-            menu.style.top = (r.bottom + m.height + 8 < innerHeight ? r.bottom + 6 : Math.max(8, r.top - m.height - 6)) + 'px';
-            menu.querySelector('button:not(:disabled)')?.focus({ preventScroll: true });
-            menu.onkeydown = e => {
-                const buttons = [...menu.querySelectorAll('button:not(:disabled)')];
-                const i = buttons.indexOf(document.activeElement);
-                if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
-                    e.preventDefault(); buttons[e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus();
-                } else if (e.key === 'Escape') { e.preventDefault(); closeMenu(true); }
-                else if (e.key === 'Tab') closeMenu(true);
-            };
-        });
+        const trigger = action('more', `更多操作 ${name}`, () => openMenu(trigger, `${name}的操作`, items));
         trigger.setAttribute('aria-haspopup', 'menu'); trigger.setAttribute('aria-expanded', 'false');
         return trigger;
+    }
+    function openMenu(trigger, label, items, className = '') {
+        if (activeMenu?.trigger === trigger) { closeMenu(true); return; }
+        closeMenu();
+        const menu = node('div', 'project-menu' + (className ? ' ' + className : '')); menu.setAttribute('role', 'menu');
+        menu.setAttribute('aria-label', label);
+        items.forEach(item => {
+            const button = node('button', 'project-menu-item'); button.type = 'button';
+            button.setAttribute('role', item.checked == null ? 'menuitem' : 'menuitemradio'); button.disabled = !!item.disabled;
+            button.innerHTML = icon(item.icon); button.append(node('span', '', item.label));
+            if (item.checked != null) {
+                button.setAttribute('aria-checked', String(item.checked));
+                if (item.checked) { const check = node('span', 'home-theme-check'); check.innerHTML = icon('check'); button.append(check); }
+            }
+            if (item.danger) button.dataset.danger = 'true';
+            button.onclick = () => { closeMenu(true); item.handler?.(); };
+            menu.append(button);
+        });
+        document.body.append(menu); trigger.setAttribute('aria-expanded', 'true');
+        activeMenu = { menu, trigger };
+        const r = trigger.getBoundingClientRect(), m = menu.getBoundingClientRect();
+        menu.style.left = Math.max(8, Math.min(r.right - m.width, innerWidth - m.width - 8)) + 'px';
+        menu.style.top = (r.bottom + m.height + 8 < innerHeight ? r.bottom + 6 : Math.max(8, r.top - m.height - 6)) + 'px';
+        (menu.querySelector('[aria-checked="true"]') || menu.querySelector('button:not(:disabled)'))?.focus({ preventScroll: true });
+        menu.onkeydown = e => {
+            const buttons = [...menu.querySelectorAll('button:not(:disabled)')];
+            const i = buttons.indexOf(document.activeElement);
+            if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+                e.preventDefault(); buttons[e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1 : (i + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+            } else if (e.key === 'Escape') { e.preventDefault(); closeMenu(true); }
+            else if (e.key === 'Tab') closeMenu(true);
+        };
     }
     const previewObserver = new IntersectionObserver(entries => {
         entries.forEach(entry => {
@@ -169,15 +176,19 @@
     }
     function show(view) { const hash = view === 'new' ? '#new' : '#projects'; if (location.hash !== hash) location.hash = hash; route(); }
     function goHome(event) { event?.preventDefault(); show('projects'); }
-    function setTheme(theme) {
-        document.documentElement.dataset.homeTheme = theme;
+    const themeLabels = { system: '跟随系统', light: '浅色', dark: '深色' };
+    function renderTheme() {
         const button = $('homeThemeButton');
-        button.innerHTML = icon(theme === 'dark' ? 'sun' : 'moon');
-        button.title = theme === 'dark' ? '切换浅色外观' : '切换深色外观'; button.setAttribute('aria-label', button.title);
+        const mode = HomeTheme.getMode();
+        button.innerHTML = icon({ system: 'system', light: 'sun', dark: 'moon' }[mode]);
+        button.title = `外观：${themeLabels[mode]}`; button.setAttribute('aria-label', button.title);
+        if (activeMenu?.trigger === button) closeMenu(true);
     }
     function toggleTheme() {
-        const theme = document.documentElement.dataset.homeTheme === 'dark' ? 'light' : 'dark';
-        setTheme(theme); try { localStorage.setItem('prototype-home-theme', theme); } catch (_) { /* 外观仅保留在本次页面 */ }
+        openMenu($('homeThemeButton'), '外观', Object.entries(themeLabels).map(([mode, label]) => ({
+            label, icon: { system: 'system', light: 'sun', dark: 'moon' }[mode],
+            checked: mode === HomeTheme.getMode(), handler: () => HomeTheme.setMode(mode)
+        })), 'home-theme-menu');
     }
     function summary() {
         if (!$('summarySkill') || typeof pages === 'undefined') return;
@@ -257,8 +268,7 @@
         document.documentElement.dataset.homeInput = 'pointer';
         document.addEventListener('pointerdown', () => { document.documentElement.dataset.homeInput = 'pointer'; }, true);
         document.addEventListener('keydown', event => { if (event.key === 'Tab') document.documentElement.dataset.homeInput = 'keyboard'; }, true);
-        let theme = 'light'; try { theme = localStorage.getItem('prototype-home-theme') || theme; } catch (_) { /* 使用浅色 */ }
-        setTheme(theme === 'dark' ? 'dark' : 'light');
+        renderTheme(); window.addEventListener('home-theme-change', renderTheme);
         route(); window.addEventListener('hashchange', route);
         document.addEventListener('input', summary); document.addEventListener('change', () => queueMicrotask(summary));
         new MutationObserver(summary).observe($('pageCardsContainer'), { childList: true, subtree: true });

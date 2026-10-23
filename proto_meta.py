@@ -185,6 +185,37 @@ def validate_size(value, label="视口"):
     return {k: value[k] for k in ("width", "height")}
 
 
+def validate_interaction_locator(value, label='热区定位'):
+    if not isinstance(value, dict):
+        raise ValueError(f'{label}无效')
+    for key, limit in (('protoId', 300), ('selector', 2000), ('tag', 80), ('text', 200), ('parentText', 200)):
+        if key in value and (not isinstance(value[key], str) or len(value[key]) > limit):
+            raise ValueError(f'{label}字段无效：{key}')
+    if not value.get('protoId') and not value.get('selector'):
+        raise ValueError(f'{label}缺少稳定 ID 或选择器')
+
+
+def validate_reveal_steps(steps):
+    if not isinstance(steps, list) or len(steps) > 12:
+        raise ValueError('展开入口最多支持 12 步')
+    seen = set()
+    for step in steps:
+        validate_interaction_locator(step, '展开入口定位')
+        key = (step.get('protoId'), step.get('selector'))
+        kind = step.get('kind')
+        if key in seen or kind not in ('click', 'select', 'checkbox', 'radio', 'aria-selected', 'aria-expanded', 'aria-pressed', 'aria-checked'):
+            raise ValueError('展开入口重复或操作类型无效')
+        seen.add(key)
+        value = step.get('value')
+        if kind in ('checkbox', 'radio'):
+            if type(value) is not bool:
+                raise ValueError('展开入口的勾选值须为布尔值')
+        elif not isinstance(value, str) or len(value) > 1000:
+            raise ValueError('展开入口的目标值无效')
+        if 'label' in step and (not isinstance(step['label'], str) or len(step['label']) > 120):
+            raise ValueError('展开入口文案无效')
+
+
 def validate_interaction_hints(value):
     if value is None:
         return
@@ -193,6 +224,18 @@ def validate_interaction_hints(value):
     ids = value.get('protoIds', [])
     if not isinstance(ids, list) or any(not isinstance(pid, str) or not pid.strip() for pid in ids) or len(set(ids)) != len(ids):
         raise ValueError('interactionHints.protoIds 必须为不重复的元素 ID 数组')
+    for field in ('manualTargets', 'excludedTargets'):
+        targets = value.get(field, [])
+        if not isinstance(targets, list) or len(targets) > 2000:
+            raise ValueError('手动热区清单无效')
+        seen = set()
+        for target in targets:
+            if not isinstance(target, dict) or not isinstance(target.get('id'), str) or not target['id'].strip() or len(target['id']) > 100 or target['id'] in seen:
+                raise ValueError('手动热区 ID 无效或重复')
+            seen.add(target['id'])
+            if 'label' in target and (not isinstance(target['label'], str) or len(target['label']) > 120):
+                raise ValueError('手动热区名称无效')
+            validate_interaction_locator(target.get('anchor'))
 
 
 def remember_annotation_deletions(before, after):
@@ -292,6 +335,12 @@ def validate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
         if page.get('progress') is not None and (type(page['progress']) is not int or not 0 <= page['progress'] <= 100):
             raise ValueError('页面完成进度必须为 0–100 的整数')
         safe_relative(page.get("file") or "index.html")
+        if page.get('kind') == 'screenshot':
+            import screenshot_pages
+            screenshot_pages.validate_record(page)
+        if 'htmlImport' in page:
+            import html_import
+            html_import.validate_record(page)
         states = page.get("states")
         if not isinstance(states, list) or not states:
             raise ValueError("页面状态清单无效")
@@ -322,6 +371,8 @@ def validate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError("条目引用了未登记状态")
     numbers = set()
     for note in bundle['prd']['annotations']:
+        if isinstance(note.get('anchor'), dict) and 'revealSteps' in note['anchor']:
+            validate_reveal_steps(note['anchor']['revealSteps'])
         if note.get('color') is not None and not re.fullmatch(r'#[0-9a-fA-F]{6}', str(note['color'])):
             raise ValueError('标注颜色无效')
         number = note.get('number')
@@ -374,6 +425,10 @@ def bundle_from_docs(docs: dict[str, Any]) -> dict[str, Any]:
 
 def load_bundle(root: Path) -> dict[str, Any]:
     md = meta_dir(root)
+    if (md / 'html-import.pending.json').exists():
+        raise ValueError('上次 HTML 导入中断，已保留恢复记录；请先恢复，避免覆盖现场')
+    if (md / 'screenshot-operation.pending.json').exists():
+        raise ValueError('上次截图保存中断，已保留恢复记录；请先恢复，避免覆盖现场')
     if (md / 'page-operation.pending.json').exists():
         raise ValueError('上次页面删除中断，已保留页面文件及恢复记录；请先恢复，避免覆盖现场')
     if (md / ".pending-write.json").exists():
