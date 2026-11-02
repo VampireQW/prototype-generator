@@ -331,7 +331,7 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 ## 8. 外部项目与标注（.prototype 元数据）
 
 ### 本机访问约束
-- `/api/projects/workbench`、`/api/external/*`、`/api/proto/*`、`/api/ext/*`、`/ext/*` 及登记表静态读取仅允许 loopback 客户端；Host 必须是 `localhost`、`127.0.0.1` 或 `[::1]` 且端口与服务一致。
+- `/api/projects/workbench`、`/api/home/*`、`/api/external/*`、`/api/proto/*`、`/api/ext/*`、`/ext/*` 及登记表静态读取仅允许 loopback 客户端；Host 必须是 `localhost`、`127.0.0.1` 或 `[::1]` 且端口与服务一致。
 - 浏览器 Origin 必须等于当前 `http://Host`；拒绝 `null`、跨站及 same-site 非同源请求（403）。无 Origin 的本机命令行调用仍可用。
 - 上述 API 的 POST 使用 `Content-Type: application/json`，否则返回 415。目录选择在独立子进程执行，不阻塞列表读取；普通请求仍串行调度以保护读改写和 CAS。
 
@@ -341,6 +341,12 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 - Returns: `{ ok: true, path, cancelled }`；取消时 `path` 为空，不写登记表。
 - 已有窗口打开时 409；系统选择器不可用、失败或 180 秒超时返回 503，可改用粘贴路径。
 - 只选择路径，不自动登记；取得路径后调用 `roots/add`。
+
+### 打开项目本地文件夹
+`POST /api/home/open-folder`
+- Body: `{ source: "local" | "ai", projectId }`，省略 source 默认 local；不接受客户端指定目录。local 仅解析已登记、已隐藏或当前监视范围内发现的项目，ai 通过原有项目目录边界与访问权限校验。
+- Returns: `{ ok: true, message: "已打开本地文件夹" }`；未知项目或目录不存在 404，参数 / 链接目录无效 400，AI 项目无权访问 403，系统文件管理器无法启动 503；跨站 403、非 JSON 415。
+- 只打开系统目录，不登记项目、不初始化元数据、不改发布状态或 PRD。Windows 使用 explore 操作，其他系统使用固定命令与参数数组，不经 shell 拼接。
 
 ### 添加项目或监视根
 `POST /api/external/roots/add`
@@ -419,7 +425,7 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 ### 发布原型或研发版到 GitHub Pages
 `POST /api/ext/publish`
 - Body: `{ extId: "p-xxx", mode: "pure" | "review" }`；省略 mode 默认 `review`。
-- Returns: `{ ok: true, url, publishedAt, message }`；未登记 404、缺 Token/用户名 400（含 `needGithubConfig: true`，viewer 据此自动弹配置引导）、元数据读取失败 409、构建或上传失败 500（错误均 `{ ok: false, error }`，失败不写本地发布记录）。
+- Returns: `{ ok: true, url, publishedAt, message }`；未登记 404、缺 Token/用户名或 GitHub 返回 401 / 权限 403 时 400（含 `needGithubConfig: true`，viewer 据此自动弹配置引导）、元数据读取失败 409、网络失败 502、访问频率受限 503、构建或其他上传失败 500。错误均 `{ ok: false, error, needGithubConfig? }`，失败保留本地已有发布记录；网络与频率限制不引导替换 Token。
 - 流程：登记校验 → 读取 bundle（自动对齐 projectId、补登新发现页面）→ 按 mode 构建纯原型或评审站 → 复用 GitHub 建仓 / Pages / 上传管线推送至 `projects/<extId>/` → 登记表写入发布地址、时间与版本 → 更新作品集列表页。`review` 使用 `review_export.build_review_export` 构建 `index.html` 评审壳与 `proto/` 原型副本；导出副本排除 `.prototype` / 隐藏项 / `exports` / `dist` / `node_modules` / `__pycache__`，单文件 >25MB 跳过。
 - 发布地址形态 `https://<用户名>.github.io/<仓库>/projects/<extId>/`；Token 优先读取环境变量 `PROTOTYPE_GITHUB_TOKEN` / `GITHUB_TOKEN`，其次读取既有本机加密持久化配置，不写入项目或导出物。
 - 评审壳为只读单文件应用：左页面树（多状态页可切换状态，经 PrototypeBridge 同步）、中间真原型 iframe（注入锚点脚本渲染编号气泡）、右栏页面需求与标注明细（壳内置零依赖 Markdown 渲染器，失锚标注灰显）；点气泡右栏滚动定位、点标注行原型滚动定位；支持 `#p=<pageId>&s=<stateId>` 深链。
@@ -461,6 +467,11 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 - Returns: `{ success: true, username, repo, tokenMasked, hasToken, tokenSource, tokenState }`；Token 仅返回打码值。
 - `tokenSource` 为 `env`、`stored` 或空字符串；`tokenState` 为 `ready`、`missing` 或 `unreadable`。存在持久化文件但无法读取 / 解密时返回 `unreadable`，与未配置区分。
 - Windows DPAPI 凭据绑定保存时的用户账户，服务必须由同一账户运行。
+
+### 测试连接
+`POST /api/github/test`
+- Body: `{ token?: "..." }`；省略时使用服务端当前凭据，只读访问 GitHub `/user`，不发布、不保存所输入的 Token。
+- Returns: `{ success, message, username?, name?, needGithubConfig? }`。与发布共用代理、TLS 及自动重试；401 / 权限不足引导配置，网络 / 超时 / 证书 / 访问频率分别提示，GitHub 5xx 不再误报为 Token 无效。
 
 ### 保存配置
 `POST /api/github/config`

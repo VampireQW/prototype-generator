@@ -181,6 +181,22 @@ async function externalPost(route, body) {
     if (!response.ok || !data.ok) throw new Error(data.error || '操作失败');
     return data;
 }
+const openingProjectFolders = new Set();
+async function openProjectFolder(source, projectId) {
+    const key = `${source}:${projectId}`;
+    if (openingProjectFolders.has(key)) return;
+    openingProjectFolders.add(key);
+    try {
+        const response = await fetch('/api/home/open-folder', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({source, projectId})
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || '无法打开本地文件夹');
+        showToast('已打开本地文件夹');
+    } catch (error) { showToast(error.message, 'error'); }
+    finally { openingProjectFolders.delete(key); }
+}
 async function loadExternalProjects() {
     if (externalLoading) { externalReloadQueued = true; return; }
     externalLoading = true;
@@ -287,10 +303,11 @@ function buildExternalCard(item) {
         detail: item.root, open, disabled: !item.exists || externalShowHidden, preview: { source: 'local', id: item.projectId }
     });
     const deletion = { icon: 'delete', label: '彻底删除项目及本地文件', danger: true, handler: () => deleteExternalProject(item.projectId, item.name, item.root) };
+    const folder = { icon: 'folder', label: '打开本地文件夹', disabled: !item.exists, handler: () => openProjectFolder('local', item.projectId) };
     if (externalShowHidden) {
         const restore = HomeUI.action('open', '显示到首页', () => restoreExternalProject(item.projectId));
         restore.className = 'app-button app-secondary project-restore'; restore.textContent = '显示到首页';
-        actions.append(restore, HomeUI.more(item.name, [deletion]));
+        actions.append(restore, HomeUI.more(item.name, [folder, deletion]));
     } else if (item.discovered) {
         actions.append(HomeUI.action('connect', `连接项目 ${item.name}`, open));
     } else {
@@ -300,6 +317,7 @@ function buildExternalCard(item) {
         );
     }
     if (!externalShowHidden) actions.append(HomeUI.more(item.name, [
+        folder,
         ...(!item.exists ? [{icon: 'folder', label: '添加新的项目目录', handler: () => { toggleExternalAddPanel(); if ($('externalAddBox').classList.contains('hidden')) toggleExternalAdd(); }}] : []),
         { icon: 'hidden', label: '隐藏项目', handler: () => hideExternalProject(item.projectId) }, deletion
     ]));
@@ -626,6 +644,7 @@ function renderProjectList() {
             detail: [project.model_name, project.ownerName].filter(Boolean).join(' · ') || '原型项目', open,
             preview: ['generating', 'pending_external', 'failed'].includes(project.status) ? null : { source: 'ai', id: project.id } });
         const extraActions = [
+            { icon: 'folder', label: '打开本地文件夹', handler: () => openProjectFolder('ai', project.id) },
             { icon: 'edit', label: '编辑名称', handler: () => editProjectTitle(project.id, project.name) },
             { icon: 'copy', label: '复制项目', handler: () => copyProject(project.id, project.name) },
             { icon: 'history', label: '生成记录', handler: () => viewRecord(project.id) }

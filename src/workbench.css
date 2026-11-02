@@ -158,8 +158,9 @@ body.ext-mode {
 .ext-mode #extPublishBtn { background: var(--wb-primary); color: var(--wb-on-primary); }
 .ext-mode #extPublishBtn:is(:hover,:focus-visible) { background: var(--wb-primary); color: var(--wb-on-primary); }
 .ext-mode #extPublishRepo { margin: 0 0 8px; font-size: 11px; line-height: 18px; }
-.ext-mode .ext-publish-state { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 38px; padding: 6px 8px; box-sizing: border-box; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-alt); }
+.ext-mode .ext-publish-state { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; column-gap: 8px; row-gap: 2px; min-height: 38px; padding: 6px 8px; box-sizing: border-box; border: 1px solid var(--wb-line); border-radius: 6px; background: var(--wb-alt); }
 .ext-mode .ext-publish-state-label { display: flex; align-items: center; gap: 6px; min-width: 0; font: 500 12px/20px var(--wb-font); }
+.ext-mode #extPublishTime { grid-column: 1 / -1; min-width: 0; color: var(--wb-muted); font: 400 11px/16px var(--wb-font); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ext-mode .ext-publish-state-label > i { display: none; }
 .ext-mode .ext-publish-state[data-state="published"] { background: var(--wb-published-soft); border-color: var(--wb-published-line); color: var(--wb-published); }
 .ext-mode .ext-publish-state[data-state="published"] .ext-publish-state-label > i { display: inline-block; }

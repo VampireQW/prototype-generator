@@ -621,6 +621,7 @@ html[data-proto-pick-cursor],html[data-proto-pick-cursor] :not([data-prototype-o
 
     function layoutPins() {
         if (!pinLayer) return;
+        const occupied = [];
         notes.forEach((note) => {
             let pin = [...pinLayer.querySelectorAll('.pa-pin[data-note-id]')].find(p => p.dataset.noteId === note.id);
             if (drag?.id === note.id) return;
@@ -662,11 +663,14 @@ html[data-proto-pick-cursor],html[data-proto-pick-cursor] :not([data-prototype-o
             // 那堆灰序号在用户眼里是 bug；可展开的由引导徽标提示，失锚的在右栏标灰并可从「更多」重新绑定。
             if (!found.point) { pin.style.visibility = 'hidden'; return; }
             const x = found.point.x, y = found.point.y;
-            pin.style.left = Math.max(4, Math.min(x, viewWidth() - pin.offsetWidth - 4)) + 'px';
-            pin.style.top = Math.max(40, Math.min(y, viewHeight() - 4)) + 'px';
+            const placed = found.point.visible && ProtoAnchors.pinPosition
+                ? ProtoAnchors.pinPosition(x, y, pin.offsetWidth || 36, pin.offsetHeight || 36, occupied, viewWidth(), viewHeight())
+                : { x: Math.max(4, Math.min(x, viewWidth() - pin.offsetWidth - 4)), y: Math.max(40, Math.min(y, viewHeight() - 4)) };
+            pin.style.left = placed.x + 'px';
+            pin.style.top = placed.y + 'px';
             pin.style.visibility = found.point.visible ? '' : 'hidden';
             // 落点不可见（折叠 / 过渡动画中量到屏外坐标）时不挪卡——曾因此把开着的卡甩到左上角
-            if (inputCard?.dataset.noteId === note.id && found.point.visible) placeCard(x, y);
+            if (inputCard?.dataset.noteId === note.id && found.point.visible) placeCard(placed.x, placed.y);
         });
         layoutGuides();
         if (pending && hoverBox) showPreviewNumber(pending.x, pending.y);
@@ -904,7 +908,7 @@ html[data-proto-pick-cursor],html[data-proto-pick-cursor] :not([data-prototype-o
        rAF 节流重排，使引导与序号随原型状态即时增删。 */
     if (typeof MutationObserver !== 'undefined') {
         new MutationObserver((records) => { if (records.some((r) => !owned(r.target))) scheduleLayout(); })
-            .observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-expanded', 'aria-hidden'] });
+            .observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-expanded', 'aria-hidden', 'inert'] });
     }
     document.addEventListener('transitionend', (e) => { if (!owned(e.target)) scheduleLayout(); }, true);
     document.addEventListener('animationend', (e) => { if (!owned(e.target)) scheduleLayout(); }, true);

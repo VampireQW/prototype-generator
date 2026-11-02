@@ -1410,7 +1410,7 @@
     </style>
     <link rel="stylesheet" href="/agent-skills/prototype-flow/assets/project-navigation.css?v=20261016-compact-nav">
     <script src="/agent-skills/prototype-flow/assets/project-navigation.js?v=20261015-page-tree"></script>
-    <link rel="stylesheet" href="/src/workbench.css?v=20261021-quiet-resize">
+    <link rel="stylesheet" href="/src/workbench.css?v=20261028-publish-time-row">
     <link rel="stylesheet" href="/src/sidebar-resize.css?v=20261021-quiet-resize">
     <link rel="stylesheet" href="/src/pages-manager.css?v=20261021-publish-links">
 </head>
@@ -1486,6 +1486,7 @@
                         <button type="button" onclick="extCopyPublishLink()" title="复制链接" aria-label="复制发布链接"><i class="fas fa-copy" aria-hidden="true"></i></button>
                         <button type="button" onclick="extOpenPublishLink()" title="打开链接" aria-label="打开发布链接"><i class="fas fa-external-link-alt" aria-hidden="true"></i></button>
                     </div>
+                    <time id="extPublishTime" title="发布时间" hidden></time>
                 </div>
                 <div id="extPublishHint" class="text-xs text-amber-600 mb-2" style="display: none;">
                     <i class="fas fa-info-circle" aria-hidden="true"></i><span id="extPublishHintText">配置 Token 后即可发布</span>
@@ -1978,13 +1979,13 @@
         </div>
     </div>
 
-    <script src="/src/proto-order.js"></script>
+    <script src="/src/proto-order.js?v=20261028-visibility-core-v2"></script>
     <script src="/src/proto-appearance.js"></script>
     <script src="/src/vendor/vditor/dist/js/lute/lute.min.js"></script>
     <script src="/src/vendor/vditor/dist/index.min.js"></script>
     <script src="/src/vendor/dompurify/dist/purify.min.js"></script>
     <script src="/src/proto-markdown.js?v=20261016-toolbar-single-row"></script>
-    <script src="/src/proto-interactions.js?v=20261023-reveal-compact"></script>
+    <script src="/src/proto-interactions.js?v=20261028-visibility-core-v2"></script>
     <script src="/src/proto-screenshot-editor.js?v=20261023-replace-page"></script>
     <script src="/src/proto-text-runtime.js?v=20261021-semantic-text"></script>
     <script src="/src/proto-text-edit.js?v=20261021-semantic-text"></script>
@@ -2836,10 +2837,13 @@
         async function extRefreshPublishStatus() {
             const statusEl = $('extPublishStatus'), btn = $('extPublishBtn'), links = $('extPublishLinks');
             if (!statusEl || !btn || !links) return;
-            const state = $('extPublishState'), unpublish = $('extUnpublishBtn');
+            const state = $('extPublishState'), unpublish = $('extUnpublishBtn'), timeEl = $('extPublishTime');
             try {
                 const res = await fetch(`/api/ext/publish-status?projectId=${encodeURIComponent(extId)}`);
                 const data = await res.json();
+                timeEl.hidden = !(data.ok && data.published && data.publishedAt);
+                timeEl.textContent = timeEl.hidden ? '' : data.publishedAt;
+                timeEl.dateTime = timeEl.textContent.replace(' ', 'T');
                 if (data.ok && data.published) {
                     extPublishUrl = data.url;
                     const modeLabel = { review: '研发版', pure: '纯净版' }[data.mode] || '';
@@ -2861,6 +2865,9 @@
             } catch (_) {
                 statusEl.textContent = '发布状态查询失败';
                 statusEl.title = '';
+                timeEl.hidden = true;
+                timeEl.textContent = '';
+                timeEl.removeAttribute('datetime');
                 state.dataset.state = 'error';
             }
         }
@@ -3466,11 +3473,11 @@
                 mdStyle.setAttribute('data-prototype-owned', ''); d.head.appendChild(mdStyle);
                 await new Promise((resolve,reject)=>{
                 const s1 = d.createElement('script');
-                s1.src = '/src/proto-anchors.js?v=20261023-reveal-status';
+                s1.src = '/src/proto-anchors.js?v=20261028-visibility-core-v2';
                 s1.onload = () => {
                     if (previewFrame.contentDocument !== d) {resolve();return;}
                     const s2 = d.createElement('script');
-                    s2.src = '/src/proto-annotate.js?v=20261023-shared-auto';
+                    s2.src = '/src/proto-annotate.js?v=20261028-visibility-core-v2';
                     s2.onload = () => {
                         if (previewFrame.contentDocument !== d) {resolve();return;}
                         extRenderPins();

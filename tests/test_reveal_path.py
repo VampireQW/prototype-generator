@@ -149,6 +149,27 @@ assert.equal(A.reveal(other),second);assert.equal(A.revealHint(anchor),null);
 ''')
 
 
+def test_aria_hidden_screen_keeps_live_reveal_hint_and_can_be_reopened():
+    run_case(r'''
+pane.isHidden=false;group.isHidden=false;group.attrs['aria-hidden']='true';
+assert.equal(target.getClientRects().length,1,'ARIA 隐藏屏幕仍有实际尺寸');
+assert.equal(A.hidden(target),true);assert.equal(A.revealHint(anchor)?.trigger,opener);
+opener.onClick=()=>{group.attrs['aria-hidden']='false'};
+assert.equal(A.reveal(anchor),target);assert.equal(A.hidden(target),false);assert.deepEqual(clicks,['open-group']);
+''')
+
+
+def test_shared_manual_path_recognizes_aria_hidden_container_without_css_hiding():
+    run_case(r'''
+pane.isHidden=false;group.isHidden=false;group.attrs['aria-hidden']='true';delete group.attrs['data-proto-reveal-by'];
+const second=new El('TH',{'data-proto-id':'second'},group),other={protoId:'second',tag:'th'};
+mapping.set('[data-proto-id="second"]',[second]);
+A.setRevealNotes([{id:'source',anchor:{...anchor,revealSteps:[{selector:'#open-group',kind:'click',value:'true',label:'打开分组'}]}}]);
+assert.equal(A.sharedReveal(other)?.sourceNoteIds[0],'source');
+assert.equal(A.revealHint(other)?.trigger,opener);
+''')
+
+
 def test_undeclared_hidden_container_can_share_one_unambiguous_manual_path_without_writing_notes():
     run_case(r'''
 pane.isHidden=false;delete group.attrs['data-proto-reveal-by'];

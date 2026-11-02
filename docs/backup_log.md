@@ -1,5 +1,19 @@
 # 备份与回滚日志 (Backup & Rollback Log)
 
+## 首页打开项目目录（2026-10-28）
+
+修改前的 server.py、src/script.js、src/index.html、首页菜单回归及对应文档保存到 backups/20261028_open_project_folder/，保留相对路径。恢复对应文件并重启服务可撤回目录入口；新增 tests/test_open_folder.py 可随回滚移除，未修改项目目录与凭据。
+
+## 发布卡显示发布时间（2026-10-28）
+
+修改前的 src/viewer.html、src/workbench.css 及本次对应文档保存到 backups/20261028_publish_time/，保留相对路径。恢复对应文件即可撤回，前端刷新生效；未修改凭据、发布记录和 PRD。
+
+时间独占一行的布局调整前，另存 src/viewer.html、src/workbench.css 到 backups/20261028_publish_time_layout/。
+
+## GitHub 错误分类与通用标注显隐（2026-10-28）
+
+GitHub 修改前的 server.py 与继续验证前的锚点 / 标注 / 交互 / 评审脚本、viewer 已保存到 backups/20261028_github_diagnostics/，保留相对路径。proto-order.js 的修改前基线也保存在同目录。该备份包含此前的通用显隐改动；需要整体恢复至本次修改前时，以 Git 中 2405e3f 为基线逐文件回溯。未备份或修改真实凭据、原型业务文件和 PRD。撤回网络模块时同时恢复 server.py 并移除新增 github_transport.py；完成后重启服务。
+
 ## 首页升级（2026-10-10）
 
 修改前备份至 backups/20261010_home_commercial/，保留相对路径：src/index.html、src/home.css、src/home-ui.js、src/script.js、server.py、DESIGN.md、docs/changelog.md、docs/features.md、docs/architecture.md、docs/api.md、docs/backup_log.md、.finesse/log.json。

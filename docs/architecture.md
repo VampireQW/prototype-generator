@@ -1,5 +1,19 @@
 # 架构设计 (Architecture)
 
+## GitHub 共用连接与错误分类（2026-10-28）
+
+`github_transport.py` 提供共用 Session，服务端测试连接、两类发布入口及发布管理均经 `github_api_session` 使用。保留 Requests 的系统 / 环境代理及 TLS 校验，对连接建立前失败和只读请求重试；写入请求等待响应失败后不重放。网络、代理、证书与超时产生不含底层连接细节的分类提示；401 引导更新凭据，403 区分权限与频率限制，429 提示稍后重试。`GitHubError` 携带 HTTP 状态及 `need_github_config`，端点据此返回是否打开配置；连接失败不误导用户替换 Token，也不修改已有发布记录。
+
+## 通用页面可见性与序号避让（2026-10-28）
+
+`pinPosition` 在每次重排内使用临时占用矩形，为相近序号选择邻近位置并约束视口边界。编辑态与评审复用同一函数，仅将可见序号纳入避让；继续复用按钮节点，不改 note / placement。编辑卡片跟随避让后的序号坐标。
+
+`proto-anchors.js` 的 `hiddenRoot` 沿祖先检查 hidden、inert、ARIA、关闭的 dialog、display、opacity 和 content-visibility，并按元素实际计算的 visibility 处理隐藏 / collapse，允许子节点合法覆盖祖先的 visibility。`visible`、`hidden` 和 `hiddenContainer` 共用这一判断；`resolveHidden` 仍解析隐藏锚点，保留展开引导与绑定。
+
+`point` 的显示坐标通过 `paintedAt` 检查真实覆盖关系，过滤平台自有图层；无隐藏标记但被无关业务区域覆盖的落点同样不显示序号，锚点不记为失效。fullDocument 逻辑投影不做覆盖检查；排序统一请求该投影，隐藏但保留布局的目标按原相对落点测量，避免退回容器左上角而换号。无布局目标继续使用已有展开入口代位。禁用、半透明与 pointer-events:none 本身不被猜成隐藏页面。
+
+编辑态、交互面板与静态评审的 MutationObserver 均监听 inert 及既有显隐属性，配合过渡 / 动画结束重排。规则只依赖 DOM 标准状态与实际覆盖，不猜业务类名、页面名或项目 ID；无需迁移项目清单、PRD 和 placement。
+
 ## 共用展开入口与路径复用（2026-10-23）
 
 `proto-interactions.js` 的点选器在原型文档插入临时自有样式，让 `[data-prototype-owned]` 图层及其子节点穿透，避免已有 `pa-guide` 截获点选；窗口捕获监听继续阻止原型业务动作。选择、取消、页面离开均通过同一 cleanup 移除样式和监听。

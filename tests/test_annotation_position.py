@@ -67,6 +67,110 @@ check({...note,placement:{kind:'element',x:90,y:10}},190,130);
 ''')
 
 
+def test_hidden_screen_ancestor_suppresses_pins_without_losing_anchor_or_placement():
+    case(r'''
+let screenHidden='true';body.getAttribute=key=>key==='aria-hidden'?screenHidden:null;
+const saved=JSON.stringify(note);
+assert.equal(el.getClientRects().length,1,'后台屏幕仍保留布局矩形');
+assert.equal(A.visible(el),false,'aria-hidden 祖先中的目标不属于当前可见页面');
+assert.equal(A.hidden(el),true);assert.equal(A.resolveHidden(note.anchor),el,'隐藏页面不是失锚');
+assert.equal(A.point(note).point,null,'首页序号不能穿透覆盖在详情页上');
+const attributes=el.getAttribute;el.getAttribute=key=>key==='aria-hidden'?'false':attributes(key);
+assert.equal(A.visible(el),false,'子节点 aria-hidden=false 不可覆盖祖先的隐藏状态');
+screenHidden='false';check(note,190,130);
+assert.equal(JSON.stringify(note),saved,'切回首页无需改写已有标注或落点');
+''')
+
+
+def test_hidden_target_itself_is_suppressed_even_if_css_still_draws_it():
+    case(r'''
+const attributes=el.getAttribute;let aria='true';el.getAttribute=key=>key==='aria-hidden'?aria:attributes(key);
+assert.equal(A.hidden(el),true);assert.equal(A.visible(el),false);assert.equal(A.point(note).point,null);
+aria='false';check(note,190,130);
+''')
+
+
+def test_logical_projection_keeps_saved_relative_point_when_page_is_hidden():
+    case(r'''
+const saved=JSON.stringify(note);let aria='false';
+body.getAttribute=key=>key==='aria-hidden'?aria:null;
+const before=A.point(note,true).point;aria='true';
+assert.equal(A.point(note).point,null,'显示层隐藏');
+const logical=A.point(note,true).point;
+assert.ok(logical,'排序仍使用保留布局的隐藏目标');
+assert.equal(logical.x,before.x);assert.equal(logical.y,before.y,'不能退回容器左上角导致换号');
+assert.equal(JSON.stringify(note),saved);
+''')
+
+
+@pytest.mark.parametrize('kind', ['hidden', 'inert', 'aria', 'display', 'opacity', 'content', 'visibility', 'collapse', 'dialog'])
+def test_generic_hidden_page_states_preserve_and_restore_the_same_anchor(kind):
+    case(r'''
+const kind=KIND,attrs={},page={tagName:kind==='dialog'?'DIALOG':'SECTION',parentElement:body,scrollTop:0,scrollLeft:0,
+ getAttribute:k=>attrs[k]??null,hasAttribute:k=>k in attrs,getBoundingClientRect:body.getBoundingClientRect,open:kind!=='dialog'};
+el.parentElement=page;let active=false;
+context.getComputedStyle=n=>({display:!active&&kind==='display'&&n===page?'none':'block',
+ visibility:!active&&['visibility','collapse'].includes(kind)&&[page,el].includes(n)?kind==='collapse'?'collapse':'hidden':'visible',
+ opacity:!active&&kind==='opacity'&&n===page?'0':'1',contentVisibility:!active&&kind==='content'&&n===page?'hidden':'visible',overflowX:'visible',overflowY:'visible'});
+if(kind==='aria')attrs['aria-hidden']='true';
+if(kind==='hidden'||kind==='inert')attrs[kind]='';
+assert.equal(A.visible(el),false,kind+' 页面不应显示序号');assert.equal(A.hidden(el),true);
+assert.equal(A.point(note).point,null);assert.equal(A.resolveHidden(note.anchor),el);
+delete attrs.hidden;delete attrs.inert;delete attrs['aria-hidden'];page.open=true;active=true;
+check(note,190,130);
+'''.replace('KIND', json.dumps(kind)))
+
+
+def test_visible_disabled_controls_and_css_visibility_override_remain_annotatable():
+    case(r'''
+el.disabled=true;
+context.getComputedStyle=n=>({display:'block',visibility:n===body?'hidden':'visible',opacity:'.35',pointerEvents:'none',overflowX:'visible',overflowY:'visible'});
+check(note,190,130,'禁用、半透明和 pointer-events:none 不能被猜成后台页面');
+''')
+
+
+def test_business_overlay_suppresses_covered_pin_but_owned_layers_do_not():
+    case(r'''
+el.contains=n=>n===el||n===child;
+const child={parentElement:el,closest:()=>null,getClientRects:()=>[bounds],contains:()=>false};
+const cover={parentElement:body,closest:()=>null,getClientRects:()=>[bounds],contains:()=>false};
+const owned={closest:()=>({}),getClientRects:()=>[bounds],contains:()=>false};
+document.elementsFromPoint=()=>[owned,cover,el];
+let found=A.point(note);assert.ok(found.point,'被遮挡不等于失锚');assert.equal(found.point.visible,false,'底层序号不能浮到覆盖页面上');
+assert.equal(A.hidden(el),false);assert.equal(A.point(note,true).point.visible,true,'逻辑坐标仍可用于编号排序');
+document.elementsFromPoint=()=>[owned,child,el];check(note,190,130);
+document.elementsFromPoint=()=>[];check(note,190,130,'非交互元素不能仅因无命中节点而消失');
+''')
+
+
+def test_nearby_visible_markers_are_separated_without_changing_saved_positions():
+    case(r'''
+const saved=JSON.stringify(note),occupied=[];
+const points=[[100,150],[105,154],[103,149]];
+const positions=points.map(([x,y])=>A.pinPosition(x,y,36,36,occupied,800,600));
+assert.equal(positions[0].x,100);assert.equal(positions[0].y,150,'未冲突的落点保持原位');
+for(let i=0;i<positions.length;i++)for(let j=i+1;j<positions.length;j++){
+ const a=positions[i],b=positions[j];
+ assert.ok(a.x+36<=b.x||b.x+36<=a.x||a.y<=b.y-36||b.y<=a.y-36,'相近序号不可互相遮挡');
+}
+assert.equal(JSON.stringify(note),saved);
+const again=[];assert.deepEqual(points.map(([x,y])=>A.pinPosition(x,y,36,36,again,800,600)),positions,'重复重排不抖动');
+''')
+
+
+def test_marker_spacing_keeps_touch_targets_inside_narrow_viewport():
+    case(r'''
+const occupied=[];
+for(let i=0;i<4;i++){
+ const pos=A.pinPosition(370,20,44,44,occupied,375,600);
+ assert.ok(pos.x>=4&&pos.x+44<=371);assert.ok(pos.y-44>=4&&pos.y<=596);
+}
+for(let i=0;i<occupied.length;i++)for(let j=i+1;j<occupied.length;j++){
+ const a=occupied[i],b=occupied[j];assert.ok(a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top);
+}
+''')
+
+
 def test_move_and_rebind_preserve_annotation_identity_body_and_count():
     methods = VIEWER[VIEWER.index('            rebindDone('):VIEWER.index('            deleteNote(')]
     case(r'''

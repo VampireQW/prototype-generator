@@ -162,6 +162,25 @@ def test_publish_upload_failure_writes_nothing(api):
     assert 'github_url' not in saved, '上传失败不得写本地发布记录'
 
 
+@pytest.mark.parametrize('configure,status', [(True, 400), (False, 502)])
+def test_transport_failure_preserves_previous_publication_and_guides_only_credentials(api, configure, status):
+    from github_transport import GitHubError
+    pid, _ = register_project(api)
+    registry = json.loads(api.registry.read_text(encoding='utf-8'))
+    registry['projects'][pid].update(github_url='https://fixture.invalid/existing/', github_published_at='before')
+    api.registry.write_text(json.dumps(registry), encoding='utf-8')
+
+    def fail(*args):
+        raise GitHubError('fixture-failure', need_github_config=configure, status=status)
+
+    api.namespace['github_ensure_pages'] = fail
+    actual, result = api.request('/api/ext/publish', {'extId': pid})
+    assert actual == status and result['ok'] is False
+    assert result['needGithubConfig'] is configure
+    assert not api.calls['upload'] and not api.calls['listing']
+    assert json.loads(api.registry.read_text(encoding='utf-8')) == registry
+
+
 def test_publish_unregistered(api):
     status, res = api.request('/api/ext/publish', {'extId': 'p-0000000000000000'})
     assert status == 404 and not res['ok']

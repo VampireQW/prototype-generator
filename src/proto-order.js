@@ -72,7 +72,7 @@
     function classify(note, win) {
         const PA = win.ProtoAnchors;
         let found = null;
-        try { found = PA.point(note); } catch (_) { /* 未就绪或失效锚点 */ }
+        try { found = PA.point(note, true); } catch (_) { /* 未就绪或失效锚点 */ }
         let point = logicalPoint(found, win), el = found?.element || null;
         if (!el && note.anchor) { try { el = PA.resolveHidden?.(note.anchor) || null; } catch (_) { /* 旧选择器失效 */ } }
         if (!point && note.anchor) { try { point = proxyPoint(note, el, win); } catch (_) { /* 代位失败按失锚处理 */ } }

@@ -577,6 +577,22 @@ const denied=mk('DIV',{x:0,y:0,height:10},{'data-proto-branch':'false',role:'dia
 """)
 
 
+def test_display_order_uses_logical_projection_for_hidden_and_visible_pages():
+    node("""
+const assert=require('node:assert/strict');
+""" + ORDER + """
+const root={},body={};let hidden=false;
+const target={parentElement:body,scrollLeft:0,scrollTop:0,getBoundingClientRect:()=>({x:0,y:0}),getClientRects:()=>[{}],hasAttribute:()=>false,getAttribute:()=>null};
+const other={...target};
+const win={scrollX:0,scrollY:0,document:{scrollingElement:root,body,documentElement:root},getComputedStyle:()=>({position:'static'}),
+ ProtoAnchors:{point:(note,logical)=>hidden&&!logical&&note.id==='large'?null:{element:note.id==='large'?target:other,point:{x:0,y:note.id==='large'?150:100}},
+ hidden:()=>hidden,resolveHidden:()=>target}};
+const notes=[{id:'large',anchor:{}},{id:'other',anchor:{}}];
+const before=ProtoOrder.project(notes,win).map(n=>[n.id,n.displayNumber]);hidden=true;
+assert.deepEqual(ProtoOrder.project(notes,win).map(n=>[n.id,n.displayNumber]),before);
+""")
+
+
 def annotation_harness(test):
     hook = """
     globalThis.testState = values => {
@@ -891,7 +907,7 @@ def test_card_toolbar_placement_resize_and_grip_bugfix():
     assert 'padding:8px 20px 12px 12px' in annotate
     assert 'Math.max(CARD_EDGE, Math.min(left, width - w - CARD_EDGE))' in annotate
     assert 'cardHeight() - startT - CARD_EDGE' in annotate
-    assert 'if (inputCard?.dataset.noteId === note.id && found.point.visible) placeCard(x, y);' in annotate
+    assert 'if (inputCard?.dataset.noteId === note.id && found.point.visible) placeCard(placed.x, placed.y);' in annotate
     assert "for (const side of ['w', 'e', 's', 'se', 'sw'])" in annotate
     assert 'function startCardResize(e, card, handle, side)' in annotate
     assert 'Math.min(760, cardWidth() - CARD_EDGE * 2)' in annotate and 'Math.min(280, hi)' in annotate
@@ -1208,7 +1224,7 @@ def test_hidden_pins_stay_hidden_and_guide_is_transparent_overlay():
     assert 'text(list[0]) === anchor.text' not in anchors and 'text(el) === anchor.text' not in anchors
     # #2b 编辑态原型自身交互（展开/折叠/切页签）后也要重排，不能只靠 scroll/resize；自有节点变动过滤掉防死循环
     assert 'new MutationObserver((records) => { if (records.some((r) => !owned(r.target))) scheduleLayout(); })' in annotate
-    assert "attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-expanded', 'aria-hidden']" in annotate
+    assert "attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-expanded', 'aria-hidden', 'inert']" in annotate
     assert "document.addEventListener('transitionend'" in annotate and "document.addEventListener('animationend'" in annotate
     # #3 透明可点虚线框 + 拼接式呼吸标签，两侧同源；亮黄色系（框线 #d97706 / 标签 #fbbf24 深棕字 #5c3300）与蓝色序号区分
     for src, cls, tag, below, end, kf in ((annotate, '.pa-guide', '.pa-guide-tag', 'pa-guide-below', 'pa-guide-end', 'paGuideTag'),

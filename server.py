@@ -719,20 +719,9 @@ def get_github_runtime_config():
 
 
 def github_api_session(token):
-    """带自动重试的 GitHub API Session（连接池里的僵尸连接被 GitHub 关闭后自动重连）。"""
-    from requests.adapters import HTTPAdapter
-    from urllib3.util.retry import Retry
-    retry_strategy = Retry(total=3, backoff_factor=1, connect=3, read=3,
-                           status_forcelist=[500, 502, 503, 504],
-                           allowed_methods=["GET", "PUT", "POST", "DELETE"])
-    session = requests.Session()
-    session.mount('https://', HTTPAdapter(max_retries=retry_strategy))
-    session.headers.update({
-        'Authorization': f'token {token}',
-        'Accept': 'application/vnd.github.v3+json',
-        'Content-Type': 'application/json'
-    })
-    return session
+    """发布、发布管理与测试连接共用网络重试及故障分类。"""
+    from github_transport import api_session
+    return api_session(token)
 
 
 def github_ensure_pages(session, api_base, username, repo):
@@ -749,7 +738,7 @@ def github_ensure_pages(session, api_base, username, repo):
         elif r.status_code != 200:
             raise Exception(f"访问仓库失败（HTTP {r.status_code}）: {r.json().get('message', r.text)}")
     except requests.exceptions.RequestException as req_e:
-        raise Exception(f"连接 GitHub API 失败（检查网络或Token）: {req_e}")
+        raise Exception('连接 GitHub API 失败，请检查网络和系统代理后重试') from req_e
     default_branch = session.get(repo_url, timeout=15).json().get('default_branch', 'main')
     root_index_path = f"{api_base}/repos/{username}/{repo}/contents/index.html"
     if session.get(root_index_path, timeout=10).status_code == 404:
@@ -1439,7 +1428,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         if getattr(self.server, 'restarting', False):
             self.send_json_status({'ok': False, 'error': '服务正在重新启动，请稍后重试'}, 503)
             return
-        if path.startswith(('/api/external/', '/api/proto/', '/api/ext/', '/api/pages/')) or path in ('/api/projects/workbench', '/api/github/unpublish'):
+        if path.startswith(('/api/external/', '/api/proto/', '/api/ext/', '/api/pages/', '/api/home/')) or path in ('/api/projects/workbench', '/api/github/unpublish'):
             if not self.require_local_origin():
                 return
             if self.headers.get_content_type() != 'application/json':
@@ -1476,6 +1465,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         # ---- 外部项目与原型元数据（标注整合） ----
         elif path == '/api/projects/workbench':
             self.handle_project_workbench()
+        elif path == '/api/home/open-folder':
+            self.handle_open_project_folder()
         elif path == '/api/external/add':
             self.handle_external_add()
         elif path in ('/api/external/remove', '/api/external/hide'):
@@ -3943,6 +3934,48 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
         except Exception as error:
             self.send_json_status({'ok': False, 'error': str(error)}, 503)
 
+    def handle_open_project_folder(self):
+        """按首页项目身份打开实际目录，不接受客户端指定文件系统路径。"""
+        try:
+            data = self.read_json_body()
+            if not isinstance(data, dict):
+                raise ValueError('请指定项目 ID')
+            pid, source = data.get('projectId'), data.get('source', 'local')
+            if not isinstance(pid, str) or not pid or source not in ('local', 'ai'):
+                raise ValueError('项目 ID 或来源无效')
+            if source == 'ai':
+                root = self.safe_ai_project_root(pid)
+                if not self.require_ai_project_access(pid):
+                    return
+            else:
+                entry = self.external_library_entry(load_external_registry(), pid)
+                if not entry:
+                    self.send_json_status({'ok': False, 'error': '项目不存在或已不在该列表'}, 404)
+                    return
+                if not entry.get('root'):
+                    raise ValueError('项目目录已失效')
+                root = Path(entry['root'])
+                if proto_meta.is_linked_path(root):
+                    raise ValueError('不支持符号链接或目录联接，请打开真实项目目录')
+                root = root.resolve()
+                if not root.is_dir():
+                    raise FileNotFoundError('项目目录不存在或已被移动')
+        except FileNotFoundError as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 404)
+            return
+        except (ValueError, OSError) as error:
+            self.send_json_status({'ok': False, 'error': str(error)}, 400)
+            return
+        try:
+            if sys.platform == 'win32':
+                os.startfile(str(root), 'explore')
+            else:
+                subprocess.Popen(['open' if sys.platform == 'darwin' else 'xdg-open', str(root)],
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+            self.send_json_response({'ok': True, 'message': '已打开本地文件夹'})
+        except (OSError, NotImplementedError):
+            self.send_json_status({'ok': False, 'error': '无法打开本地文件夹，请检查目录权限及系统文件管理器'}, 503)
+
     def handle_root_add(self):
         try:
             data = self.read_json_body()
@@ -5410,14 +5443,8 @@ function copyLink(url, btn) {{
                 self.send_error_response("请先填写 Personal Access Token")
                 return
 
-            resp = requests.get(
-                'https://api.github.com/user',
-                headers={
-                    'Authorization': f'token {token}',
-                    'Accept': 'application/vnd.github.v3+json'
-                },
-                timeout=15
-            )
+            with github_api_session(token) as session:
+                resp = session.get('https://api.github.com/user', timeout=15)
 
             if resp.status_code == 200:
                 user = resp.json()
@@ -5430,11 +5457,12 @@ function copyLink(url, btn) {{
             else:
                 self.send_json_response({
                     'success': False,
-                    'message': f"Token 无效（HTTP {resp.status_code}）"
+                    'message': f"GitHub 暂时无法完成验证（HTTP {resp.status_code}），请稍后重试"
                 })
 
         except Exception as e:
-            self.send_error_response(f"连接失败：{str(e)}")
+            self.send_json_response({'success': False, 'message': str(e),
+                                     'needGithubConfig': getattr(e, 'need_github_config', False)})
 
     # ==================== GitHub 发布 API ====================
 
@@ -5471,25 +5499,7 @@ function copyLink(url, btn) {{
 
             api_base = 'https://api.github.com'
 
-            # 用带自动重试的 Session，解决连接池里的"僵尸连接"被 GitHub 关闭后引发的 ConnectionResetError
-            from requests.adapters import HTTPAdapter
-            from urllib3.util.retry import Retry
-            retry_strategy = Retry(
-                total=3,          # 最多重试 3 次
-                backoff_factor=1, # 重试间隔: 0s, 1s, 2s
-                connect=3,        # 连接失败（ConnectionResetError）也重试
-                read=3,
-                status_forcelist=[500, 502, 503, 504],
-                allowed_methods=["GET", "PUT", "POST", "DELETE"]
-            )
-            adapter = HTTPAdapter(max_retries=retry_strategy)
-            session = requests.Session()
-            session.mount('https://', adapter)
-            session.headers.update({
-                'Authorization': f'token {token}',
-                'Accept': 'application/vnd.github.v3+json',
-                'Content-Type': 'application/json'
-            })
+            session = github_api_session(token)
 
             print(f"[GitHub] 开始发布项目 '{project_id}' 到仓库 '{username}/{repo}'")
 
@@ -5515,7 +5525,7 @@ function copyLink(url, btn) {{
                 else:
                     print(f"[GitHub] 仓库 '{repo}' 已存在。")
             except requests.exceptions.RequestException as req_e:
-                raise Exception(f"连接 GitHub API 失败（检查网络或Token）: {req_e}")
+                raise Exception('连接 GitHub API 失败，请检查网络和系统代理后重试') from req_e
 
             # ---- 2. 获取默认分支 ----
             print(f"[GitHub] 步骤 2/7: 获取仓库默认分支...")
@@ -5616,7 +5626,9 @@ function copyLink(url, btn) {{
             })
 
         except (ValueError, FileNotFoundError) as e:
-            self.send_json_status({'success': False, 'error': str(e)}, 400 if isinstance(e, ValueError) else 404)
+            self.send_json_status({'success': False, 'error': str(e),
+                                   'needGithubConfig': getattr(e, 'need_github_config', False)},
+                                  getattr(e, 'status', 400 if isinstance(e, ValueError) else 404))
         except Exception as e:
             print(f"[错误] GitHub 发布失败: {e}")
             import traceback
@@ -5738,7 +5750,8 @@ function copyLink(url, btn) {{
             print(f"[错误] 评审壳发布失败: {e}")
             import traceback
             traceback.print_exc()
-            self.send_json_status({'ok': False, 'error': f'发布失败: {e}'}, 500)
+            self.send_json_status({'ok': False, 'error': f'发布失败: {e}',
+                                   'needGithubConfig': getattr(e, 'need_github_config', False)}, getattr(e, 'status', 500))
         finally:
             import shutil
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -5826,7 +5839,8 @@ function copyLink(url, btn) {{
         except github_pages.PagesError as error:
             self.send_json_status({'ok': False, 'error': str(error)}, error.status)
         except ValueError as error:
-            self.send_json_status({'ok': False, 'error': str(error), 'needGithubConfig': True}, 400)
+            self.send_json_status({'ok': False, 'error': str(error),
+                                   'needGithubConfig': getattr(error, 'need_github_config', True)}, getattr(error, 'status', 400))
         except Exception:
             self.send_json_status({'ok': False, 'error': '无法完整读取远端发布信息，请稍后重试'}, 502)
 
@@ -5909,7 +5923,9 @@ function copyLink(url, btn) {{
         except github_pages.PagesError as error:
             self.send_json_status({'ok': False, 'success': False, 'error': str(error)}, error.status)
         except (ValueError, TypeError) as error:
-            self.send_json_status({'ok': False, 'success': False, 'error': str(error), 'needGithubConfig': 'gh' not in locals()}, 400)
+            self.send_json_status({'ok': False, 'success': False, 'error': str(error),
+                                   'needGithubConfig': getattr(error, 'need_github_config', 'gh' not in locals())},
+                                  getattr(error, 'status', 400))
         except Exception:
             self.send_json_status({'ok': False, 'success': False, 'error': '取消发布或后续同步未能完成，请刷新检查远端与本地状态后重试'}, 502)
 

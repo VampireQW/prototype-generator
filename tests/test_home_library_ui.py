@@ -23,7 +23,8 @@ const context={console,document:{createElement(){return {className:'',type:'',te
  HomeUI:{clear(box){box.children=[];rendered=[];},formatDate(){return '';},updateCounts(source,total,visible){context.counts={source,total,visible};},
  card(config){rendered.push(config);config.actions=[];return {article:{config},actions:{append(...actions){config.actions.push(...actions);}}};},
  action(icon,label,handler){return {icon,label,handler};},more(name,items){return {items};},empty(...args){empty=args;},closeMenu(){}},
- connectExternalProject(){},openExternalProject(){},openExtPublishModal(){},hideExternalProject(){},restoreExternalProject(){},deleteExternalProject(){},toggleExternalAddPanel(){}};
+ connectExternalProject(){},openExternalProject(){},openExtPublishModal(){},hideExternalProject(){},restoreExternalProject(){},deleteExternalProject(){},toggleExternalAddPanel(){},
+ openProjectFolder(source,id){(context.openedFolders||(context.openedFolders=[])).push([source,id]);}};
 vm.createContext(context);vm.runInContext(SOURCE,context);
 const connected={projectId:'a',name:'已连接项目',root:'/a',exists:true,pages:1};
 const discovered={projectId:'b',name:'新发现项目',root:'/b',exists:true,pages:1,discovered:true};
@@ -59,4 +60,29 @@ context.externalShowHidden=true;context.renderExternalProjects([],[],[hidden]);
 const card=rendered[0];assert.equal(card.disabled,true);
 assert.ok(card.actions.some(item=>item.label==='显示到首页'));
 assert.ok(card.actions.find(item=>item.items).items.some(item=>item.label==='彻底删除项目及本地文件'));
+''')
+
+
+def test_every_local_view_offers_open_folder_and_invalid_directories_are_disabled():
+    run_case(r'''
+context.renderExternalProjects([connected],[discovered],[]);
+for(const card of rendered){const item=card.actions.find(a=>a.items).items.find(a=>a.label==='打开本地文件夹');
+ assert.ok(item&&!item.disabled);item.handler();}
+context.externalShowHidden=true;context.renderExternalProjects([],[],[hidden]);
+rendered[0].actions.find(a=>a.items).items.find(a=>a.label==='打开本地文件夹').handler();
+assert.deepEqual(context.openedFolders.slice().sort((a,b)=>a[1].localeCompare(b[1])),[['local','a'],['local','b'],['local','c']]);
+context.externalShowHidden=false;context.renderExternalProjects([{...connected,exists:false}],[],[]);
+assert.equal(rendered[0].actions.find(a=>a.items).items.find(a=>a.label==='打开本地文件夹').disabled,true);
+''')
+
+
+def test_ai_more_menu_opens_original_ai_folder():
+    source = (Path(__file__).resolve().parents[1]/'src/script.js').read_text(encoding='utf-8')
+    start = source.index('function renderProjectList(')
+    end = source.index('function showGeneratedProjects(', start)
+    run_case('vm.runInContext(' + json.dumps(source[start:end]) + r''',context);
+context.allProjects=[{id:'ai-pending',name:'待外部生成项目',status:'pending_external'}];
+context.searchQuery='';context.currentUser=null;context.currentTab='my';context.renderProjectList();
+const item=rendered[0].actions.find(a=>a.items).items.find(a=>a.label==='打开本地文件夹');
+assert.ok(item);item.handler();assert.deepEqual(context.openedFolders,[['ai','ai-pending']]);
 ''')

@@ -370,7 +370,7 @@
                     });
                 });
                 visibilityObserver.observe(frame.contentWindow.document.documentElement, { subtree: true, childList: true, attributes: true,
-                    attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-expanded', 'aria-hidden', 'disabled', 'aria-disabled', 'aria-controls', 'role', 'data-proto-reveal-by', 'data-proto-reveal-label', 'data-proto-reveal-value'] });
+                    attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-expanded', 'aria-hidden', 'inert', 'disabled', 'aria-disabled', 'aria-controls', 'role', 'data-proto-reveal-by', 'data-proto-reveal-label', 'data-proto-reveal-value'] });
             } catch (_) { /* 原型正在导航或已离开同源页面 */ }
         }
         frame.addEventListener('load', () => { cancelPick(); edit = null; context = config.scopeKey(); watchVisibility(); if (opened) render(); });

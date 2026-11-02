@@ -23,12 +23,32 @@
     }
     // 选择器就是页面唯一 id：id 本身即身份，文本变化（占位符→已选值、计数刷新）不视为目标变化。
     const idBound = (anchor) => /^#[^\s>+~]+$/.test(anchor?.selector || '');
-    const visible = (el) =>
-        !!el &&
-        !owned(el) &&
-        el.getClientRects().length > 0 &&
-        getComputedStyle(el).display !== 'none' &&
-        getComputedStyle(el).visibility !== 'hidden';
+    function hiddenRoot(el) {
+        if (!el) return null;
+        // 只依据标准 DOM / 渲染状态，不猜项目、路由名或框架的 active/on 类名。
+        for (let node = el; node; node = node.parentElement) {
+            const css = getComputedStyle(node);
+            if (node.hidden || node.inert || node.hasAttribute?.('hidden') || node.hasAttribute?.('inert') ||
+                node.getAttribute?.('aria-hidden')?.toLowerCase() === 'true' || node.tagName === 'DIALOG' && !node.open ||
+                css.display === 'none' || css.contentVisibility === 'hidden' || css.opacity !== undefined && css.opacity !== '' && Number(css.opacity) === 0) return node;
+        }
+        // visibility 可以被子节点显式覆盖，其他祖先隐藏条件则不可反向覆盖。
+        const state = getComputedStyle(el).visibility;
+        if (state === 'hidden' || state === 'collapse') {
+            let root = el;
+            while (root.parentElement && getComputedStyle(root.parentElement).visibility === state) root = root.parentElement;
+            return root;
+        }
+        return null;
+    }
+    const visible = el => !!el && !owned(el) && !hiddenRoot(el) && el.getClientRects().length > 0;
+    function paintedAt(el, x, y) {
+        if (typeof document.elementsFromPoint !== 'function') return true;
+        try {
+            const top = document.elementsFromPoint(x, y).find(node => visible(node));
+            return !top || top === el || !!el.contains?.(top) || !!top.contains?.(el);
+        } catch (_) { return true; }
+    }
     function selector(el) {
         if (el.id && document.querySelectorAll('#' + CSS.escape(el.id)).length === 1)
             return '#' + CSS.escape(el.id);
@@ -239,10 +259,16 @@
             const visible = fullDocument || (x >= 0 && y >= 0 && x < innerWidth && y < innerHeight);
             return { point: { x, y, visible }, rect: { x, y, width: 0, height: 0, visible } };
         }
-        const found = resolve(note.anchor);
+        let found = resolve(note.anchor);
+        // 排序使用逻辑坐标：隐藏但仍保留布局时按原落点测量，不能退回容器左上角。
+        // display:none 等无布局目标继续由 ProtoOrder 使用展开入口代位。
+        if (fullDocument && !found.element) {
+            const element = resolveHidden(note.anchor);
+            if (element?.getClientRects().length) found = { element };
+        }
         if (!found.element) return { reason: found.reason, point: null, rect: null };
         const element = found.element, r = element.getBoundingClientRect(), clip = rect(element, fullDocument);
-        if (!p) return { element, rect: clip, point: { x: clip.x, y: clip.y, visible: clip.visible }, legacy: true };
+        if (!p) return { element, rect: clip, point: { x: clip.x, y: clip.y, visible: clip.visible && (fullDocument || paintedAt(element, clip.x, clip.y)) }, legacy: true };
         const ew = Math.max(r.width, element.scrollWidth), eh = Math.max(r.height, element.scrollHeight);
         let px = p.x, py = p.y;
         if (Number.isFinite(p.rx) && Number.isFinite(p.ry)) {
@@ -267,8 +293,23 @@
             if (y < clip.y && !clip.reach.top) y = clip.y;
             if (y > bottom && !clip.reach.bottom) y = bottom;
         }
-        const visible = clip.visible && x >= clip.x && x <= clip.x + clip.width && y >= clip.y && y <= clip.y + clip.height;
+        const visible = clip.visible && x >= clip.x && x <= clip.x + clip.width && y >= clip.y && y <= clip.y + clip.height && (fullDocument || paintedAt(element, x, y));
         return { element, rect: clip, point: { x, y, visible } };
+    }
+    function pinPosition(x, y, width, height, occupied, viewportWidth = innerWidth, viewportHeight = innerHeight) {
+        const gap = 4, clamp = (value, min, max) => Math.max(min, Math.min(value, Math.max(min, max)));
+        const position = (left, bottom) => ({ x: clamp(left, gap, viewportWidth - width - gap), y: clamp(bottom, height + gap, viewportHeight - gap) });
+        const base = position(x, y);
+        const available = p => occupied.every(r => p.x + width + gap <= r.left || p.x >= r.right + gap || p.y + gap <= r.top || p.y - height >= r.bottom + gap);
+        let placed = base;
+        const limit = Math.min(occupied.length + 1, Math.ceil(viewportWidth / (width + gap)) + Math.ceil(viewportHeight / (height + gap)));
+        search: for (let distance = 0; distance <= limit; distance++) {
+            const candidates = distance ? [position(base.x + distance * (width + gap), base.y), position(base.x - distance * (width + gap), base.y),
+                position(base.x, base.y + distance * (height + gap)), position(base.x, base.y - distance * (height + gap))] : [base];
+            for (const candidate of candidates) if (available(candidate)) { placed = candidate; break search; }
+        }
+        occupied.push({ left: placed.x, right: placed.x + width, top: placed.y - height, bottom: placed.y });
+        return placed;
     }
     function inBox(box) {
         const nodes = [
@@ -305,9 +346,7 @@
     }
     // ---------- 折叠区展开 / 引导（标注工作台“点序号联动展开”与“点击引导”复用；全流程已归档，此为标注侧增补） ----------
     function hidden(el) {
-        if (!el) return true;
-        const cs = getComputedStyle(el);
-        return cs.display === 'none' || cs.visibility === 'hidden' || el.getClientRects().length === 0;
+        return !el || !!hiddenRoot(el) || el.getClientRects().length === 0;
     }
     function resolveHidden(anchor) {
         // 与 resolve 同规则但不过滤可见性：定位被折叠/隐藏的目标元素
@@ -459,9 +498,10 @@
     function setRevealNotes(notes) { revealNotes = Array.isArray(notes) ? notes : []; }
     const revealPathKey = steps => JSON.stringify(steps.map(s => [s.protoId || s.selector, s.kind, s.value]));
     function hiddenContainer(el) {
+        const root = hiddenRoot(el);
+        if (root) return root === document.body || root === document.documentElement ? null : root;
         for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
-            const css = getComputedStyle(n);
-            if (n.hidden || css.display === 'none' || n.tagName === 'DETAILS' && !n.open) return n;
+            if (n.tagName === 'DETAILS' && !n.open) return n;
         }
         return null;
     }
@@ -692,6 +732,7 @@
         rect,
         placement,
         point,
+        pinPosition,
         at,
         inBox,
         currentIds,

@@ -270,7 +270,7 @@
         if (selectedNoteId && !notes.some(n => n.id === selectedNoteId)) selectNote(null);
         const arranged = window.ProtoOrder.project(notes, window);
         const stale = [], noPoint = [];
-        const visibleIds = new Set();
+        const visibleIds = new Set(), occupied = [];
         for (const n of arranged) {
             let found = null;
             try { found = window.ProtoAnchors.point(n); } catch (_) { /* 锚定异常按失效处理 */ }
@@ -293,8 +293,11 @@
             pin.setAttribute('aria-haspopup', 'dialog');
             pin.setAttribute('aria-controls', '__review_popover');
             pin.setAttribute('aria-expanded', String(popNoteId === n.id && pop?.style.display === 'block'));
-            pin.style.left = found.point.x + 'px';
-            pin.style.top = found.point.y + 'px';
+            const placed = window.ProtoAnchors.pinPosition
+                ? window.ProtoAnchors.pinPosition(found.point.x, found.point.y, pin.offsetWidth || 36, pin.offsetHeight || 36, occupied)
+                : found.point;
+            pin.style.left = placed.x + 'px';
+            pin.style.top = placed.y + 'px';
             pin.onclick = e => {
                 e.preventDefault(); e.stopPropagation();
                 selectNote(n.id);
@@ -379,7 +382,7 @@
     if (typeof MutationObserver !== 'undefined') {
         new MutationObserver(records => { if (records.some(record => !owned(record.target))) scheduleLayout(); })
             .observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true,
-                attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-expanded', 'aria-hidden', 'data-proto-state'] });
+                attributeFilter: ['class', 'style', 'hidden', 'open', 'aria-expanded', 'aria-hidden', 'inert', 'data-proto-state'] });
     }
     for (const event of ['transitionend', 'animationend', 'load'])
         document.addEventListener(event, e => { if (!owned(e.target)) scheduleLayout(); }, true);
