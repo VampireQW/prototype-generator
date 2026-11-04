@@ -217,7 +217,7 @@
         state.observer = new Observer(state.apply); states.set(doc, state); state.apply();
         doc.addEventListener('DOMContentLoaded', state.apply, { once: true });
     }
-    window.ProtoTextRuntime = { bindings, install };
+    window.ProtoTextRuntime = { bindings, install, locate };
     const data = document.getElementById('proto-text-edits-data');
     if (data) { try { install(document, JSON.parse(data.textContent)); } catch (_) { /* Keep the original prototype usable if an override was edited externally. */ } }
 })();

@@ -725,7 +725,7 @@ def github_api_session(token):
 
 
 def github_ensure_pages(session, api_base, username, repo):
-    """确保仓库存在、含根重定向且已启用 Pages（与内部发布管线同口径），返回默认分支。"""
+    """确保仓库与 Pages 就绪，使用实际发布分支。"""
     repo_url = f"{api_base}/repos/{username}/{repo}"
     try:
         r = session.get(repo_url, timeout=15)
@@ -740,15 +740,6 @@ def github_ensure_pages(session, api_base, username, repo):
     except requests.exceptions.RequestException as req_e:
         raise Exception('连接 GitHub API 失败，请检查网络和系统代理后重试') from req_e
     default_branch = session.get(repo_url, timeout=15).json().get('default_branch', 'main')
-    root_index_path = f"{api_base}/repos/{username}/{repo}/contents/index.html"
-    if session.get(root_index_path, timeout=10).status_code == 404:
-        put_resp = session.put(root_index_path, json={
-            'message': 'Add root redirect for GitHub Pages',
-            'content': base64.b64encode(b'<meta http-equiv="refresh" content="0;url=projects/">').decode(),
-            'branch': default_branch
-        }, timeout=15)
-        if put_resp.status_code not in (200, 201):
-            raise Exception(f"创建根目录 'index.html' 失败: {put_resp.json().get('message', put_resp.text)}")
     pages_api_url = f"{api_base}/repos/{username}/{repo}/pages"
     pages_headers = {'Accept': 'application/vnd.github+json'}
     pages_resp = session.get(pages_api_url, headers=pages_headers, timeout=10)
@@ -759,48 +750,30 @@ def github_ensure_pages(session, api_base, username, repo):
             raise Exception(f"启用 GitHub Pages 失败: {post_resp.json().get('message', post_resp.text)}")
     elif pages_resp.status_code != 200:
         raise Exception(f"检查 GitHub Pages 状态失败（HTTP {pages_resp.status_code}）: {pages_resp.json().get('message', pages_resp.text)}")
+    else:
+        pages = pages_resp.json()
+        if pages.get('build_type') == 'workflow':
+            raise ValueError('当前仓库通过 Actions 构建 Pages，请先改为从分支根目录发布')
+        source = pages.get('source') or {}
+        if source.get('path') not in (None, '', '/'):
+            raise ValueError('当前 Pages 发布目录不是仓库根目录，请先将发布目录设为 /（root）')
+        default_branch = source.get('branch') or default_branch
+    root_index_path = f"{api_base}/repos/{username}/{repo}/contents/index.html"
+    if session.get(root_index_path, params={'ref':default_branch}, timeout=10).status_code == 404:
+        put_resp = session.put(root_index_path, json={
+            'message': 'Add root redirect for GitHub Pages',
+            'content': base64.b64encode(b'<meta http-equiv="refresh" content="0;url=projects/">').decode(),
+            'branch': default_branch
+        }, timeout=15)
+        if put_resp.status_code not in (200, 201):
+            raise Exception(f"创建根目录 'index.html' 失败: {put_resp.json().get('message', put_resp.text)}")
     return default_branch
 
 
 def github_upload_dir(session, api_base, username, repo, branch, export_dir, remote_prefix):
-    """把本地导出目录逐个文件上传到远端 remote_prefix 下（已存在则带 sha 更新）。"""
-    label = remote_prefix.rstrip('/').split('/')[-1]
-
-    def upload_file(local_path, remote_path):
-        with open(local_path, 'rb') as f:
-            content_b64 = base64.b64encode(f.read()).decode()
-
-        file_api_url = f"{api_base}/repos/{username}/{repo}/contents/{remote_path}"
-
-        # Check if file exists to get SHA for update
-        existing = session.get(file_api_url, timeout=10)
-        payload = {
-            'message': f'Update prototype: {label}',
-            'content': content_b64,
-            'branch': branch
-        }
-        if existing.status_code == 200:
-            payload['sha'] = existing.json().get('sha', '')
-            print(f"[GitHub] 更新文件: {remote_path}")
-        else:
-            print(f"[GitHub] 创建文件: {remote_path}")
-
-        put_resp = session.put(file_api_url, json=payload, timeout=30)
-        if put_resp.status_code not in (200, 201):
-            raise Exception(f"上传文件失败 {remote_path}: {put_resp.json().get('message', put_resp.text)}")
-        print(f"[GitHub] 文件 '{remote_path}' 上传成功。")
-
-    # 遍历 export_dir 下的所有文件并上传
-    if os.path.exists(export_dir):
-        for root_dir, _, files in os.walk(export_dir):
-            for file_name in files:
-                local_path = os.path.join(root_dir, file_name)
-                rel_path = os.path.relpath(local_path, export_dir).replace('\\', '/')
-                upload_file(local_path, f"{remote_prefix}/{rel_path}")
-    else:
-        raise Exception(f"导出目录不存在: {export_dir}")
+    """项目文件同批提交，避免客户端看到半个新版本。"""
     import github_pages
-    github_pages.invalidate()
+    return github_pages.publish_directory(session, username, repo, branch, export_dir, remote_prefix)
 
 
 def chinese_to_pinyin(text):
@@ -1371,6 +1344,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_proto_read(query)
         elif path == '/api/ext/publish-status':
             self.handle_ext_publish_status(query)
+        elif path == '/api/ext/release-preview':
+            self.handle_ext_release_preview(query)
         elif path == '/api/ext/export':
             self.handle_ext_export(query)
         elif path == '/api/pages/overview':
@@ -1542,6 +1517,8 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
             self.handle_github_unpublish()
         elif path == '/api/ext/publish':
             self.handle_ext_publish()
+        elif path == '/api/ext/release-notes':
+            self.handle_ext_release_notes()
         elif path == '/api/ext/unpublish':
             self.handle_ext_unpublish()
         elif path == '/api/pages/unpublish':
@@ -5232,7 +5209,7 @@ function copyLink(url, btn) {{
 </html>'''
 
     def update_github_listing(self, session, api_base, username, repo, default_branch,
-                              project_id, project_name, project_url, mode, remove=False):
+                              project_id, project_name, project_url, mode, remove=False, published_at=None):
         """更新 GitHub 上的 projects/manifest.json 和 projects/index.html"""
         manifest_api_url = f"{api_base}/repos/{username}/{repo}/contents/projects/manifest.json"
 
@@ -5254,13 +5231,14 @@ function copyLink(url, btn) {{
             manifest = [m for m in manifest if m.get('id') != project_id]
         else:
             # 更新或添加项目
+            published_at = review_export.publication_time(published_at)
             found = False
             for m in manifest:
                 if m.get('id') == project_id:
                     m['name'] = project_name
                     m['url'] = project_url
                     m['mode'] = mode
-                    m['publishedAt'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    m['publishedAt'] = published_at
                     found = True
                     break
             if not found:
@@ -5269,7 +5247,7 @@ function copyLink(url, btn) {{
                     'name': project_name,
                     'url': project_url,
                     'mode': mode,
-                    'publishedAt': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    'publishedAt': published_at
                 })
 
         # 上传 manifest.json
@@ -5357,15 +5335,22 @@ function copyLink(url, btn) {{
             raise ValueError('导出仅支持纯净版和研发版，内嵌版已移除')
         return modes[mode]
 
-    def build_ai_export(self, project_id, mode):
-        self.register_ai_workbench(project_id)
+    def build_ai_export(self, project_id, mode, published_at=None):
+        connected=self.register_ai_workbench(project_id)
         root = self.safe_ai_project_root(project_id)
         bundle = proto_meta.load_bundle(root)
         output_parent = Path(get_base_path()) / 'exports'
         output_parent.mkdir(parents=True, exist_ok=True)
         output = tempfile.mkdtemp(prefix=f'ai-{mode}-', dir=output_parent)
-        builder = review_export.build_pure_export if mode == 'pure' else review_export.build_review_export
-        builder(root, bundle, output)
+        if mode == 'pure':
+            review_export.build_pure_export(root, bundle, output)
+        else:
+            record = proto_meta.read_json(root / 'record.json', {})
+            previous = record.get('github_published_at') if record.get('github_url') else None
+            import publication_versions as V
+            target,baseline,unavailable=self.publication_context(connected['projectId'],bundle)
+            publication=V.prepare(root,bundle,target,published_at=published_at or previous,baseline=baseline,unavailable=unavailable)
+            review_export.build_review_export(root, bundle, output, published_at=publication['release']['publishedAt'],publication=publication)
         return output
 
     # ==================== GitHub 配置 API ====================
@@ -5467,175 +5452,84 @@ function copyLink(url, btn) {{
     # ==================== GitHub 发布 API ====================
 
     def handle_github_publish(self):
-        """将项目发布到 GitHub Pages"""
+        """旧 AI 发布入口转入统一版本发布，保持原链接身份与版本别名。"""
         try:
-            content_length = int(self.headers['Content-Length'])
-            body = self.rfile.read(content_length)
-            data = json.loads(body.decode('utf-8'))
-
-            project_id = data.get('projectId', '')
-            mode = self.normalize_export_mode(data.get('mode', 'preview'))
-            if not project_id:
-                self.send_error_response("缺少 projectId")
-                return
-
+            data=self.read_json_body()
+            mode=self.normalize_export_mode(data.get('mode','preview'))
+            project_id=str(data.get('projectId',''))
+            if not self.require_ai_project_access(project_id): return
             self.safe_ai_project_root(project_id)
-            if not self.require_ai_project_access(project_id):
-                return
-
-            gh = get_github_runtime_config()
-            token = gh.get('token', '')
-            username = gh.get('username', '')
-            repo = gh.get('repo', 'my-prototypes')
-
-            if not token or not username:
-                self.send_error_response("请先在设置中配置 GitHub Token 和用户名")
-                return
-
-            project_dir = os.path.join(PROJECTS_DIR, project_id)
-            if not os.path.exists(project_dir):
-                self.send_error_response(f"项目不存在: {project_id}")
-                return
-
-            api_base = 'https://api.github.com'
-
-            session = github_api_session(token)
-
-            print(f"[GitHub] 开始发布项目 '{project_id}' 到仓库 '{username}/{repo}'")
-
-            # ---- 1. 检查/创建仓库 ----
-            print(f"[GitHub] 步骤 1/7: 检查或创建 GitHub 仓库 '{username}/{repo}'...")
-            repo_url = f"{api_base}/repos/{username}/{repo}"
-            try:
-                r = session.get(repo_url, timeout=15)
-                if r.status_code == 404:
-                    print(f"[GitHub] 仓库 '{repo}' 不存在，尝试创建...")
-                    create_resp = session.post(
-                        f"{api_base}/user/repos",
-                        json={'name': repo, 'private': False, 'auto_init': True},
-                        timeout=20
-                    )
-                    if create_resp.status_code not in (200, 201):
-                        raise Exception(f"创建仓库失败: {create_resp.json().get('message', create_resp.text)}")
-                    print(f"[GitHub] 仓库 '{repo}' 已成功创建。")
-                    import time
-                    time.sleep(2)  # 等待仓库初始化
-                elif r.status_code != 200:
-                    raise Exception(f"访问仓库失败（HTTP {r.status_code}）: {r.json().get('message', r.text)}")
-                else:
-                    print(f"[GitHub] 仓库 '{repo}' 已存在。")
-            except requests.exceptions.RequestException as req_e:
-                raise Exception('连接 GitHub API 失败，请检查网络和系统代理后重试') from req_e
-
-            # ---- 2. 获取默认分支 ----
-            print(f"[GitHub] 步骤 2/7: 获取仓库默认分支...")
-            repo_info = session.get(repo_url, timeout=15).json()
-            default_branch = repo_info.get('default_branch', 'main')
-            print(f"[GitHub] 默认分支为: '{default_branch}'。")
-
-            # ---- 3. 确保 index.html 根文件存在（GitHub Pages 需要） ----
-            print(f"[GitHub] 步骤 3/7: 检查并创建根目录重定向文件 'index.html'...")
-            root_index_path = f"{api_base}/repos/{username}/{repo}/contents/index.html"
-            r_root = session.get(root_index_path, timeout=10)
-            if r_root.status_code == 404:
-                root_content = base64.b64encode(b'<meta http-equiv="refresh" content="0;url=projects/">').decode()
-                put_resp = session.put(root_index_path, json={
-                    'message': 'Add root redirect for GitHub Pages',
-                    'content': root_content,
-                    'branch': default_branch
-                }, timeout=15)
-                if put_resp.status_code not in (200, 201):
-                    raise Exception(f"创建根目录 'index.html' 失败: {put_resp.json().get('message', put_resp.text)}")
-                print(f"[GitHub] 根目录 'index.html' 已创建。")
-            else:
-                print(f"[GitHub] 根目录 'index.html' 已存在。")
-
-            # ---- 4. 启用 GitHub Pages ----
-            print(f"[GitHub] 步骤 4/7: 检查并启用 GitHub Pages...")
-            pages_api_url = f"{api_base}/repos/{username}/{repo}/pages"
-            # Pages API 需要特殊的 Accept header，临时覆盖
-            pages_headers = {'Accept': 'application/vnd.github+json'}
-            pages_resp = session.get(pages_api_url, headers=pages_headers, timeout=10)
-            if pages_resp.status_code == 404:
-                post_resp = session.post(pages_api_url, headers=pages_headers, json={
-                    'source': {'branch': default_branch, 'path': '/'}
-                }, timeout=15)
-                if post_resp.status_code not in (200, 201):
-                    raise Exception(f"启用 GitHub Pages 失败: {post_resp.json().get('message', post_resp.text)}")
-                print(f"[GitHub] GitHub Pages 已成功启用。")
-            elif pages_resp.status_code == 200:
-                print(f"[GitHub] GitHub Pages 已存在，跳过。")
-            else:
-                raise Exception(f"检查 GitHub Pages 状态失败（HTTP {pages_resp.status_code}）: {pages_resp.json().get('message', pages_resp.text)}")
-
-            # ---- 4.5. 执行本地导出 ----
-            print(f"[GitHub] 步骤 4.5/7: 按模式 '{mode}' 执行本地导出...")
-            export_dir = self.build_ai_export(project_id, mode)
-            print(f"[GitHub] 导出目录: {export_dir}")
-
-            # ---- 5. 上传项目文件 ----
-            print(f"[GitHub] 步骤 5/7: 上传项目文件到 'projects/{project_id}/' 目录...")
-            github_upload_dir(session, api_base, username, repo, default_branch,
-                              export_dir, f"projects/{project_id}")
-
-            print(f"[GitHub] 项目文件上传完成。")
-
-            # ---- 6. 生成 Pages URL ----
-            print(f"[GitHub] 步骤 6/7: 生成 GitHub Pages URL...")
-            pages_url_result = f"https://{username}.github.io/{repo}/projects/{project_id}/"
-            print(f"[GitHub] 预计发布链接: {pages_url_result}")
-
-            # ---- 7. 更新 record.json + 列表页 ----
-            print(f"[GitHub] 步骤 7/7: 更新本地记录 + GitHub 列表页...")
-            record_path = os.path.join(project_dir, 'record.json')
-            project_name = project_id  # 默认用 ID
-            try:
-                record = {}
-                if os.path.exists(record_path):
-                    with open(record_path, 'r', encoding='utf-8') as f:
-                        record = json.load(f)
-                project_name = record.get('title', record.get('name', project_id))
-                record['github_url'] = pages_url_result
-                record['github_published_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                record['github_mode'] = mode
-                with open(record_path, 'w', encoding='utf-8') as f:
-                    json.dump(record, f, ensure_ascii=False, indent=2)
-                print(f"[GitHub] 'record.json' 已更新。")
-            except Exception as e:
-                print(f"[GitHub] 警告: 更新 'record.json' 失败（非致命错误）: {e}")
-
-            # 更新 GitHub 列表页
-            try:
-                self.update_github_listing(
-                    session, api_base, username, repo, default_branch,
-                    project_id=project_id,
-                    project_name=project_name,
-                    project_url=pages_url_result,
-                    mode=mode,
-                    remove=False
-                )
-            except Exception as e:
-                print(f"[GitHub] 警告: 更新列表页失败（非致命错误）: {e}")
-
-            print(f"[GitHub] 项目 '{project_id}' 发布流程完成。")
-            self.send_json_response({
-                'success': True,
-                'url': pages_url_result,
-                'mode': mode,
-                'message': f'发布成功！约 1-3 分钟后链接生效: {pages_url_result}'
-            })
-
-        except (ValueError, FileNotFoundError) as e:
-            self.send_json_status({'success': False, 'error': str(e),
-                                   'needGithubConfig': getattr(e, 'need_github_config', False)},
-                                  getattr(e, 'status', 400 if isinstance(e, ValueError) else 404))
-        except Exception as e:
-            print(f"[错误] GitHub 发布失败: {e}")
-            import traceback
-            traceback.print_exc()
-            self.send_error_response(f"GitHub 发布失败: {str(e)}")
+            connected=self.register_ai_workbench(project_id)
+            self.handle_ext_publish({'extId':connected['projectId'],'mode':mode})
+        except (ValueError,FileNotFoundError) as error:
+            self.send_json_status({'success':False,'ok':False,'error':str(error)},400 if isinstance(error,ValueError) else 404)
+        except Exception as error:
+            self.send_json_status({'success':False,'ok':False,'error':str(error)},500)
 
     # ==================== 外部项目评审壳发布 API ====================
+
+    def publication_context(self, pid, bundle, *, session=None, branch=None, refresh=False):
+        import publication_versions as V
+        item=load_external_registry()['projects'].get(pid) or {}
+        gh=get_github_runtime_config()
+        target={'owner':gh.get('username') or 'local','repo':gh.get('repo') or 'local',
+                'branch':branch or item.get('github_branch') or 'main','remoteId':item.get('github_remote_id') or pid}
+        root=external_root_for(pid)
+        baseline=V.load_state(root,target)
+        if (refresh or baseline is None) and gh.get('token') and gh.get('username'):
+            try:
+                session=session or github_api_session(gh['token'])
+                if not branch:
+                    repo_info=session.get(f"https://api.github.com/repos/{target['owner']}/{target['repo']}",timeout=15)
+                    if repo_info.status_code==200:
+                        target['branch']=repo_info.json().get('default_branch') or target['branch']
+                    pages_info=session.get(f"https://api.github.com/repos/{target['owner']}/{target['repo']}/pages",timeout=10)
+                    if pages_info.status_code==200 and isinstance(pages_info.json(),dict):
+                        target['branch']=(pages_info.json().get('source') or {}).get('branch') or target['branch']
+                    baseline=V.load_state(root,target)
+                remote=V.remote_baseline(session,target)
+                if remote is not None: baseline=remote
+            except Exception as error:
+                print('[发布版本] 上版快照暂不可读，保留本地基线:',type(error).__name__)
+        unavailable=bool(item.get('github_url')) and not (baseline or {}).get('snapshot')
+        return target,baseline,unavailable
+
+    def handle_ext_release_preview(self, query):
+        import publication_versions as V
+        pid=str(query.get('projectId',[''])[0])
+        if not self.require_registered_project_access(pid): return
+        root=external_root_for(pid)
+        if root is None:
+            self.send_json_status({'ok':False,'error':'项目目录已失效'},404); return
+        try:
+            bundle=proto_meta.ensure_bundle(root)
+            proto_meta.ensure_project_id(root,bundle,pid)
+            proto_meta.ensure_pages_registered(root,bundle)
+            target,baseline,unavailable=self.publication_context(pid,bundle,refresh=query.get('refresh',[''])[0]=='1')
+            publication=V.prepare(root,bundle,target,baseline=baseline,unavailable=unavailable)
+            self.send_json_response({'ok':True,'target':target,'sourceVersion':publication['snapshot']['contentVersion'],
+                'release':publication['release'],'changes':publication['changes'],
+                'deployment':(V.load_state(root,target) or {}).get('deployment','')})
+        except Exception as error:
+            self.send_json_status({'ok':False,'error':str(error)},409 if isinstance(error,ValueError) else 500)
+
+    def handle_ext_release_notes(self):
+        import publication_versions as V
+        try:
+            data=self.read_json_body(); pid=str(data.get('projectId',''))
+            if not self.require_registered_project_access(pid): return
+            root=external_root_for(pid)
+            if root is None: raise ValueError('项目目录已失效')
+            bundle=proto_meta.load_bundle(root); gh=get_github_runtime_config()
+            item=load_external_registry()['projects'].get(pid) or {}
+            branch=data.get('branch') or item.get('github_branch') or 'main'
+            if not isinstance(branch,str) or len(branch)>255: raise ValueError('发布目标无效')
+            target={'owner':gh.get('username') or 'local','repo':gh.get('repo') or 'local','branch':branch,'remoteId':item.get('github_remote_id') or pid}
+            if V.capture(root,bundle)['contentVersion']!=data.get('sourceVersion'): raise ValueError('项目内容已变化，请重新生成更新说明')
+            V.save_draft(root,target,data['sourceVersion'],data.get('descriptions',{}))
+            self.send_json_response({'ok':True})
+        except Exception as error:
+            self.send_json_status({'ok':False,'error':str(error)},409 if isinstance(error,ValueError) else 500)
 
     def sync_ai_publication(self, item):
         """统一发布仍更新 AI 项目原 record / 列表，保留既有分享链接身份。"""
@@ -5674,15 +5568,33 @@ function copyLink(url, btn) {{
         if not item:
             self.send_json_status({'ok': False, 'error': '项目未登记'}, 404)
             return
+        if query.get('probe',[''])[0]=='1' and item.get('github_deployment')=='pending':
+            import publication_versions as V
+            gh=get_github_runtime_config()
+            target={'owner':gh.get('username') or 'local','repo':gh.get('repo') or 'local',
+                    'branch':item.get('github_branch') or 'main','remoteId':item.get('github_remote_id') or pid}
+            root=external_root_for(pid); state=V.load_state(root,target) if root else None
+            if state and V.probe_deployment(target,state['release']):
+                with REQUEST_LOCK:
+                    current=V.load_state(root,target)
+                    if current and current['release']['releaseId']==state['release']['releaseId']:
+                        current.pop('snapshot',None);current['deployment']='live'
+                        proto_meta.write_json_atomic(V._folder(root,target)/'state.json',current)
+                        with EXTERNAL_LOCK:
+                            registry=load_external_registry(); actual=registry['projects'].get(pid)
+                            if actual and actual.get('github_release_id')==state['release']['releaseId']:
+                                actual['github_deployment']='live';save_external_registry(registry);item=actual
         self.send_json_response({'ok': True, 'published': bool(item.get('github_url')),
                                  'url': item.get('github_url', ''),
                                  'publishedAt': item.get('github_published_at', ''),
-                                 'mode': item.get('github_publish_mode', '')})
+                                 'mode': item.get('github_publish_mode', ''),
+                                 'deployment':item.get('github_deployment',''),
+                                 'releaseId':item.get('github_release_id','')})
 
-    def handle_ext_publish(self):
+    def handle_ext_publish(self, supplied_data=None):
         """发布已登记外部项目为 GitHub Pages 评审壳（交互原型 + PRD + 标注气泡）。"""
         try:
-            data = self.read_json_body()
+            data = supplied_data if supplied_data is not None else self.read_json_body()
         except Exception:
             self.send_json_status({'ok': False, 'error': '请求体不是有效 JSON'}, 400)
             return
@@ -5717,34 +5629,51 @@ function copyLink(url, btn) {{
             version_label = '研发版评审壳' if mode == 'review' else '纯净版'
             print(f"[GitHub] 开始发布{version_label} '{pid}' 到 '{username}/{repo}'")
             default_branch = github_ensure_pages(session, api_base, username, repo)
-            published_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            published_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            import publication_versions as V
+            target,baseline,unavailable=self.publication_context(pid,bundle,session=session,branch=default_branch,refresh=True)
+            snapshot=V.capture(root,bundle,mode)
+            frozen=Path(tmp_dir)/'source'; frozen.mkdir()
+            review_export.copy_proto(root,frozen,ai_project=bundle['project'].get('source')=='ai')
+            if V.capture(frozen,bundle,mode)['contentVersion']!=snapshot['contentVersion']:
+                raise ValueError('项目正在修改，请完成保存后重新发布')
+            publication=V.prepare(root,bundle,target,published_at,snapshot=snapshot,baseline=baseline,mode=mode,unavailable=unavailable)
+            output=Path(tmp_dir)/'site'; output.mkdir()
             if mode == 'pure':
-                built = review_export.build_pure_export(root, bundle, tmp_dir)
+                built = review_export.build_pure_export(frozen, bundle, output)
+                built['files']+=V.write_publication(output,publication)
             else:
-                built = review_export.build_review_export(root, bundle, tmp_dir, published_at=published_at)
+                built = review_export.build_review_export(frozen, bundle, output, published_at=published_at,publication=publication,versioned=True)
             print(f"[GitHub] {version_label}构建完成，共 {len(built['files'])} 个文件，开始上传...")
             registry = load_external_registry()
             item = registry['projects'].get(pid)
             remote_id = (item.get('github_remote_id') or pid) if item else pid
-            github_upload_dir(session, api_base, username, repo, default_branch,
-                              tmp_dir, f"projects/{remote_id}")
+            uploaded=github_upload_dir(session, api_base, username, repo, default_branch,
+                              output, f"projects/{remote_id}")
+            if isinstance(uploaded,dict) and uploaded.get('release'):
+                publication['release']=uploaded['release']
+            V.commit(root,target,publication)
             pages_url = f"https://{username}.github.io/{repo}/projects/{remote_id}/"
             if item:
                 item['github_url'] = pages_url
-                item['github_published_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                item['github_published_at'] = published_at
                 item['github_publish_mode'] = mode
+                item['github_branch']=default_branch
+                item['github_release_id']=publication['release']['releaseId']
+                item['github_deployment']='pending'
                 save_external_registry(registry)
                 self.sync_ai_publication(item)
             try:
                 self.update_github_listing(session, api_base, username, repo, default_branch,
                                            project_id=remote_id,
                                            project_name=bundle['project'].get('name', pid),
-                                           project_url=pages_url, mode=mode, remove=False)
+                                           project_url=pages_url, mode=mode, remove=False, published_at=published_at)
             except Exception as e:
                 print(f"[GitHub] 警告: 更新列表页失败（非致命错误）: {e}")
             print(f"[GitHub] {version_label} '{pid}' 发布完成: {pages_url}")
-            self.send_json_response({'ok': True, 'url': pages_url,
+            self.send_json_response({'ok': True, 'success': True, 'url': pages_url,
                                      'publishedAt': item.get('github_published_at', '') if item else '',
+                                     'releaseId':publication['release']['releaseId'],'deployment':'pending',
                                      'message': f'发布成功！约 1-3 分钟后链接生效: {pages_url}'})
         except Exception as e:
             print(f"[错误] 评审壳发布失败: {e}")
@@ -5786,7 +5715,12 @@ function copyLink(url, btn) {{
             if mode == 'pure':
                 built = review_export.build_pure_export(root, bundle, tmp_dir)
             else:
-                built = review_export.build_review_export(root, bundle, tmp_dir)
+                import publication_versions as V
+                target,baseline,unavailable=self.publication_context(pid,bundle)
+                publication=V.prepare(root,bundle,target,published_at=item.get('github_published_at') if item.get('github_url') else None,
+                                      baseline=baseline,unavailable=unavailable)
+                built = review_export.build_review_export(root, bundle, tmp_dir,
+                    published_at=publication['release']['publishedAt'],publication=publication)
             # 单页面纯净版：直接下载原型页面本身；其余（多页纯净版 / 研发版）打 ZIP
             if mode == 'pure' and built.get('htmlCount') == 1:
                 html_rel = next((rel for rel in built['files']
@@ -5891,7 +5825,7 @@ function copyLink(url, btn) {{
             changed = []
             for _, item in matches:
                 if item is selected or item.get('github_url') in urls or item.get('github_repository') == owner+'/'+repo:
-                    for key in ('github_url', 'github_published_at', 'github_publish_mode', 'github_repository'):
+                    for key in ('github_url', 'github_published_at', 'github_publish_mode', 'github_repository','github_branch','github_release_id','github_deployment'):
                         item.pop(key, None)
                     changed.append(item)
             if changed:

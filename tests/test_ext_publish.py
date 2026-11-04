@@ -6,12 +6,15 @@ import functools
 import http.client
 import http.server
 import ipaddress
+import io
 import json
 import os
 import posixpath
+import re
 import tempfile
 import threading
 import urllib.parse
+import zipfile
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -74,11 +77,17 @@ def api(tmp_path):
         if hooks['fail_upload']:
             raise Exception('网络不可达')
         export = Path(export_dir)
+        manifest=json.loads((export / 'prototype-release.json').read_text(encoding='utf-8')) if (export / 'prototype-release.json').exists() else {}
+        proto_base=manifest.get('prototypeBase') or 'proto/'
+        if manifest.get('mode')=='review' or (export / 'proto').is_dir():
+            shell = (export / 'index.html').read_text(encoding='utf-8')
+            hooks['uploaded_data'] = json.loads(re.search(
+                r'<script type="application/json" id="review-data">(.*?)</script>', shell, re.S).group(1))
         calls['upload'].append({
             'remote_prefix': remote_prefix,
             'branch': branch,
             'has_shell': (export / 'index.html').is_file(),
-            'has_proto': (export / 'proto' / 'index.html').is_file(),
+            'has_proto': (export / proto_base / 'index.html').is_file(),
         })
 
     extra = {
@@ -105,7 +114,7 @@ def api(tmp_path):
         connection.request(method or ('POST' if data is not None else 'GET'), path, body, headers)
         response = connection.getresponse()
         raw = response.read()
-        result = (response.status, json.loads(raw) if raw else {})
+        result = (response.status, json.loads(raw) if 'application/json' in response.getheader('Content-Type', '') else raw)
         connection.close()
         return result
 
@@ -140,6 +149,46 @@ def test_publish_happy_path(api):
     assert saved['github_url'] == res['url'] and saved['github_published_at']
     status, res = api.request(f'/api/ext/publish-status?projectId={urllib.parse.quote(pid)}')
     assert status == 200 and res['ok'] and res['published'] and res['url'] == saved['github_url']
+
+
+def test_publish_time_matches_artifact_record_and_status_despite_upload_delay(api):
+    pid, _ = register_project(api)
+    clock = {'now': datetime.datetime(2026, 11, 3, 11, 54, 0)}
+
+    class Clock(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            local = clock['now'].replace(tzinfo=datetime.timezone(datetime.timedelta(hours=8)))
+            return local.astimezone(tz) if tz else clock['now']
+
+    api.namespace['datetime'] = SimpleNamespace(datetime=Clock, timezone=datetime.timezone)
+    upload = api.namespace['github_upload_dir']
+
+    def delayed_upload(*args):
+        upload(*args)
+        clock['now'] = datetime.datetime(2026, 11, 3, 11, 55, 1)
+
+    api.namespace['github_upload_dir'] = delayed_upload
+    code, result = api.request('/api/ext/publish', {'extId': pid})
+    assert code == 200 and result['ok']
+    status = api.request('/api/ext/publish-status?projectId=' + pid)[1]
+    saved = json.loads(api.registry.read_text(encoding='utf-8'))['projects'][pid]
+    assert api.hooks['uploaded_data']['publishedAt'] == result['publishedAt'] == status['publishedAt'] == saved['github_published_at']
+    assert api.calls['listing'][-1]['published_at'] == result['publishedAt']
+
+
+def test_review_download_uses_publication_time_from_status(api):
+    pid, _ = register_project(api)
+    registry = json.loads(api.registry.read_text(encoding='utf-8'))
+    registry['projects'][pid].update(github_url='https://fixture.invalid/published/',
+                                     github_published_at='2026-11-03 11:55:01')
+    api.registry.write_text(json.dumps(registry), encoding='utf-8')
+    code, raw = api.request('/api/ext/export?extId=' + pid + '&mode=review')
+    assert code == 200
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        shell = archive.read('index.html').decode('utf-8')
+    data = json.loads(re.search(r'<script type="application/json" id="review-data">(.*?)</script>', shell, re.S).group(1))
+    assert data['publishedAt'] == api.request('/api/ext/publish-status?projectId=' + pid)[1]['publishedAt'] == '2026-11-03 11:55:01'
 
 
 def test_publish_without_token_writes_nothing(api):
@@ -225,3 +274,54 @@ def test_unpublish_without_token_marks_need_config(api):
 def test_publish_status_unregistered(api):
     status, res = api.request('/api/ext/publish-status?projectId=p-0000000000000000')
     assert status == 404 and not res['ok']
+
+
+def test_release_preview_draft_and_publication_share_same_change_content(api):
+    import publication_versions as V
+    pid,root=register_project(api)
+    code,preview=api.request('/api/ext/release-preview?projectId='+pid)
+    assert code==200 and preview['ok'],preview
+    assert len(preview['changes']['items'])==1
+    row=preview['changes']['items'][0]
+    code,result=api.request('/api/ext/release-notes',{'projectId':pid,'branch':preview['target']['branch'],
+        'sourceVersion':preview['sourceVersion'],'descriptions':{row['id']:'新增首页预览入口'}})
+    assert code==200 and result['ok']
+    code,published=api.request('/api/ext/publish',{'extId':pid})
+    assert code==200 and published['ok']
+    assert api.hooks['uploaded_data']['changeLog']['items'][0]['description']=='新增首页预览入口'
+    state=V.load_state(root,preview['target'])
+    assert state['release']['releaseId']==published['releaseId']
+    assert api.request('/api/ext/release-preview?projectId='+pid)[1]['changes']['items']==[]
+
+
+def test_stale_release_description_is_rejected_without_advancing_baseline(api):
+    import publication_versions as V
+    pid,root=register_project(api)
+    preview=api.request('/api/ext/release-preview?projectId='+pid)[1]
+    (root/'index.html').write_text('<html><h1>新内容</h1></html>',encoding='utf-8')
+    code,result=api.request('/api/ext/release-notes',{'projectId':pid,'branch':'main','sourceVersion':preview['sourceVersion'],'descriptions':{}})
+    assert code==409 and not result['ok']
+    assert V.load_state(root,preview['target']) is None
+
+
+def test_failed_republish_keeps_previous_release_snapshot(api):
+    import publication_versions as V
+    pid,root=register_project(api)
+    first=api.request('/api/ext/publish',{'extId':pid})[1]
+    target={'owner':'u','repo':'r','branch':'main','remoteId':pid}
+    (root/'index.html').write_text('<html><h1>新内容</h1></html>',encoding='utf-8')
+    api.hooks['fail_upload']=True
+    assert api.request('/api/ext/publish',{'extId':pid})[0]==500
+    assert V.load_state(root,target)['release']['releaseId']==first['releaseId']
+
+
+def test_release_deployment_only_marks_live_after_matching_static_manifest(api,monkeypatch):
+    import publication_versions as V
+    pid,_=register_project(api)
+    first=api.request('/api/ext/publish',{'extId':pid})[1]
+    assert api.request('/api/ext/publish-status?projectId='+pid)[1]['deployment']=='pending'
+    monkeypatch.setattr(V,'probe_deployment',lambda target,release:False)
+    assert api.request('/api/ext/publish-status?projectId='+pid+'&probe=1')[1]['deployment']=='pending'
+    monkeypatch.setattr(V,'probe_deployment',lambda target,release:True)
+    status=api.request('/api/ext/publish-status?projectId='+pid+'&probe=1')[1]
+    assert status['deployment']=='live' and status['releaseId']==first['releaseId']

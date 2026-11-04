@@ -6,6 +6,7 @@ import copy
 import datetime
 import hashlib
 import json
+from pathlib import Path
 import re
 import threading
 import time
@@ -182,3 +183,91 @@ def unpublish(session, owner, repo, project_id, expected_head, render_index, *, 
     if any(row['id'] == project_id for row in after['projects']):
         raise Conflict('远端仍有该项目或已重新发布，请刷新后检查；本地发布记录已保留')
     return {'ok':True,'overview':after}
+
+
+def repository_tree(session, owner, repo, branch):
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,99}',str(owner)): raise ValueError('GitHub 用户无效')
+    _id(repo)
+    if not isinstance(branch,str) or not branch or len(branch)>255: raise ValueError('发布分支无效')
+    api=f'https://api.github.com/repos/{owner}/{repo}'
+    ref=_call(session,'get',api+'/git/ref/heads/'+quote(branch,safe=''))
+    head=ref['object']['sha']
+    commit=_call(session,'get',api+'/git/commits/'+quote(head,safe=''))
+    tree=commit['tree']['sha']; rows=_tree(session,api,tree)
+    for row in rows: _path(row.get('path'))
+    return {'api':api,'head':head,'tree':tree,'files':rows,'branch':branch}
+
+
+def read_file(session,current,path,max_bytes=8*1024*1024):
+    _path(path)
+    row=next((r for r in current['files'] if r.get('path')==path and r.get('type')=='blob'),None)
+    if not row: return None
+    if row.get('size',0)>max_bytes: raise PagesError('发布版本数据过大，不能安全读取')
+    data=_call(session,'get',current['api']+'/git/blobs/'+quote(row['sha'],safe=''))
+    try: raw=base64.b64decode(data['content'])
+    except (ValueError,KeyError) as error: raise PagesError('发布版本数据无效') from error
+    if len(raw)>max_bytes: raise PagesError('发布版本数据过大')
+    return raw
+
+
+def publish_directory(session, owner, repo, branch, directory, remote_prefix):
+    """所有文件与发布清单同一 commit；仅清理发布器登记的本项目文件。"""
+    import publication_versions as V
+    remote_prefix=_path(remote_prefix).rstrip('/')+'/'
+    if not re.fullmatch(r'projects/[A-Za-z0-9][A-Za-z0-9_.-]{0,199}/',remote_prefix): raise ValueError('发布目录无效')
+    current=repository_tree(session,owner,repo,branch)
+    previous_raw=read_file(session,current,remote_prefix+V.MANIFEST)
+    try: previous=json.loads(previous_raw) if previous_raw else {}
+    except ValueError: raise PagesError('远端版本清单损坏，未覆盖原发布')
+    if not isinstance(previous,dict): raise PagesError('远端版本清单无效')
+    folder=Path(directory).resolve(); local={}
+    for path in sorted(folder.rglob('*')):
+        if path.is_symlink(): raise ValueError('发布产物不能含链接')
+        if path.is_file(): local[path.relative_to(folder).as_posix()]=path.read_bytes()
+    if not local: raise ValueError('没有可发布文件')
+    manifest=json.loads(local[V.MANIFEST]) if V.MANIFEST in local else None
+    retained=set()
+    if manifest is not None:
+        if manifest.get('baseReleaseId','')!=previous.get('releaseId',''):
+            raise Conflict('该项目已有另一版本发布，请重新生成更新说明后重试')
+        bases=[manifest.get('prototypeBase','')]
+        if manifest.get('mode')=='review':
+            old_base=previous.get('prototypeBase') or ('proto/' if any(r['path'].startswith(remote_prefix+'proto/') for r in current['files']) else '')
+            if old_base and old_base!=bases[0]: bases.append(old_base)
+        bases=[p for p in bases if p and (p=='proto/' or re.fullmatch(r'prototype-versions/[a-f0-9]{24}/',p))]
+        history=previous.get('history',[])
+        history=[h for h in history if isinstance(h,dict) and re.fullmatch(r'rel-[a-f0-9]{16}',str(h.get('releaseId','')))]
+        if manifest.get('contentVersion')!=previous.get('contentVersion'):
+            history=[{k:manifest[k] for k in ('releaseId','sequence','contentVersion','publishedAt','changesUrl','summary','mode') if k in manifest},*history][:V.LIMIT]
+        if manifest.get('mode')!='review': history=[]
+        keep_notes={h.get('changesUrl','') for h in history}
+        keep_notes|={p.replace('.json','.snapshot.json') for p in keep_notes if p.endswith('.json')}
+        for row in current['files']:
+            path=row['path']
+            if row.get('type')!='blob' or not path.startswith(remote_prefix): continue
+            rel=path[len(remote_prefix):]
+            if any(rel.startswith(base) for base in bases) or rel in keep_notes: retained.add(rel)
+        manifest['history']=history
+        manifest['managedFiles']=sorted(set(local)|retained)
+        local[V.MANIFEST]=json.dumps(manifest,ensure_ascii=False,separators=(',',':')).encode()
+    owned=previous.get('managedFiles',[])
+    if not isinstance(owned,list): raise PagesError('远端文件归属清单无效')
+    remote={r['path']:r for r in current['files'] if r.get('type')=='blob'}
+    changes=[]
+    for rel,raw in local.items():
+        _path(rel); path=remote_prefix+rel
+        sha=hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
+        if path in remote and remote[path].get('sha')==sha: continue
+        created=_call(session,'post',current['api']+'/git/blobs',json={'content':base64.b64encode(raw).decode(),'encoding':'base64'})
+        changes.append({'path':path,'mode':'100644','type':'blob','sha':created['sha']})
+    for rel in owned:
+        _path(rel)
+        if rel not in local and rel not in retained and remote_prefix+rel in remote:
+            changes.append({'path':remote_prefix+rel,'mode':'100644','type':'blob','sha':None})
+    if not changes: return {'head':current['head'],'release':manifest}
+    tree=_call(session,'post',current['api']+'/git/trees',json={'base_tree':current['tree'],'tree':changes})
+    commit=_call(session,'post',current['api']+'/git/commits',json={'message':'Publish prototype: '+remote_prefix.split('/')[-2],
+        'tree':tree['sha'],'parents':[current['head']]})
+    _call(session,'patch',current['api']+'/git/refs/heads/'+quote(branch,safe=''),json={'sha':commit['sha'],'force':False})
+    invalidate()
+    return {'head':commit['sha'],'release':manifest}

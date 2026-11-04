@@ -3182,6 +3182,7 @@ async function executeGitHubUnpublish() {
 let currentExtPubId = '';
 let currentExtPubName = '';
 let currentExtPubMode = 'pure';
+let extHomeDeploymentTimer=null;
 
 async function openExtPublishModal(item) {
     currentExtPubId = item.projectId;
@@ -3201,11 +3202,13 @@ async function openExtPublishModal(item) {
 
     $('extPublishModal').classList.remove('hidden');
     $('extPublishModal').classList.add('flex');
+    void PublicationUpdates.summarizeLocal($('extPubChangesBtn'),currentExtPubId);
 
     await loadExtPubStatus();
 }
 
 function closeExtPublishModal() {
+    clearTimeout(extHomeDeploymentTimer);
     $('extPublishModal').classList.add('hidden');
     $('extPublishModal').classList.remove('flex');
 }
@@ -3223,9 +3226,13 @@ function doExtLocalExport() {
 }
 
 async function loadExtPubStatus() {
+    if(currentExtPubId && $('extPubChangesBtn'))void PublicationUpdates.summarizeLocal($('extPubChangesBtn'),currentExtPubId,true);
+    clearTimeout(extHomeDeploymentTimer);
+    const statusProject=currentExtPubId;
     try {
         const resp = await fetch('/api/github/config');
         const data = await resp.json();
+        if(statusProject!==currentExtPubId)return;
         if (!data.success || !data.hasToken || !data.username) {
             $('extPubNotConfigured').classList.remove('hidden');
             return;
@@ -3238,14 +3245,17 @@ async function loadExtPubStatus() {
     }
     // 查询该项目是否已发布（登记表）
     try {
-        const resp = await fetch(`/api/ext/publish-status?projectId=${encodeURIComponent(currentExtPubId)}`);
+        const resp = await fetch(`/api/ext/publish-status?projectId=${encodeURIComponent(currentExtPubId)}&probe=1`);
         const data = await resp.json();
+        if(statusProject!==currentExtPubId)return;
         if (data.ok && data.published && data.url) {
+            if($('extPubStatusText'))$('extPubStatusText').textContent=data.deployment==='pending'?'部署中':'已发布';
             $('extPubPublishedUrl').value = data.url;
             $('extPubPublishedAt').textContent = data.publishedAt || '';
             $('extPubPublishedInfo').classList.remove('hidden');
             $('extPubPublishBtnText').textContent = '重新发布 / 更新';
             $('extPubUnpublishBtn').classList.remove('hidden');
+            if(data.deployment==='pending'&&!$('extPublishModal').classList.contains('hidden'))extHomeDeploymentTimer=setTimeout(()=>{if(statusProject===currentExtPubId)void loadExtPubStatus();},15000);
         }
     } catch (_) { }
 }
@@ -3270,7 +3280,8 @@ async function doExtGithubPublish() {
             $('extPubUnpublishBtn').classList.remove('hidden');
             finalText = '重新发布 / 更新';
             window.PagesManager?.publicationChanged();
-            showToast('🚀 发布成功！约 1-3 分钟后链接生效');
+            showToast('已提交 GitHub，正在等待站点生效');
+            void loadExtPubStatus();
         } else {
             showToast('发布失败: ' + (data.error || '未知错误'), 'error');
             finalText = $('extPubPublishedInfo').classList.contains('hidden') ? '立即发布' : '重新发布 / 更新';

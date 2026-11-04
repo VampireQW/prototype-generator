@@ -1,5 +1,22 @@
 # API 参考 (API Reference)
 
+## 发布更新说明（2026-11-03）
+
+新接口沿用已登记项目访问权限；POST 仍要求本机同源 JSON，不接受客户端任意目录。
+
+| 接口 | 参数 / 行为 | 返回 |
+| --- | --- | --- |
+| `GET /api/ext/release-preview?projectId=...` | 规范化当前内容，比较同一发布目标的上次成功基线；只记录待编辑的变化 ID，不推进基线 | `{ok,release,changes,sourceVersion,target,deployment}` |
+| `POST /api/ext/release-notes` | `{projectId,branch,sourceVersion,descriptions:{changeId:text}}`；只允许当前指纹及预览中存在的 ID，说明最多 1000 字 | `{ok:true}`；内容已改变 / 非法说明返回 409，项目无权限保留原访问错误 |
+
+`changes.items` 每项含 `id,kind,description,pageTitle,stateTitle,before,after,affectedPages,affectedPageTitles,target`。`target` 为 `pageId,stateId` 及可选 `anchor,noteId,documentId,deleted`。自动说明基于真实差异，正文前后内容为变化行节选，不代表 AI 推断实现完成。
+
+`POST /api/ext/publish` 保留 `{extId,mode}`，成功增加 `releaseId,deployment:'pending'`（并兼容 `success:true`）；构建和整批提交成功后才更新记录。`GET /api/ext/publish-status` 增加 `releaseId,deployment`；显式传 `probe=1` 可检查公开站点新清单，只有版本匹配才从 pending 转 live。`/api/github/publish` 的旧 AI 项目入口映射到同一流程，mode 别名与远端身份保留。
+
+`GET /api/ext/export?extId=...&mode=review` 及旧 AI 研发导出携带当前更新说明，不推进发布基线；纯净下载格式不变。Pages 发布的纯净版仅附不含 PRD 的最小版本清单，供先前研发页检测版本类型变化。
+
+静态 `prototype-release.json` 是公开同站只读文件，包含 `schemaVersion:1,projectId,releaseId,sequence,contentVersion,publishedAt,mode,prototypeBase,changesUrl,snapshotUrl,summary,history,managedFiles`；研发运行时不带 Token，不调用本地服务。内容相同重发可更新发布时间 / sequence，但不会通知有新内容。
+
 ## HTML 页面导入（2026-10-21）
 
 `POST /api/proto/import-html`，要求本机同源 JSON 与项目访问权限。

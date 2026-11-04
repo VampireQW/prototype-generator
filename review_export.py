@@ -19,7 +19,7 @@ import re
 import shutil
 import prototype_manifest
 import proto_meta
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -29,6 +29,7 @@ PIN_SCRIPTS = (
     ("appearance", "proto-appearance.js"),
     ("anchors", "proto-anchors.js"),
     ("order", "proto-order.js"),
+    ("changes", "change-locator.js"),
     ("bridge", "review-bridge.js"),
     ("pins", "review-pins.js"),
 )
@@ -38,6 +39,17 @@ HTML_SUFFIXES = (".html", ".htm")
 
 IGNORE_NAMES = {".prototype", "exports", "dist", ".git", "node_modules", "__pycache__", "agent-skills"}
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 与 GitHub Contents API 单文件上限一致
+
+
+def publication_time(value: str | None = None) -> str:
+    """发布记录与产物共用服务器本地时间，兼容旧 UTC / 带时区 ISO 时间。"""
+    try:
+        stamp = datetime.fromisoformat(value.replace('Z', '+00:00')) if value else datetime.now()
+    except (ValueError, AttributeError):
+        return str(value)  # 保留旧记录的未知格式，不让导出失败
+    if stamp.tzinfo is not None:
+        stamp = stamp.astimezone()
+    return stamp.strftime('%Y-%m-%d %H:%M:%S')
 
 
 def copy_proto(root: Path, dest: Path, *, ai_project: bool = False, excluded_files=()) -> list[str]:
@@ -109,6 +121,8 @@ def render_shell(template: str, data: dict) -> str:
     out = out.replace('__PROJECT_NAV_JS__', (prototype_manifest.ASSETS_DIR / 'project-navigation.js').read_text(encoding='utf-8'))
     out = out.replace('__SIDEBAR_RESIZE_CSS__', (BASE_DIR / 'src/sidebar-resize.css').read_text(encoding='utf-8'))
     out = out.replace('__SIDEBAR_RESIZE_JS__', (BASE_DIR / 'src/sidebar-resize.js').read_text(encoding='utf-8'))
+    out = out.replace('__PUBLICATION_UPDATES_CSS__', (BASE_DIR / 'src/publication-updates.css').read_text(encoding='utf-8'))
+    out = out.replace('__PUBLICATION_UPDATES_JS__', (BASE_DIR / 'src/publication-updates.js').read_text(encoding='utf-8'))
     return out.replace("__REVIEW_DATA__", payload)
 
 
@@ -186,15 +200,18 @@ def inject_proto_scripts(proto_dir: Path, copied: list[str], project_bundle: dic
     return touched
 
 
-def build_review_export(root: Path, bundle: dict, out_dir: Path, published_at: str | None = None) -> dict:
+def build_review_export(root: Path, bundle: dict, out_dir: Path, published_at: str | None = None, *, publication=None, versioned=False) -> dict:
     """构建评审站到 out_dir（调用方保证 out_dir 为空或已清理）。返回产物清单。"""
     root = Path(root)
     out_dir = Path(out_dir)
     if not root.is_dir():
         raise ValueError(f"项目目录不存在：{root}")
     template = SHELL_TEMPLATE.read_text(encoding="utf-8")
-    published = published_at or datetime.now(timezone.utc).isoformat()
-    proto_dir = out_dir / "proto"
+    published = publication_time(published_at)
+    import copy
+    publication=copy.deepcopy(publication)
+    prototype_base=publication['release']['prototypeBase'] if publication and versioned else 'proto/'
+    proto_dir = out_dir / prototype_base
     proto_dir.mkdir(parents=True, exist_ok=True)
     if not any(not p.get('trashedAt') and p.get('role') != 'launcher' for p in bundle['project']['pages']):
         raise ValueError('没有可导出的业务页面，请先从回收站恢复页面')
@@ -205,6 +222,9 @@ def build_review_export(root: Path, bundle: dict, out_dir: Path, published_at: s
     copied = sorted(set(copied + prototype_manifest.build_launcher(proto_dir, bundle)))
     injected = inject_proto_scripts(proto_dir, copied, bundle)
     data = review_data(bundle, published)
+    if publication:
+        publication['release']['prototypeBase']=prototype_base
+        data.update(release=publication['release'],changeLog=publication['changes'],prototypeBase=prototype_base)
     # 版本包含最终 HTML 内嵌的工作台脚本；只改运行时、PRD revision 不变时也必须刷新 iframe。
     data['prototypeVersions'] = {
         rel: hashlib.sha256((proto_dir / rel).read_bytes()).hexdigest()[:20]
@@ -213,10 +233,14 @@ def build_review_export(root: Path, bundle: dict, out_dir: Path, published_at: s
     (out_dir / "index.html").write_text(
         render_shell(template, data), encoding="utf-8"
     )
+    extra=[]
+    if publication:
+        import publication_versions
+        extra=publication_versions.write_publication(out_dir,publication)
     return {
-        "files": ["index.html", *(f"proto/{rel}" for rel in copied)],
+        "files": ["index.html", *(prototype_base+rel for rel in copied),*extra],
         "publishedAt": published,
-        "injected": [f"proto/{rel}" for rel in injected],
+        "injected": [prototype_base+rel for rel in injected],
     }
 
 

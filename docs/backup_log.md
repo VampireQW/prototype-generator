@@ -1,5 +1,27 @@
 # 备份与回滚日志 (Backup & Rollback Log)
 
+## 发布更新通知与说明（2026-11-03）
+
+修改前核心文件、共享评审模块、发布 / 导出测试和对应文档保存至 `backups/20261103_release_updates/`，沿用相对路径。`src/proto-text-runtime.js` 的原导出接口另存同目录；PRD skill 随服务副本同步前也已备份，保留本地已确认规则。
+
+回滚恢复相应 server / github_pages / review_export、viewer / 首页、review shell / bridge、文本运行时及文档，移除新增 publication_versions.py、publication-updates.js/css、change-locator.js，再重启服务。真实项目、凭据和远端发布均未为验证改写；浏览器验证使用 tmp/release-updates 下的隔离项目。
+
+上线后产生的 `.prototype/releases/` 为独立版本记录，回滚旧代码可保留而不读取；远端新研发版自包含运行代码，恢复本地代码不会改写已发布内容。需要撤回远端行为应显式重新发布，不删除业务 PRD 或原型。
+
+## 遗留入口与历史产物清理（2026-11-03）
+
+清理前工作树差异及加载 / 发布时间修复快照保存在 `backups/20261103_legacy_cleanup/`。`retired-source.zip` 保存退役的 16 个源码 / 脚本；`historical-exports.zip` 和 `historical-tomodao.zip` 保存历史交付文件，共 176 个文件。每个 zip 均有相对路径、长度与 SHA-256 清单，已逐条回读校验。
+
+需要回滚时，从对应 zip 按归档内相对路径恢复指定文件；当前修改前文档与运行文件另存 working-tree 子目录。`cleanup-result.json` 记录实际清理和权限受限目录，执行与验证详情见 `docs/archive/task_20261103_legacy_cleanup.md`。未改写项目、回收站、模型配置和发布凭据。
+
+## 发布与导出时间统一（2026-11-03）
+
+修改前的 server.py、review_export.py、src/review_shell.html、相关发布 / 导出回归及对应文档保存到 backups/20261103_publication_time/，保留相对路径。恢复对应文件并重启服务可撤回时间统一修复；不涉及原型业务文件、PRD、GitHub 凭据或历史发布记录。
+
+## 预览启动加载过渡（2026-11-03）
+
+修改前的 src/viewer.html 与对应更新日志、功能、架构文档保存到 backups/20261103_preview_loading/，保留相对路径。恢复 viewer 并移除新增 src/preview-loading.js、src/preview-loading.css 及对应回归即可撤回；前端刷新生效，不涉及业务原型、项目配置或 PRD。
+
 ## 首页打开项目目录（2026-10-28）
 
 修改前的 server.py、src/script.js、src/index.html、首页菜单回归及对应文档保存到 backups/20261028_open_project_folder/，保留相对路径。恢复对应文件并重启服务可撤回目录入口；新增 tests/test_open_folder.py 可随回滚移除，未修改项目目录与凭据。

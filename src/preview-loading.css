@@ -1,0 +1,26 @@
+/* 首屏即生效，手机 / Web / Pad 识别完成前不绘制默认设备外壳。 */
+#previewContainer[data-preview-state] > #deviceFrameWrapper { transition: opacity 160ms cubic-bezier(.23,1,.32,1); }
+#previewContainer[data-preview-state]:not([data-preview-state="ready"]) > #deviceFrameWrapper { opacity: 0; pointer-events: none; }
+.preview-loading {
+    --load-bg: #fafafa; --load-surface: #fff; --load-soft: #f1f2f4; --load-line: #e4e5e8; --load-text: #262626; --load-muted: #737373; --load-accent: #2563eb;
+    position: absolute; inset: 0; z-index: 4; display: grid; place-items: center;
+    box-sizing: border-box; padding: 32px 20px; background: var(--load-bg); color: var(--load-text);
+    font-family: -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    opacity: 1; visibility: visible; transition: opacity 140ms cubic-bezier(.23,1,.32,1), visibility 0s;
+}
+:root[data-ext-theme="dark"] .preview-loading { --load-bg: #0a0a0a; --load-surface: #171717; --load-soft: #252525; --load-line: #363636; --load-text: #ededed; --load-muted: #a1a1a1; --load-accent: #7ba2ff; }
+@media(prefers-color-scheme:dark) { :root:not([data-ext-theme="light"]) .preview-loading { --load-bg: #0a0a0a; --load-surface: #171717; --load-soft: #252525; --load-line: #363636; --load-text: #ededed; --load-muted: #a1a1a1; --load-accent: #7ba2ff; } }
+#previewContainer[data-preview-state="ready"] > .preview-loading { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 140ms cubic-bezier(.23,1,.32,1), visibility 0s 140ms; }
+.preview-loading-content { width: min(100%,320px); text-align: center; }
+.preview-loading-art { display: block; width: 156px; height: 116px; margin: 0 auto 22px; }
+.preview-loading-caption { display: flex; align-items: center; justify-content: center; gap: 9px; }
+.preview-loading-title { margin: 0; font-size: 15px; font-weight: 600; line-height: 24px; letter-spacing: .01em; }
+.preview-loading-spinner { box-sizing: border-box; flex: none; width: 16px; height: 16px; border: 2px solid var(--load-line); border-top-color: var(--load-accent); border-radius: 50%; animation: preview-spin 750ms linear infinite; }
+.preview-loading-detail { margin: 7px 0 0; color: var(--load-muted); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
+.preview-loading-retry { margin-top: 16px; padding: 6px 12px; min-height: 32px; border: 1px solid var(--load-line); border-radius: 6px; background: var(--load-surface); color: var(--load-text); font-family: inherit; font-size: 12px; font-weight: 500; line-height: 20px; cursor: pointer; }
+.preview-loading-retry[hidden] { display: none; }
+.preview-loading-retry:focus-visible { outline: 2px solid var(--load-accent); outline-offset: 3px; }
+#previewContainer[data-preview-state="error"] .preview-loading-spinner { animation: none; border-color: var(--load-line); border-top-color: var(--load-muted); }
+@media(hover:hover) { .preview-loading-retry:hover { background: var(--load-soft); } }
+@keyframes preview-spin { to { transform: rotate(360deg); } }
+@media(prefers-reduced-motion:reduce) { .preview-loading-spinner { animation: none; } #previewContainer[data-preview-state] > #deviceFrameWrapper, .preview-loading, #previewContainer[data-preview-state="ready"] > .preview-loading { transition: none; } }

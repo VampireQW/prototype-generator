@@ -89,16 +89,17 @@ console.log(JSON.stringify({text:a.TEXT_COLORS,pins:a.PIN_COLORS,rendered}));
         assert contrast(rendered['color'], rendered['stroke']) >= 3
 
 
-def test_export_image_renderer_keeps_code_literal_and_uses_site_asset_path():
+@pytest.mark.parametrize('prototype_base',['proto/','prototype-versions/'+'a'*24+'/'])
+def test_export_image_renderer_keeps_code_literal_and_uses_site_asset_path(prototype_base):
     executable = shutil.which('node')
     if not executable:
         pytest.skip('需要 Node.js')
     shell = (SRC / 'review_shell.html').read_text(encoding='utf-8')
     renderer = re.search(r'function esc\(s\) \{[\s\S]+?(?=\s+function md\(src\))', shell)[0]
     image = 'prd-assets/' + 'a' * 64 + '.png'
-    script = "const location={href:'https://example.github.io/repo/projects/p1/index.html'};" + renderer + "\nconst path=" + json.dumps(image) + ";\n" + """
+    script = "const location={href:'https://example.github.io/repo/projects/p1/index.html'};const data={prototypeBase:"+json.dumps(prototype_base)+"};" + renderer + "\nconst path=" + json.dumps(image) + ";\n" + """
 const value=inline('![需求]('+path+')');
-if(!value.includes('https://example.github.io/repo/projects/p1/proto/'+path))throw Error(value);
+if(!value.includes('https://example.github.io/repo/projects/p1/'+data.prototypeBase+path))throw Error(value);
 if(inline('`![需求]('+path+')`').includes('<img'))throw Error('代码被渲染成图片');
 if(inline('![x](javascript:alert)').includes('<img'))throw Error('危险 URL 被放行');
 if(inline('<img src=x onerror=alert(1)>').includes('<img'))throw Error('原始 HTML 被放行');

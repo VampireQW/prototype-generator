@@ -176,6 +176,7 @@
     <link rel="stylesheet" href="/agent-skills/prototype-flow/assets/project-navigation.css?v=20261015-vercel-workbench">
     <link rel="stylesheet" href="home.css?v=20261021-publish-theme">
     <link rel="stylesheet" href="pages-manager.css?v=20261021-publish-links">
+    <link rel="stylesheet" href="publication-updates.css?v=20261103">
 </head>
 
 <body class="home-app">
@@ -643,6 +644,7 @@
                     </div>
                 </div>
 
+                <button type="button" id="extPubChangesBtn" class="pu-btn" onclick="PublicationUpdates.openLocal({projectId:currentExtPubId})">更新说明 · 对比上次发布</button>
                 <!-- 本地导出区 -->
                 <div>
                     <h4 class="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
@@ -693,7 +695,7 @@
                         <div id="extPubPublishedInfo" class="hidden bg-green-50 border border-green-200 rounded-lg p-3">
                             <div class="flex items-center gap-2 mb-2">
                                 <i class="fas fa-check-circle text-green-500"></i>
-                                <span class="text-sm font-medium text-green-700">已发布</span>
+                                <span id="extPubStatusText" class="text-sm font-medium text-green-700">已发布</span>
                                 <span class="text-xs text-green-500" id="extPubPublishedAt"></span>
                             </div>
                             <div class="flex items-center gap-2">
@@ -979,7 +981,8 @@
     <script src="home-ui.js?v=20261021-system-theme"></script>
     <script src="design-settings.js?v=20261005-visual-presets"></script>
     <script src="pages-manager.js?v=20261021-publish-links"></script>
-    <script src="script.js?v=20261028-open-project-folder"></script>
+    <script src="publication-updates.js?v=20261103"></script>
+    <script src="script.js?v=20261103-release-updates"></script>
 </body>
 
 </html>

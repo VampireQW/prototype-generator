@@ -201,7 +201,7 @@ def test_dynamic_text_override_is_portable_in_both_export_versions(project,tmp_p
         out=tmp_path/name; builder(root,bundle,out)
         content=(out/file).read_text(encoding='utf-8')
         assert '导出后的标签' in content and 'data-proto-text-runtime' in content
-        assert 'window.ProtoTextRuntime = { bindings, install }' in content
+        assert 'window.ProtoTextRuntime = { bindings, install, locate }' in content
         assert not (out/'.prototype/text-edits').exists()
 
 

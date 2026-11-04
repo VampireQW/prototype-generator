@@ -55,7 +55,7 @@ const page={id:'home',title:'示例',file:'pages/示例 页.html',states:[{id:'d
 const version='1234567890abcdef1234',data={prototypeVersions:{[page.file]:version}};
 const nodes={scope:{},source:{removeAttribute(){}},tree:{querySelectorAll:()=>[]},empty:{}};
 const context={data,frame:{src:'',hidden:true},current:{page:null,stateId:null},loadedFile:null,frameReady:false,pendingState:null,orders:{},
- buildTree(){},renderAside(){},ProtoProjectNavigation:{applyPreview(){}},$:id=>nodes[id],history:{replaceState(){}},URLSearchParams,post:msg=>context.messages.push(msg),messages:[]};
+ buildTree(){},renderAside(){},flushPublicationTarget(){},pendingPublicationTarget:null,ProtoProjectNavigation:{applyPreview(){}},$:id=>nodes[id],history:{replaceState(){}},URLSearchParams,post:msg=>context.messages.push(msg),messages:[]};
 vm.createContext(context);vm.runInContext(HELPERS+NAVIGATION,context);
 context.selectPage(page,'default');
 assert.equal(context.frame.src,'proto/pages/%E7%A4%BA%E4%BE%8B%20%E9%A1%B5.html?v='+version);

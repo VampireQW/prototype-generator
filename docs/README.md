@@ -42,6 +42,7 @@
 | [上一版工作台升级](releases/2026-10-11.md) | 首轮更新亮点与升级方式 |
 | [Agent 协作 skill](agent-skill.md) | prototype-flow 的安装、使用与 PRD 落库 |
 | [多端项目与工具迁移](multi-client.md) | 演示入口判断、统一导航、接入清单与其他 AI 工具迁移 |
+| [遗留代码与产物清理](archive/task_20261103_legacy_cleanup.md) | 清理范围、归档位置与整体功能验证 |
 | [任务归档 (archive/)](archive/) | 历史开发任务记录 |
 
 ## 目录结构速览
@@ -57,6 +58,5 @@
 ├── agent-skills/          # 本地 Agent 可安装的协作 skill
 ├── craft/                 # 通用设计工艺与反 AI 味规范
 ├── projects/              # 项目数据存储
-├── src/                   # 前端源码 (index.html / login.html / viewer.html)
-└── templates/             # 模板文件
+└── src/                   # 前端源码 (index.html / login.html / viewer.html)
 ```

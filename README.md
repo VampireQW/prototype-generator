@@ -251,7 +251,6 @@ Windows 启动脚本在新服务启动成功后自动打开首页，使用 `conf
 ├── skills/                # 按产物类型拆分的生成 skills
 ├── agent-skills/          # 可安装到本地 Agent 的协作 skill
 ├── craft/                 # 色彩、字体、反 AI 味等通用设计规范
-├── templates/             # 页面模板
 └── 启动项目.bat           # Windows 启动脚本
 ```
 

@@ -76,6 +76,11 @@
             case 'reveal':
                 if (m.note) { window.__REVIEW__.selectedNoteId = m.note.id; window.__reviewSelectNote?.(m.note.id); reveal(m.note); }
                 break;
+            case 'locateChange':
+                Promise.resolve(window.ProtoChangeLocator?.locate(m.target,window.__REVIEW__.notes)).then(result=>{
+                    post({type:'changeLocated',requestId:m.requestId,...(result || {ok:false,message:'定位功能暂不可用'})});
+                });
+                break;
             case 'select':
                 window.__REVIEW__.selectedNoteId = m.noteId || null;
                 window.__reviewSelectNote?.(window.__REVIEW__.selectedNoteId);

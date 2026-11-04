@@ -1,4 +1,5 @@
 """评审壳导出构建（review_export.py）的纯函数回归。"""
+import datetime
 import json
 import re
 import sys
@@ -97,10 +98,29 @@ def test_shell_contains_embedded_data(tmp_path):
     raw, data = payload_of(out)
     assert data['name'] == '测试项目</script><b>'
     assert data['projectId'] == 'p1' and data['revision'] == 7
-    assert data['publishedAt'] == '2026-02-03T04:05:06+00:00'
+    expected = datetime.datetime.fromisoformat('2026-02-03T04:05:06+00:00').astimezone().strftime('%Y-%m-%d %H:%M:%S')
+    assert data['publishedAt'] == expected
     assert len(data['pages']) == 2 and len(data['documents']) == 1 and len(data['annotations']) == 1
     assert 'changes' not in data and 'task-1' not in raw, '任务列表不应进入评审数据'
-    assert result['publishedAt'] == '2026-02-03T04:05:06+00:00'
+    assert result['publishedAt'] == expected
+
+
+@pytest.mark.parametrize('timestamp', ['2026-11-03T03:55:01Z', '2026-11-03T03:55:01+00:00', '2026-11-03 11:55:01', None])
+def test_review_timestamp_uses_local_wall_time_with_seconds(tmp_path, monkeypatch, timestamp):
+    class LocalTime(datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls(2026, 11, 3, 11, 55, 1, tzinfo=datetime.timezone(datetime.timedelta(hours=8)))
+            return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+
+        def astimezone(self, tz=None):
+            return super().astimezone(tz or datetime.timezone(datetime.timedelta(hours=8)))
+
+    monkeypatch.setattr(review_export, 'datetime', LocalTime)
+    root = make_project(tmp_path / 'project')
+    out = tmp_path / 'out'
+    result = review_export.build_review_export(root, make_bundle(), out, published_at=timestamp)
+    assert payload_of(out)[1]['publishedAt'] == result['publishedAt'] == '2026-11-03 11:55:01'
 
 
 def test_export_keeps_manual_hotspots_exclusions_and_reveal_path(tmp_path):

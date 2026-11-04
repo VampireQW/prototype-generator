@@ -1,5 +1,39 @@
 # 架构设计 (Architecture)
 
+## 发布版本与更新说明（2026-11-03）
+
+`publication_versions.py` 独立负责规范化快照、事实差异、说明草稿和基线。`.prototype/releases/<target-hash>/` 按 owner / repo / branch / remoteId 隔离：`preview.json` 限定可编辑变化 ID，`draft.json` 只存指纹匹配的说明文本，`state.json` 保存最近成功发布和部署状态，`snapshots/*.json.gz` 保存最近 10 次轻量语义快照（无变化重发不挤占变化历史，当前快照仍保留）。不复制图片或改写三文件协议及 PRD。
+
+发布先捕获项目并冻结源副本，再校验同一指纹用于说明与构建；`review_export` 输出稳定根壳及 `prototype-versions/<contentVersion前24位>/` 原型资源。`prototype-release.json` 包含递增序号、发布 ID、内容指纹、统一时间、输出类型、统计和说明路径；`prototype-changes/rel-*.json` 为轻量表格，`*.snapshot.json` 只含原本交付范围的语义摘要，用于本地记录遗失后恢复比较。命名冲突直接报错，不覆盖用户文件。
+
+`github_pages.publish_directory` 读取远端 tree，校验本项目 baseReleaseId 后上传 blobs、创建 tree 和 commit，最后一次非强制更新 ref；发布清单与全部资源同时切换。保留当前和上一完整原型目录、10 次说明 / 语义快照，仅删除旧 managedFiles 内不再保留的文件，其他项目与未登记资源不动。GitHub 接受提交后才推进本地快照；`probe=1` 显式检查公开站点对应 releaseId + contentVersion 并用 CAS 标记生效。Token 不进入产物或站点探测。
+
+旧 AI 发布转入统一工作台管线并保持远端项目身份。旧研发包通过 review-data 与 proto 文件只读引入基线；纯净版 / 网络不可用且无本地记录时显示历史不可比较。发布使用 Pages 的 source.branch，Actions 构建和非根目录源明确拒绝，避免上传到错误位置。
+
+`publication-updates.js/css` 共用本地说明弹窗和静态研发页提示。可见时每 30 秒检查版本清单（no-store + 变化查询参数），隐藏暂停、focus / visibility 恢复检查、网络错误退避至 5 分钟；序号和内容双重去重，不用 GitHub API。file:// 仅显示随包说明，不轮询。历史更新从同站相对路径读取并核对 releaseId。
+
+`change-locator.js` 在 iframe 内复用 ProtoAnchors 和手动文案的 ProtoTextRuntime.locate；评审壳新增 locateChange / changeLocated 消息，继续限制 e.source 为当前 iframe。URL 只接收页面、状态、标注和有限锚点字段，不接受展开点击动作；noteId 的展开路径取当前真实标注。目标先切页 / 状态并等待就绪，再展开、滚动、高亮，失败有页面级降级。
+
+## 有效入口与历史工具退役（2026-11-03）
+
+源码启动保留 `启动项目.bat → server.py`，本地下载及 Pages 发布共用 `review_export.py`，研发交付继续读取 `src/review_shell.html`、共享标注模块及 `agent-skills/prototype-flow/assets`。旧 export_project / 墨刀 / 手动覆盖备份 / standalone / 重复启动 / 打包脚本已移出运行目录，旧 templates 不再作为产品资产。
+
+旧工具源码及历史交付产物归档在 `backups/20261103_legacy_cleanup/`，与当前 `projects`、`deleted`、数据库及运行资源分开。根 dist 的清理不涉及 vendor 目录下编辑器运行时的 dist，备份工具退役不移除回滚资料或项目回收站功能。
+
+## 发布产物时间来源（2026-11-03）
+
+`handle_ext_publish` 与旧 AI 发布入口在构建前只取一次本地发布时间；上传成功后将同值写入 `github_published_at`，并传给评审壳构建器及 GitHub listing。失败仍保留上次发布记录。下载研发版优先传入已发布记录，无记录才使用本次导出时间；旧 AI `build_ai_export` 支持显式发布批次时间并回退到 record 中的发布时间。
+
+`review_export.publication_time` 将本地字符串或带时区 ISO 输入规范化为服务器本地 `YYYY-MM-DD HH:mm:ss`，所有研发产物共用该格式。`review_shell.html` 保留秒，不再直接截取 UTC 字符串作为本地时间。只影响新构建产物，不迁移历史数据，也不自动改写远端文件。
+
+## 预览加载状态（2026-11-03）
+
+`preview-loading.css` 在外部脚本前加载，`previewContainer` 的初始 `data-preview-state="loading"` 即可隐藏设备外壳绘制并显示静态占位，不依赖 JavaScript 首次执行。外壳仅 opacity 为零并 inert，保留 iframe 尺寸供既有自适应规则测量，避免 display:none 影响端类型判断。
+
+`preview-loading.js` 管理 loading / ready / error、慢加载重试和 aria-busy。每次 begin 递增代次，旧 timer / requestAnimationFrame / ready / fail 不能覆盖新页面。viewer 在设置 iframe.src 前开启加载，load 处理完成类型识别、脚本注入与深链接初始状态后 ready；两次父页面 rAF 提交布局后淡出占位。原型准备失败显式 fail，无页面时 dismiss；旧文档的 load 事件和切页中断不会提前结束当前加载。
+
+加载图案由本地 SVG 与 CSS 构成，不依赖图片、字体或图标 CDN。只覆盖预览区，不改变 iframe 通信协议、业务页面或元数据。减少动效时移除旋转与过渡。
+
 ## GitHub 共用连接与错误分类（2026-10-28）
 
 `github_transport.py` 提供共用 Session，服务端测试连接、两类发布入口及发布管理均经 `github_api_session` 使用。保留 Requests 的系统 / 环境代理及 TLS 校验，对连接建立前失败和只读请求重试；写入请求等待响应失败后不重放。网络、代理、证书与超时产生不含底层连接细节的分类提示；401 引导更新凭据，403 区分权限与频率限制，429 提示稍后重试。`GitHubError` 携带 HTTP 状态及 `need_github_config`，端点据此返回是否打开配置；连接失败不误导用户替换 Token，也不修改已有发布记录。

@@ -160,6 +160,8 @@
         .layout.left-closed .review-project-name{display:none}
         </style>
         <style>__SIDEBAR_RESIZE_CSS__</style>
+        <style>__PUBLICATION_UPDATES_CSS__</style>
+        <script>__PUBLICATION_UPDATES_JS__</script>
         <script>__PROJECT_NAV_JS__</script>
         <script>__SIDEBAR_RESIZE_JS__</script>
     </head>
@@ -212,7 +214,8 @@
                         const size = /(?:^|\s)proto-width=(\d{1,4})$/.exec(title);
                         const width = size && +size[1] >= 48 && +size[1] <= 4096 ? ` width="${+size[1]}"` : '';
                         if (width) title = title.slice(0, size.index).trim();
-                        return hold(`<img src="${esc(new URL('proto/' + path, location.href).href)}" alt="${alt}"${width}${title ? ` title="${title}"` : ''} loading="lazy">`);
+                        const base=/^(?:proto\/|prototype-versions\/[a-f0-9]{24}\/)$/.test(data?.prototypeBase || '') ? data.prototypeBase : 'proto/';
+                        return hold(`<img src="${esc(new URL(base + path, location.href).href)}" alt="${alt}"${width}${title ? ` title="${title}"` : ''} loading="lazy">`);
                     })
                     // 文字颜色：与工作台 safeHTML 同口径，只放行 <span style="color:…"> 这一种内联 HTML（色值限十六进制 / 颜色名）
                     .replace(/&lt;span style=&quot;color:(#[0-9a-fA-F]{3,8}|[a-zA-Z]+)&quot;&gt;/g, (m, c) => `<span style="color:${c.toLowerCase()}">`)
@@ -298,6 +301,8 @@
             let frameReady = false;     // 当前 iframe 页已握手（收到 ready 且已下发 init）
             let projectNavigation = null;
             let selectedNoteId = null;
+            let pendingPublicationTarget=PublicationUpdates.readTarget(location.hash);
+            let publicationRequest=0;
 
             const safePath = (path) => {
                 const parts = String(path || '').replace(/\\/g, '/').split('/');
@@ -306,7 +311,8 @@
             };
             function prototypeUrl(page) {
                 const file = String(page.file || '').replace(/\\/g, '/');
-                const path = 'proto/' + safePath(file);
+                const base=/^(?:proto\/|prototype-versions\/[a-f0-9]{24}\/)$/.test(data.prototypeBase || '') ? data.prototypeBase : 'proto/';
+                const path = base + safePath(file);
                 const version = data.prototypeVersions?.[file];
                 return typeof version === 'string' && /^[a-f0-9]{20}$/.test(version) ? path + '?v=' + version : path;
             }
@@ -346,6 +352,7 @@
 
             // ---------- 页面 / 状态切换 ----------
             function selectPage(page, stateId) {
+                if(pendingPublicationTarget?.pageId!==page.id)pendingPublicationTarget=null;
                 const samePage = current.page?.id === page.id && loadedFile === page.file;
                 if (current.page?.id !== page.id || current.stateId !== stateId) selectedNoteId = null;
                 current = { page, stateId };
@@ -356,6 +363,7 @@
                 renderAside();
                 if (samePage && frameReady) {
                     post({ type: 'enterState', stateId });
+                    flushPublicationTarget();
                 } else {
                     pendingState = stateId;
                     loadedFile = page.file;
@@ -404,6 +412,7 @@
                 renderAside();
                 post({ type: 'init', notes: pageNotes(), asideOpen: prdAsideOpen(), enterState, selectedNoteId,
                     hintScopes: (current.page?.states || []).map(state => ({id: state.id, interactionHints: state.interactionHints})) });
+                flushPublicationTarget();
             }
             window.addEventListener('message', (e) => {
                 if (e.source === frame.contentWindow && e.data?.__protoScreenshot === 1 && e.data.type === 'navigate' && current.page?.kind === 'screenshot') {
@@ -418,7 +427,22 @@
                 if (m.type === 'sync') onPinSync(m.map || {}, m.state || 'default', m.stale || []);
                 else if (m.type === 'focus') onPinFocus(m.noteId);
                 else if (m.type === 'selection') selectReviewNote(m.noteId);
+                else if (m.type === 'changeLocated' && m.requestId===publicationRequest && !m.cancelled) PublicationUpdates.notify(m.message || (m.ok?'已定位更新位置':'目标暂不可定位'));
             });
+
+            function flushPublicationTarget(){
+                if(!pendingPublicationTarget || !frameReady)return;
+                const target=pendingPublicationTarget;pendingPublicationTarget=null;
+                if(target.documentId){document.querySelector('aside')?.scrollTo({top:0,behavior:'smooth'});PublicationUpdates.notify('已打开对应页面需求');return;}
+                if(target.noteId)onPinFocus(target.noteId);
+                post({type:'locateChange',target,requestId:++publicationRequest});
+            }
+            function locatePublicationTarget(target){
+                const page=data.pages.find(p=>p.id===target.pageId);
+                if(!page){PublicationUpdates.notify('该页面已删除，请查看变更详情');return;}
+                const state=page.states?.some(s=>s.id===target.stateId)?target.stateId:page.states?.[0]?.id || 'default';
+                pendingPublicationTarget={...target,stateId:state};selectPage(page,state);
+            }
 
             // ---------- 气泡层回调 ----------
             function onPinSync(map, state, stale) {
@@ -527,12 +551,13 @@
             } else {
                 $('project').textContent = data.name || '原型项目';
                 document.title = `${data.name || '原型项目'} · 原型评审`;
-                $('generated').textContent = data.publishedAt ? '发布于 ' + String(data.publishedAt).slice(0, 16).replace('T', ' ') : '';
+                $('generated').textContent = data.publishedAt ? '发布于 ' + String(data.publishedAt).slice(0, 19).replace('T', ' ') : '';
                 buildTree();
                 const params = new URLSearchParams(location.hash.slice(1));
-                const page = data.pages.find((p) => p.id === params.get('p')) || ProtoProjectNavigation.defaultPage(data);
+                const page = data.pages.find((p) => p.id === (pendingPublicationTarget?.pageId || params.get('p'))) || ProtoProjectNavigation.defaultPage(data);
                 const stateId = page.states?.some((s) => s.id === params.get('s')) ? params.get('s') : (page.states?.[0]?.id || 'default');
                 selectPage(page, stateId);
+                PublicationUpdates.mountPublished({data,onLocate:locatePublicationTarget});
             }
             const pageNavSizer = ProtoSidebarResize.attach($('page-nav-resizer'), {
                 storageKey: 'prototype-page-nav-width', isOpen: () => !$('layout').classList.contains('left-closed'),

@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>原型预览器</title>
+    <link rel="stylesheet" href="/src/preview-loading.css?v=20261103-loading">
+    <link rel="stylesheet" href="/src/publication-updates.css?v=20261103">
+    <script src="/src/publication-updates.js?v=20261103"></script>
     <link rel="stylesheet" href="/src/proto-markdown.css?v=20261016-toolbar-single-row">
     <link rel="stylesheet" href="/src/proto-interactions.css?v=20261023-reveal-compact">
     <link rel="stylesheet" href="/src/proto-screenshot-editor.css?v=20261020-screenshots">
@@ -1479,6 +1482,7 @@
                     <label class="ext-pub-opt"><input type="radio" name="extPubMode" value="review" checked><span>研发版</span></label>
                     <label class="ext-pub-opt"><input type="radio" name="extPubMode" value="pure"><span>纯净版</span></label>
                 </div>
+                <button type="button" id="extUpdateNotesBtn" class="pu-btn" style="width:100%;justify-content:flex-start;margin-bottom:6px;border:0;color:var(--ext-muted)" onclick="PublicationUpdates.openLocal({projectId:extId,onLocate:extLocatePublicationTarget})">更新说明 · 对比上次发布</button>
                 <div id="extPublishRepo" class="text-[11px] text-gray-400 mb-1 truncate" style="display: none; cursor: pointer;" title="修改 GitHub 配置" onclick="extOpenGithubSetup()"></div>
                 <div id="extPublishState" class="ext-publish-state" data-state="unpublished">
                     <div class="ext-publish-state-label"><i class="fas fa-check-circle" aria-hidden="true"></i><span id="extPublishStatus" role="status">未发布</span></div>
@@ -1712,9 +1716,28 @@
             </div>
 
             <!-- iframe 预览 -->
-            <div id="previewContainer" class="flex-1 flex items-center justify-center p-4 relative">
+            <div id="previewContainer" class="flex-1 flex items-center justify-center p-4 relative" data-preview-state="loading" aria-busy="true">
+                <div id="previewLoading" class="preview-loading" role="status" aria-live="polite" aria-atomic="true">
+                    <div class="preview-loading-content">
+                        <svg class="preview-loading-art" viewBox="0 0 156 116" fill="none" aria-hidden="true">
+                            <rect x="34" y="11" width="102" height="78" rx="10" fill="var(--load-soft)" stroke="var(--load-line)"/>
+                            <rect x="20" y="25" width="112" height="80" rx="10" fill="var(--load-surface)" stroke="var(--load-line)"/>
+                            <path d="M20 46h112" stroke="var(--load-line)"/>
+                            <circle cx="32" cy="36" r="2" fill="var(--load-muted)" opacity=".45"/>
+                            <circle cx="40" cy="36" r="2" fill="var(--load-muted)" opacity=".25"/>
+                            <circle cx="48" cy="36" r="2" fill="var(--load-muted)" opacity=".15"/>
+                            <rect x="31" y="57" width="30" height="35" rx="4" fill="var(--load-soft)"/>
+                            <rect x="70" y="58" width="44" height="6" rx="3" fill="var(--load-soft)"/>
+                            <rect x="70" y="71" width="33" height="5" rx="2.5" fill="var(--load-soft)"/>
+                            <rect x="70" y="83" width="39" height="5" rx="2.5" fill="var(--load-soft)"/>
+                        </svg>
+                        <div class="preview-loading-caption"><span class="preview-loading-spinner" aria-hidden="true"></span><p class="preview-loading-title" data-loading-title>正在加载原型</p></div>
+                        <p class="preview-loading-detail" data-loading-detail>正在准备页面与预览视图</p>
+                        <button class="preview-loading-retry" type="button" hidden>重新加载</button>
+                    </div>
+                </div>
                 <!-- 带外壳的预览 -->
-                <div id="deviceFrameWrapper" class="device-frame">
+                <div id="deviceFrameWrapper" class="device-frame" inert>
                     <div id="deviceScreen" class="device-screen">
                         <!-- Dynamic Island -->
                         <div class="device-notch"></div>
@@ -1747,7 +1770,7 @@
                         </div>
                         <div id="previewWrapper" class="bg-white overflow-hidden"
                             style="width:100%;height:100%;border-radius:0;">
-                            <iframe id="previewFrame" class="w-full h-full border-0" src=""></iframe>
+                            <iframe id="previewFrame" class="w-full h-full border-0" title="交互原型" src="about:blank"></iframe>
                         </div>
                         <div class="device-home-bar"></div>
                     </div>
@@ -1979,6 +2002,7 @@
         </div>
     </div>
 
+    <script src="/src/preview-loading.js?v=20261103-loading"></script>
     <script src="/src/proto-order.js?v=20261028-visibility-core-v2"></script>
     <script src="/src/proto-appearance.js"></script>
     <script src="/src/vendor/vditor/dist/js/lute/lute.min.js"></script>
@@ -2010,6 +2034,7 @@
         let extPage = '';            // 当前页 pageId
         let extStateId = 'default';  // 当前状态（PrototypeBridge data-proto-state）
         let extInitialLocation = null;
+        let extPublicationTarget=PublicationUpdates.readTarget(location.hash);
         let extStateWatcher = null;
         let extSelectedNoteId = null;
         let extNoteMenu = null;
@@ -2108,6 +2133,9 @@
         const flowchartView = $('flowchartView');
         const previewContainer = $('previewContainer');
         const pageList = $('pageList');
+        const previewLoading = ProtoPreviewLoading.create(previewContainer, $('previewLoading'), $('deviceFrameWrapper'), () => location.reload());
+        let previewLoadToken = previewLoading.begin();
+        let previewPreviousDocument = null;
 
         // ==================== 初始化 ====================
         document.addEventListener('DOMContentLoaded', async () => {
@@ -2117,6 +2145,7 @@
             extId = params.get('ext') || '';
 
             if (!extId && !projectId) {
+                previewLoading.fail(previewLoadToken, '请从项目列表进入预览器');
                 showAppAlert({
                     title: '缺少项目 ID',
                     message: '请从项目列表进入预览器。',
@@ -2138,6 +2167,7 @@
                 }
                 await initExternalMode();
             } catch (error) {
+                previewLoading.fail(previewLoadToken, error.message || '无法打开项目工作台');
                 showAppAlert({ title: '无法载入项目', message: error.message || String(error), tone: 'error' });
             }
         });
@@ -2834,12 +2864,15 @@
             }
         }
 
+        let extDeploymentTimer=null;
         async function extRefreshPublishStatus() {
+            clearTimeout(extDeploymentTimer);
             const statusEl = $('extPublishStatus'), btn = $('extPublishBtn'), links = $('extPublishLinks');
             if (!statusEl || !btn || !links) return;
+            if($('extUpdateNotesBtn'))void PublicationUpdates.summarizeLocal($('extUpdateNotesBtn'),extId,true);
             const state = $('extPublishState'), unpublish = $('extUnpublishBtn'), timeEl = $('extPublishTime');
             try {
-                const res = await fetch(`/api/ext/publish-status?projectId=${encodeURIComponent(extId)}`);
+                const res = await fetch(`/api/ext/publish-status?projectId=${encodeURIComponent(extId)}&probe=1`);
                 const data = await res.json();
                 timeEl.hidden = !(data.ok && data.published && data.publishedAt);
                 timeEl.textContent = timeEl.hidden ? '' : data.publishedAt;
@@ -2848,6 +2881,7 @@
                     extPublishUrl = data.url;
                     const modeLabel = { review: '研发版', pure: '纯净版' }[data.mode] || '';
                     statusEl.textContent = '已发布';
+                    if(data.deployment==='pending'){statusEl.textContent='部署中';extDeploymentTimer=setTimeout(extRefreshPublishStatus,15000);}
                     statusEl.title = [modeLabel, data.publishedAt].filter(Boolean).join(' · ');
                     state.dataset.state = 'published';
                     btn.querySelector('span').textContent = '重新发布';
@@ -2887,7 +2921,7 @@
                 });
                 const data = await res.json();
                 if (data.ok) {
-                    showToast(`发布成功（${extPubMode() === 'pure' ? '纯净版' : '研发版'}），约 1-3 分钟生效`, 'success', 3500);
+                    showToast('已提交 GitHub，正在等待站点生效', 'success', 3500);
                     extPublishUrl = data.url || '';
                     window.PagesManager?.publicationChanged();
                 } else {
@@ -3034,33 +3068,43 @@
             previewFrame.onload = async () => {
                 if(!extPage)return;
                 const loadedDocument=previewFrame.contentDocument;
-                extAnnotateDeactivate();
-                if (inspectorActive) disableInspector();
+                if (loadedDocument === previewPreviousDocument) return;
+                const loadToken = previewLoadToken;
                 try {
-                    const w = previewFrame.contentWindow;
-                    w.document.documentElement.dataset.protoHost = 'workbench';
-                    const file = decodeURIComponent(w.location.pathname).replace(`/ext/${extId}/`, '');
-                    const page = extBundle?.project.pages.find(p => p.file === file && p.id === w.document.documentElement.dataset.protoPage)
-                        || extBundle?.project.pages.find(p => p.file === file);
-                    if (page && page.id !== extPage) {
-                        extSuspendNoteEdit();
-                        extPage = page.id;
+                    extAnnotateDeactivate();
+                    if (inspectorActive) disableInspector();
+                    try {
+                        const w = previewFrame.contentWindow;
+                        w.document.documentElement.dataset.protoHost = 'workbench';
+                        const file = decodeURIComponent(w.location.pathname).replace(`/ext/${extId}/`, '');
+                        const page = extBundle?.project.pages.find(p => p.file === file && p.id === w.document.documentElement.dataset.protoPage)
+                            || extBundle?.project.pages.find(p => p.file === file);
+                        if (page && page.id !== extPage) {
+                            extSuspendNoteEdit();
+                            extPage = page.id;
+                        }
+                        extStateId = w.document.documentElement.dataset.protoState || 'default';
+                    } catch (_) { /* 非同源导航不注入 */ }
+                    extSelectedNoteId = null;
+                    extDisplayNotes = [];
+                    renderExtPageList();
+                    applyPreviewType();
+                    await injectExtAnnotateScripts();
+                    if(previewFrame.contentDocument!==loadedDocument)return;
+                    if(extInitialLocation?.pageId===extPage){
+                        const requested=extInitialLocation;extInitialLocation=null;
+                        if(requested.stateId!==extStateId&&!await extEnterState(requested.stateId))showToast('页面未能进入链接指定状态，已显示当前状态','warning');
+                        renderExtPageList();extProjectNavigation?.reveal(extPage);
                     }
-                    extStateId = w.document.documentElement.dataset.protoState || 'default';
-                } catch (_) { /* 非同源导航不注入 */ }
-                extSelectedNoteId = null;
-                extDisplayNotes = [];
-                renderExtPageList();
-                applyPreviewType();
-                await injectExtAnnotateScripts();
-                if(previewFrame.contentDocument!==loadedDocument)return;
-                if(extInitialLocation?.pageId===extPage){
-                    const requested=extInitialLocation;extInitialLocation=null;
-                    if(requested.stateId!==extStateId&&!await extEnterState(requested.stateId))showToast('页面未能进入链接指定状态，已显示当前状态','warning');
-                    renderExtPageList();extProjectNavigation?.reveal(extPage);
+                    extRefreshSidebar();
+                    previewLoading.ready(loadToken);
+                    await extFlushPublicationTarget();
+                } catch (error) {
+                    console.warn('[预览] 页面准备失败:', error);
+                    previewLoading.fail(loadToken, '页面暂时无法完成加载，请重新加载');
                 }
-                extRefreshSidebar();
             };
+            previewFrame.onerror = () => previewLoading.fail(previewLoadToken, '页面暂时无法加载，请重新加载');
             await loadProto();
             const requestedMode=new URLSearchParams(location.search).get('mode');
             requestAnimationFrame(() => switchMode(['preview','inspector','annotate'].includes(requestedMode)?requestedMode:'preview'));
@@ -3071,6 +3115,7 @@
                 const res = await fetch(`/api/proto/read?projectId=${encodeURIComponent(extId)}`);
                 const data = await res.json();
                 if (!data.ok) {
+                    previewLoading.fail(previewLoadToken, data.error || '无法读取项目');
                     showAppAlert({ title: '无法载入项目', message: data.error || '未知错误', tone: 'error' });
                     return;
                 }
@@ -3086,6 +3131,7 @@
                 openExtPage(extPage);
             } catch (e) {
                 console.error('[标注] 载入失败:', e);
+                previewLoading.fail(previewLoadToken, e.message || '无法读取项目');
                 showAppAlert({ title: '无法载入项目', message: String(e), tone: 'error' });
             }
         }
@@ -3157,6 +3203,8 @@
             $('deviceFrameWrapper').style.display='';
             extStateId = 'default';
             renderExtPageList();
+            previewLoadToken = previewLoading.begin(page.title || page.name || '');
+            previewPreviousDocument = previewFrame.contentDocument;
             previewFrame.src = `/ext/${encodeURIComponent(extId)}/${page.file.split('/').map(encodeURIComponent).join('/')}`;
         }
 
@@ -3185,6 +3233,7 @@
         }
 
         function showExtEmptyPages() {
+            previewLoading.dismiss();
             extAnnotateDeactivate();extSuspendNoteEdit();
             if(inspectorActive)disableInspector();
             padPreviewFit?.destroy();padPreviewFit=null;
@@ -3379,6 +3428,31 @@
             }
             extSuspendNoteEdit();
             if (!await extEnterState(stateId)) showToast('页面没有完成状态切换，请在原型内打开对应页面', 'warning', 3500);
+        }
+
+        async function extLocatePublicationTarget(target){
+            const page=extBundle?.project.pages.find(p=>p.id===target.pageId&&!p.trashedAt);
+            if(!page){showToast('该页面已删除，请查看更新详情','warning');return;}
+            if(ProtoMarkdown.isBusy() || previewFrame.contentWindow.ProtoAnnotate?.isBusy()){showToast('正在保存，请稍后定位','warning');return;}
+            extPublicationTarget=target;
+            if(page.id!==extPage){openExtPage(page.id);return;}
+            await extFlushPublicationTarget();
+        }
+        async function extFlushPublicationTarget(){
+            const target=extPublicationTarget;if(!target || target.pageId!==extPage)return;
+            extPublicationTarget=null;
+            try{
+                if(target.stateId && target.stateId!==extIframeState())await extEnterState(target.stateId);
+                if(currentMode!=='annotate')switchMode('annotate');
+                if(!prdExpanded)togglePrdSidebar();
+                if(target.documentId){$('extDocPane')?.scrollIntoView({block:'start',behavior:'smooth'});return;}
+                const w=previewFrame.contentWindow,d=w.document;
+                if(!w.ProtoChangeLocator)await new Promise((resolve,reject)=>{const s=d.createElement('script');s.src='/src/change-locator.js?v=20261103';s.setAttribute('data-prototype-owned','');s.onload=resolve;s.onerror=reject;d.head.append(s);});
+                if(previewFrame.contentDocument!==d)return;
+                if(target.noteId){extSelectNote(target.noteId);extScrollNoteIntoView([...$('extAnnotList').querySelectorAll('.ext-note')].find(n=>n.dataset.noteId===target.noteId));}
+                const result=await w.ProtoChangeLocator.locate(target,extBundle.prd.annotations);
+                if(!result.cancelled)showToast(result.message,result.ok?'success':'warning');
+            }catch(_){showToast('目标暂不可定位，已打开所属页面','warning');}
         }
 
         // ---------- 元数据保存（CAS） ----------
@@ -5761,7 +5835,7 @@ ${userInput}
     <script>
         // 构建变更检测：标签页长开期间工作台文件被更新时，提示一键刷新（防旧版滞留）
         (() => {
-            const WATCHED = ['viewer.html', 'workbench.css', 'proto-markdown.js', 'proto-appearance.js', 'proto-annotate.js', 'proto-hotspots.js', 'proto-markdown.css', 'markdown-editor.js'];
+            const WATCHED = ['viewer.html', 'preview-loading.css', 'preview-loading.js', 'workbench.css', 'proto-markdown.js', 'proto-appearance.js', 'proto-annotate.js', 'proto-hotspots.js', 'proto-markdown.css', 'markdown-editor.js'];
             let stamp = null, banner = null, checking = false;
             async function fetchStamp() {
                 const parts = [];

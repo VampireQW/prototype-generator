@@ -271,7 +271,18 @@ def test_legacy_export_aliases_use_same_builders(api):
     assert review[0] == 200 and review[1].startswith(b'PK')
 
 
-def test_old_publication_identity_and_new_publish_sync(api, monkeypatch):
+def test_legacy_review_export_uses_existing_publication_time(api):
+    root = make_ai(api, record={'github_url': 'https://fixture.invalid/published/',
+                                'github_published_at': '2026-11-03 11:55:01', 'github_mode': 'dev'})
+    code, result, _ = api.request('/api/export', {'projectId': root.name, 'mode': 'dev'})
+    assert code == 200, result
+    shell = (Path(result['exportPath']) / 'index.html').read_text(encoding='utf-8')
+    data = json.loads(re.search(r'<script type="application/json" id="review-data">(.*?)</script>', shell, re.S).group(1))
+    assert data['publishedAt'] == '2026-11-03 11:55:01'
+
+
+@pytest.mark.parametrize('publish_path',['/api/ext/publish','/api/github/publish'])
+def test_old_publication_identity_and_new_publish_sync(api, monkeypatch,publish_path):
     original_url = 'https://fixture.github.io/fixture/projects/ai-20261004/'
     root = make_ai(api, record={'github_url': original_url, 'github_published_at': '2026-10-01', 'github_mode': 'dev'})
     result = connect(api, root)
@@ -294,7 +305,8 @@ def test_old_publication_identity_and_new_publish_sync(api, monkeypatch):
                          github_api_session=lambda token: Session(), github_ensure_pages=lambda *a: 'main',
                          github_upload_dir=lambda *a: uploads.append(a[-1]))
     api.namespace['CustomHandler'].update_github_listing = lambda self, *a, **kwargs: listing.append(kwargs)
-    code, published, _ = api.request('/api/ext/publish', {'extId': pid, 'mode': 'review'})
+    payload={'extId':pid,'mode':'review'} if publish_path=='/api/ext/publish' else {'projectId':root.name,'mode':'dev'}
+    code, published, _ = api.request(publish_path,payload)
     assert code == 200, published
     assert uploads == ['projects/' + root.name]
     assert published['url'].endswith('/projects/' + root.name + '/')
