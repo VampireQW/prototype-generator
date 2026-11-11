@@ -16,11 +16,28 @@
         const color = String(note?.color || '').toLowerCase();
         return PIN_COLORS.some(([hex]) => hex === color) || LEGACY_PIN_COLORS.includes(color) ? color : DEFAULT_PIN;
     }
-    function applyPin(element, note) {
-        const color = pinColor(note), custom = color !== DEFAULT_PIN;
-        element.style.setProperty('--pin-fill', color);
-        element.style.setProperty('--pin-ink', custom ? INK : ON_BLUE);
-        element.style.setProperty('--pin-stroke', custom ? STROKE : ON_BLUE);
+    function pinStyle(value) {
+        const style = value && typeof value === 'object' ? value : {};
+        return { size: Number.isInteger(style.size) && style.size >= 24 && style.size <= 56 ? style.size : 36,
+            ...(/^#[0-9a-f]{6}$/i.test(style.color || '') ? { color: style.color.toLowerCase() } : {}) };
     }
-    window.ProtoAppearance = { TEXT_COLORS, PIN_COLORS, DEFAULT_PIN, pinColor, applyPin };
+    function applyPin(element, note, value) {
+        const global = pinStyle(value), color = global.color || pinColor(note), custom = color !== DEFAULT_PIN;
+        let ink = custom ? INK : ON_BLUE, stroke = custom ? STROKE : ON_BLUE;
+        if (global.color) {
+            const rgb = [1,3,5].map(i => parseInt(color.slice(i,i+2),16)/255).map(v => v <= .04045 ? v/12.92 : ((v+.055)/1.055)**2.4);
+            const lum = rgb[0]*.2126 + rgb[1]*.7152 + rgb[2]*.0722;
+            ink = lum > .179 ? '#000000' : '#ffffff'; stroke = ink;
+        }
+        element.style.setProperty('--pin-fill', color);
+        element.style.setProperty('--pin-ink', ink);
+        element.style.setProperty('--pin-stroke', stroke);
+    }
+    function applyPinSize(element, value) {
+        const {size} = pinStyle(value);
+        element.style.setProperty('--pin-size', size + 'px');
+        element.style.setProperty('--pin-font', Math.round(size*13/36) + 'px');
+        element.style.setProperty('--pin-padding', Math.round(size*8/36) + 'px');
+    }
+    window.ProtoAppearance = { TEXT_COLORS, PIN_COLORS, DEFAULT_PIN, pinColor, pinStyle, applyPin, applyPinSize };
 })();

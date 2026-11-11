@@ -125,36 +125,42 @@ cd prototype-generator
 
 ---
 
-### 3. 安装依赖
+### 3. 启动项目
+
+**Windows：双击 `启动项目.bat`。** 脚本优先使用项目自己的 Python 环境，再依次寻找 `py -3` 和 `python`，无需手动修改源码或配置文件。
+
+**macOS / Linux：**
 
 ```bash
-python -m pip install -r requirements.txt
+python3 -X utf8 launcher.py --open-browser
 ```
 
-首页真实项目封面是可选能力。如需启用：
+首次启动会在项目内创建 `.venv`、联网安装 `requirements.txt` 中的核心依赖，并从示例生成本机 `config.json` 和 `models.json`。已有配置保留；后续启动依赖未变化且检查正常时跳过安装，不要求 Node.js 或前端构建。Linux 如果提示缺少 `venv` / `ensurepip`，先通过系统包管理器安装对应 Python 版本的 `venv` 包（如 Ubuntu 的 `python3-venv`）。
+
+未配置 AI 密钥也能使用本地项目管理、预览、标注与导出；只有使用 AI 生成时才需要配置模型，GitHub Pages 发布时才需要配置自己的 GitHub 凭据。凭据、本机配置、虚拟环境及个人项目均不随仓库分享。
+
+服务就绪后打开 `http://localhost:8080/src/index.html`；端口可在自动生成的 `config.json` 中修改。更新后端后再次运行启动入口即可：新实例会通知同目录、同端口的旧实例退出；正在保存或生成时先等待，最长约 5 分半，超时保留旧任务，不会按端口强杀其他程序。
+
+命令行可只检查环境，排查失败后重试：
 
 ```bash
-python -m pip install -r requirements-preview.txt
-python -m playwright install chromium
+python -X utf8 launcher.py --check
 ```
 
-未安装可选依赖或某个原型无法离线渲染时，项目卡片使用名称封面，预览、标注和导出继续可用。首次封面生成在后台排队，后续复用本机缓存。
+已准备好的环境可用 `--no-install` 离线启动 / 检查，不安装依赖、不创建环境。熟悉 Python 的用户仍可在安装核心依赖后直接运行 `python -X utf8 server.py`，它也会创建缺失的本机配置。
 
----
+### 4. 可选：首页真实项目封面
 
-### 4. 启动项目
+Windows：
 
-#### Windows
-双击 `启动项目.bat`
-
-更新后端后直接再次双击即可：新实例会自动通知同目录、同端口的旧实例退出，再启动新服务。正在保存或生成时先等待完成，最长约 5 分半，超时保留旧任务；不会按端口强杀其他程序。旧服务正常退出后，启动脚本不再停在“按任意键继续”。
-
-#### macOS/Linux
-```bash
-python server.py
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements-preview.txt
+.venv\Scripts\python.exe -m playwright install chromium
 ```
 
-Windows 启动脚本在新服务启动成功后自动打开首页，使用 `config.json` 中配置的端口（默认 `http://localhost:8080/src/index.html`）。直接运行 Python 时可附加 `--open-browser` 自动打开浏览器。
+macOS / Linux 使用 `.venv/bin/python` 执行相同命令。未安装可选依赖或某个原型无法离线渲染时，项目卡片使用名称封面，预览、标注和导出继续可用。首次封面生成在后台排队，后续复用本机缓存。
+
+仓库源码约定为 UTF-8，Windows 批处理采用纯 ASCII / CRLF，日志统一 UTF-8；Git 拉取使用 `.gitattributes` 中的换行规则。本机配置读取兼容 UTF-8、UTF-8 BOM、UTF-16 / UTF-32，不因读取而重写原文件。若配置格式本身损坏，启动会指出文件名并停止；不会用默认配置覆盖。依赖下载失败时按 pip 报错检查网络 / 代理，恢复后再次启动即可。
 
 ---
 
@@ -224,6 +230,8 @@ Windows 启动脚本在新服务启动成功后自动打开首页，使用 `conf
 ```
 原型生成器/
 ├── server.py              # 后端服务 (Python)
+├── launcher.py            # 首次环境准备、依赖检查与启动入口
+├── app_runtime.py         # UTF-8 日志与本机 JSON 配置兼容
 ├── db.py                  # 团队协作数据库层 (SQLite)
 ├── migrate.py             # 旧项目归属迁移脚本
 ├── proto_meta.py          # 本地项目、页面 / 状态与标注元数据
@@ -232,6 +240,7 @@ Windows 启动脚本在新服务启动成功后自动打开首页，使用 `conf
 ├── design_settings.py     # 视觉预设与主动覆盖规则
 ├── home_thumbnails.py     # 首页封面离线生成与缓存
 ├── requirements*.txt      # 核心、封面和开发依赖
+├── config.example.json    # 无凭据的默认配置，首次启动自动生成本机副本
 ├── config.json            # 本机配置（不纳入 Git）
 ├── src/
 │   ├── index.html         # 主界面（含模型管理）
@@ -339,7 +348,7 @@ HTML PPT 产物要求默认进入可概览的小图模式，点击页面或播�
 GitHub 发布功能不再把 Token 写入 `config.json`。推荐在启动前设置环境变量：
 
 ```bash
-PROTOTYPE_GITHUB_TOKEN=你的_GitHub_Token python server.py
+PROTOTYPE_GITHUB_TOKEN=你的_GitHub_Token python -X utf8 launcher.py
 ```
 
 也可以在界面填写并保存 Token；它会持久化到本机 `data/github_token.bin`，Windows 使用 DPAPI 按当前用户加密，重启后可继续读取，不写入项目或导出物。服务须由保存 Token 的同一 Windows 账户启动；使用其他账户或自动化沙箱运行时，界面会提示已有凭据无法读取，请以原账户启动 `启动项目.bat`。
@@ -351,8 +360,8 @@ PROTOTYPE_GITHUB_TOKEN=你的_GitHub_Token python server.py
 ### Q: 提示 "python 不是内部或外部命令"
 **A:** Python 未添加到系统 PATH。请重新安装 Python，勾选 "Add Python to PATH"。
 
-### Q: 提示 "No module named 'requests'"
-**A:** 运行 `pip install requests` 安装依赖。
+### Q: 提示 "No module named 'requests'" 或 "No module named 'PIL'"
+**A:** 使用「启动项目.bat」或运行 `python -X utf8 launcher.py --check`，由启动器把完整核心依赖安装到本项目 `.venv`。不要只向另一套系统 Python 安装单个包后继续启动；若 pip 下载失败，检查网络 / 代理后重新运行启动入口。
 
 ### Q: API 调用失败 / 超时
 **A:** 

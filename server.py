@@ -8,6 +8,9 @@
 - 下载外部图片到本地
 """
 
+import app_runtime
+app_runtime.configure_utf8_output()
+
 import http.server
 import socket
 import os
@@ -117,23 +120,7 @@ MODELS_FILE = 'models.json'
 
 def load_models():
     """加载模型配置文件"""
-    if not os.path.exists(MODELS_FILE):
-        # 创建默认模型配置
-        default_models = {
-            "models": [{
-                "id": "default",
-                "name": "Default Model",
-                "provider": "",
-                "base_url": "",
-                "api_key": "YOUR_API_KEY_HERE",
-                "model": "gpt-4"
-            }],
-            "selected_model_id": "default"
-        }
-        save_models(default_models)
-        return default_models
-    with open(MODELS_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    return app_runtime.load_local_json(MODELS_FILE, template='models.example.json')
 
 def save_models(data):
     """保存模型配置文件"""
@@ -156,37 +143,15 @@ CONFIG_FILE = 'config.json'
 
 def load_config():
     """加载配置文件"""
-    if not os.path.exists(CONFIG_FILE):
-        print("=" * 60)
-        print("❌ 错误: 配置文件 config.json 不存在!")
-        print("")
-        print("请创建 config.json 文件，内容格式如下:")
-        print(json.dumps({
-            "server": {
-                "port": 8080
-            },
-            "ai_options": {
-                "max_tokens": 100000,
-                "temperature": 0.7,
-                "timeout": 300,
-                "system_prompt": "You are a professional UI/UX Developer."
-            }
-        }, indent=2, ensure_ascii=False))
-        print("")
-        print("模型配置请在 models.json 或页面「管理模型」中设置")
-        print("=" * 60)
-        raise FileNotFoundError("config.json 不存在，请创建配置文件")
-
-    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-        config = json.load(f)
+    config = app_runtime.load_local_json(CONFIG_FILE, template='config.example.json')
 
     # 验证模型配置（从 models.json）
     try:
         selected = get_selected_model()
         if not selected or not selected.get('api_key') or selected.get('api_key') == 'YOUR_API_KEY_HERE':
             print("=" * 60)
-            print("⚠️ 警告: 请在 models.json 中配置有效的 API 密钥!")
-            print("   或启动后在页面顶栏「管理模型」中配置")
+            print("[INFO] 未配置 AI 密钥，本地项目、PRD 标注与导出可以直接使用。")
+            print("       如需 AI 生成功能，启动后在页面顶栏「管理模型」中配置。")
             print("=" * 60)
         else:
             print(f"[INFO] 当前模型: {selected.get('name', '未命名')}")
@@ -595,9 +560,9 @@ def compose_generation_prompt(user_prompt, design_system_id='', skill_id='', cra
         parts.append('\n## Agent 接入交付\n读取 agent-skills/prototype-flow/SKILL.md 与 references/multi-client.md。'
                      '多端业务页面优先独立文件，编写 prototype.manifest.json；按 skill 提供的组件生成演示入口，保留业务页面 ID。'
                      '工具仓库路径由用户提供，使用 scripts/connect_project.py 校验并登记；PRD 草稿用 proto_import.py 导入。'
-                     '读取 references/prd-import.md，使用版本 3 草稿与当前 baseRevision；背景、目标和每条标注只描述本期实际改造。scope.requirements 引用需求原文并写 before / after，items 每条关联 requirementId；重新落库不等于整页补全。'
+                     '读取 references/prd-import.md 与 references/prd-writing.md，使用版本 3 草稿与当前 baseRevision；背景、目标和每条标注只描述本期实际改造。scope.requirements 引用需求原文并写 before / after，标注按业务顺序写列表和子项，items 每条关联 requirementId；重新落库不等于整页补全。'
                      '标注按本次 targets 限定；点击提示必须单独列在 hotspots，省略即无提示，不能由表格容器扩散到旧交互。'
-                     '页面需求用 background / goals 逐条关联本期需求；标注用 items 选择页面显示、数据流转、业务规则、交互说明、异常情况中适用的小节，工具生成 Markdown 标题和列表，不凑齐五项，不接受整段 body。'
+                     '页面需求用 background / goals 逐条关联本期需求；标注用 items 按原顺序合成 Markdown 列表，省略 section，不提交整段 body。涉及分页、排序、空状态及异常时在相关条目内补齐。'
                      '不补回用户删除的标注；全量需求与整页提示分别需要明确要求。落库完成必须回复项目和页面名称，并附报告的页面直达 viewerUrl。'
                      '完成实际文件，不仅返回代码块；页内业务导航不能当作演示壳隐藏。')
         return '\n\n'.join(parts)
@@ -4957,7 +4922,7 @@ class CustomHandler(http.server.SimpleHTTPRequestHandler):
 5. 每个业务页面按实际端类型声明 `data-proto-preview="web"`、`data-proto-preview="mobile"` 或 `data-proto-preview="pad"`；Pad 使用横向平板画布与外壳。单端项目的表单默认值为 {'mobile' if global_data.get('skillId') == 'mobile-app' else 'web'}，混合端分别声明。单文件的业务视图按页面名小写 slug 登记 stateId，保留中文，连续符号合成 `-`，重复名称追加 `-2`、`-3`；default 指向初始视图。
 6. 读取 `agent-skills/prototype-flow/SKILL.md` 与 `references/multi-client.md`。混合端项目按每个业务页面实际类型声明 Web/App/Pad，编写 `prototype.manifest.json`；仅目录+加载其他文件的入口可声明 launcher，业务首页保留 page。
 7. 演示目录使用 skill 配套导航组件；业务菜单保持项目设计。用 `connect_project.py --tool-root <工具仓库> <原型目录> --build-launcher` 登记与生成演示壳，PRD 用 proto_import.py 落库。
-8. PRD 按 skill 的 references/prd-import.md 使用版本 3 草稿、最新 baseRevision 与本期 scope。scope.requirements 须引用本期用户原文并说明 before / after；背景 / 目标用 background / goals、标注用 items，每条均关联本期 requirementId，由工具生成 Markdown。只选择适用小节、不凑齐五项、不接受整段 body，不以页面总览或整块容器夹带旧功能。“重新落库”不等于整页补全；明确要求纠正本期误注时按 cleanupRequest / removals 定点清理未确认内容，不清空历史。点击提示必须单独列在 hotspots，省略即无提示，不按容器扩散到原有重批 / 导出等交互，不恢复用户手动删除的标注。完整 PRD 与整页点击提示必须分别有用户明确要求。落库完成回复项目名称、页面 / 状态，并附报告的页面直达 viewerUrl。
+8. PRD 按 skill 的 references/prd-import.md 与 references/prd-writing.md 使用版本 3 草稿、最新 baseRevision 与本期 scope。scope.requirements 须引用本期用户原文并说明 before / after；背景 / 目标用 background / goals，标注按业务顺序用 items 写列表和子项，每条均关联本期 requirementId。省略 section，不使用固定小节或整段 body，不以页面总览或整块容器夹带旧功能。“重新落库”不等于整页补全；明确要求纠正本期误注时按 cleanupRequest / removals 定点清理未确认内容，不清空历史。点击提示必须单独列在 hotspots，省略即无提示，不按容器扩散到原有重批 / 导出等交互，不恢复用户手动删除的标注。完整 PRD 与整页点击提示必须分别有用户明确要求。落库完成回复项目名称、页面 / 状态，并附报告的页面直达 viewerUrl。
 
 ## 禁止
 - 不要调用外部后端接口。
@@ -5383,8 +5348,7 @@ function copyLink(url, btn) {{
             body = self.rfile.read(content_length)
             data = json.loads(body.decode('utf-8'))
 
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
+            config = app_runtime.load_local_json(CONFIG_FILE)
 
             if 'github' not in config:
                 config['github'] = {}

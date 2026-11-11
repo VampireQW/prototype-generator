@@ -60,6 +60,7 @@
                 window.ProtoHotspots?.hide();
                 document.documentElement.dataset.protoHost = 'review';
                 window.__REVIEW__.notes = Array.isArray(m.notes) ? m.notes : [];
+                window.__REVIEW__.pinStyle = m.pinStyle;
                 window.__REVIEW__.selectedNoteId = m.selectedNoteId || null;
                 window.__reviewSelectNote?.(window.__REVIEW__.selectedNoteId);
                 asideOpen = m.asideOpen !== false;

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/src/preview-loading.css?v=20261103-loading">
     <link rel="stylesheet" href="/src/publication-updates.css?v=20261103">
     <script src="/src/publication-updates.js?v=20261103"></script>
-    <link rel="stylesheet" href="/src/proto-markdown.css?v=20261016-toolbar-single-row">
+    <link rel="stylesheet" href="/src/proto-markdown.css?v=20261105-note-titles">
     <link rel="stylesheet" href="/src/proto-interactions.css?v=20261023-reveal-compact">
     <link rel="stylesheet" href="/src/proto-screenshot-editor.css?v=20261020-screenshots">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -1267,6 +1267,13 @@
         .ext-note-line { display: block; }
         /* 序号与右上角「更多」同处首行，正文另起一行：双击正文进入编辑时序号始终在首行不受影响。 */
         .ext-note-head { display: flex; align-items: center; justify-content: space-between; min-height: 22px; margin: -5px -8px 8px; padding: 5px 8px; border-radius: 6px; }
+        .ext-note-title { flex: 1; min-width: 0; width: 0; margin: 0 8px; padding: 1px 2px; border: 0; border-radius: 3px; background: transparent; color: var(--ext-text); font: 700 14px/1.7 var(--ext-font); }
+        .ext-note-title[aria-invalid="true"] { outline: 1px solid var(--ext-danger); }
+        .ext-note-title-status { font-size: 12px; color: var(--ext-danger); margin: -4px 0 8px; }
+        .ext-pin-style-controls { padding-top: 6px; margin-top: 4px; border-top: 1px solid var(--ext-border); }
+        .ext-pin-style-controls label { display: flex; align-items: center; gap: 8px; }
+        #extPinSize { flex: 1; min-width: 70px; accent-color: var(--ext-accent); }
+        #extPinStyleStatus { font-size: 11px; color: var(--ext-muted); line-height: 1.6; }
         .ext-note-no { min-width: 20px; height: 20px; margin: 0; padding: 0 5px; border-radius: 50% 50% 50% 4px; background: var(--ext-accent); color: var(--ext-on-accent); font-size: 11px; font-weight: 600; line-height: 20px; font-variant-numeric: tabular-nums; cursor: pointer; }
         .ext-note-no.stale { background: var(--ext-muted); }
         .ext-note-no:not(.stale) { background: var(--pin-fill,var(--ext-accent)); color: var(--pin-ink,var(--ext-on-accent)); }
@@ -1334,12 +1341,14 @@
         .ext-pin-palette { padding: 8px 8px 12px; border-bottom: 1px solid var(--ext-border); margin-bottom: 4px; }
         .ext-pin-palette-label { font-size: 12px; font-weight: 500; line-height: 18px; color: var(--ext-muted); margin-bottom: 8px; }
         .ext-pin-swatches { display: grid; grid-template-columns: repeat(5,24px); gap: 8px; }
-        .ext-note-menu .ext-pin-swatch { box-sizing: border-box; display: grid; place-items: center; width: 24px; height: 24px; min-height: 0; padding: 0; border: 1px solid var(--ext-control); border-radius: 50%; background: var(--swatch); }
-        .ext-note-menu .ext-pin-swatch > svg { width: 12px; height: 12px; color: var(--pin-ink); opacity: 0; }
-        .ext-note-menu .ext-pin-swatch[aria-pressed="true"] > svg { opacity: 1; }
-        .ext-note-menu .ext-pin-swatch[aria-pressed="true"] { outline: 2px solid var(--ext-accent); outline-offset: 2px; }
-        .ext-note-menu .ext-pin-swatch:not(:disabled):hover { background: var(--swatch); box-shadow: 0 0 0 2px var(--ext-accent); }
-        @media(pointer:coarse) { .ext-pin-swatches { grid-template-columns: repeat(5,44px); gap: 8px; } .ext-note-menu button { min-height: 44px; } .ext-note-menu .ext-pin-swatch { width: 44px; height: 44px; } }
+        .ext-note-menu .ext-pin-swatch, .ext-pin-style-controls .ext-pin-swatch { box-sizing: border-box; display: grid; place-items: center; width: 24px; height: 24px; min-height: 0; padding: 0; border: 1px solid var(--ext-control); border-radius: 50%; background: var(--swatch); cursor: pointer; }
+        .ext-note-menu .ext-pin-swatch > svg, .ext-pin-style-controls .ext-pin-swatch > svg { width: 12px; height: 12px; color: var(--pin-ink); opacity: 0; }
+        .ext-note-menu .ext-pin-swatch[aria-pressed="true"] > svg, .ext-pin-style-controls .ext-pin-swatch[aria-pressed="true"] > svg { opacity: 1; }
+        .ext-note-menu .ext-pin-swatch[aria-pressed="true"], .ext-pin-style-controls .ext-pin-swatch[aria-pressed="true"] { outline: 2px solid var(--ext-accent); outline-offset: 2px; }
+        .ext-note-menu .ext-pin-swatch:not(:disabled):hover, .ext-pin-style-controls .ext-pin-swatch:not(:disabled):hover { background: var(--swatch); box-shadow: 0 0 0 2px var(--ext-accent); }
+        #extPinColors { grid-template-columns: repeat(auto-fit,24px); margin: 4px 0 8px; }
+        .ext-pin-style-controls .ext-pin-swatch:focus-visible { outline: 2px solid var(--ext-accent); outline-offset: 2px; }
+        @media(pointer:coarse) { .ext-pin-swatches { grid-template-columns: repeat(5,44px); gap: 8px; } #extPinColors { grid-template-columns: repeat(auto-fit,44px); } .ext-note-menu button { min-height: 44px; } .ext-note-menu .ext-pin-swatch, .ext-pin-style-controls .ext-pin-swatch { width: 44px; height: 44px; } }
         #extPanel button:disabled, .ext-note-menu button:disabled { opacity: .5; cursor: not-allowed; }
         #extPanel button:focus-visible, #extPanel [tabindex]:focus-visible, #extPanel textarea:focus-visible, .ext-note-menu button:focus-visible, #devSidebarToggle:focus-visible { outline: 2px solid var(--ext-accent); outline-offset: 2px; }
         #devSidebar { flex-shrink: 0; z-index: 30; }
@@ -1411,8 +1420,8 @@
         .github-setup-step .step-num { width: 22px; height: 22px; border-radius: 50%; background: #6366f1; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px; }
         @media(prefers-reduced-motion:reduce) { .ext-mode .prd-sidebar { transition: none; } }
     </style>
-    <link rel="stylesheet" href="/agent-skills/prototype-flow/assets/project-navigation.css?v=20261016-compact-nav">
-    <script src="/agent-skills/prototype-flow/assets/project-navigation.js?v=20261015-page-tree"></script>
+    <link rel="stylesheet" href="/agent-skills/prototype-flow/assets/project-navigation.css?v=20261104-state-edit-hover">
+    <script src="/agent-skills/prototype-flow/assets/project-navigation.js?v=20261104-state-grip"></script>
     <link rel="stylesheet" href="/src/workbench.css?v=20261028-publish-time-row">
     <link rel="stylesheet" href="/src/sidebar-resize.css?v=20261021-quiet-resize">
     <link rel="stylesheet" href="/src/pages-manager.css?v=20261021-publish-links">
@@ -1834,6 +1843,12 @@
                             <label class="ext-theme-opt"><input type="radio" name="extTheme" value="dark"><span><i class="fas fa-moon"></i>暗色</span></label>
                         </div>
                     </div>
+                    <div class="ext-pin-style-controls" role="group" aria-label="页面序号样式">
+                        <div class="ext-shortcut-row"><span>页面序号颜色</span><span class="ext-shortcut-spacer"></span><button id="extPinColorReset" type="button">恢复单条配色</button></div>
+                        <div id="extPinColors" class="ext-pin-swatches" role="group" aria-label="统一序号颜色"></div>
+                        <div class="ext-shortcut-row"><label for="extPinSize">大小</label><input id="extPinSize" type="range" min="24" max="56" step="4" value="36"><output id="extPinSizeValue" for="extPinSize">100%</output><button id="extPinStyleReset" type="button">恢复默认</button></div>
+                        <div id="extPinStyleStatus" role="status" aria-live="polite">适用于本项目全部页面，保存后随发布和导出生效</div>
+                    </div>
                 </div>
 
                 <!-- 外部项目：标注 + 页面文档 面板 -->
@@ -2004,7 +2019,7 @@
 
     <script src="/src/preview-loading.js?v=20261103-loading"></script>
     <script src="/src/proto-order.js?v=20261028-visibility-core-v2"></script>
-    <script src="/src/proto-appearance.js"></script>
+    <script src="/src/proto-appearance.js?v=20261105-pin-style"></script>
     <script src="/src/vendor/vditor/dist/js/lute/lute.min.js"></script>
     <script src="/src/vendor/vditor/dist/index.min.js"></script>
     <script src="/src/vendor/dompurify/dist/purify.min.js"></script>
@@ -2012,7 +2027,7 @@
     <script src="/src/proto-interactions.js?v=20261028-visibility-core-v2"></script>
     <script src="/src/proto-screenshot-editor.js?v=20261023-replace-page"></script>
     <script src="/src/proto-text-runtime.js?v=20261021-semantic-text"></script>
-    <script src="/src/proto-text-edit.js?v=20261021-semantic-text"></script>
+    <script src="/src/proto-text-edit.js?v=20261111-text-rebase"></script>
     <script src="/src/pages-manager.js?v=20261021-publish-links"></script>
     <script src="/src/sidebar-resize.js?v=20261021-nav-width"></script>
     <script>
@@ -2038,6 +2053,7 @@
         let extStateWatcher = null;
         let extSelectedNoteId = null;
         let extNoteMenu = null;
+        let extPinStylePreview = null, extPinStyleSaving = false;
         let extSaveQueue = Promise.resolve();
         let extPickActive = false;
         let extInteractions = null;
@@ -3218,11 +3234,12 @@
             if (!extBundle) return;
             syncExtLocation();
             const config = { project:extBundle.project,currentPage:extPage,currentState:extStateId,
-                annotations:extBundle.prd.annotations,onEdit:editExtPageNavigation,
+                annotations:extBundle.prd.annotations,onEdit:editExtPageNavigation,onEditState:editExtStateName,
                 onTrash:openExtPageTrash,
                 onReorder: async request => {
+                    if(previewFrame.contentWindow.ProtoAnnotate?.isBusy() || ProtoMarkdown.isBusy() || ProtoMarkdown.current()){showToast('请先结束 PRD 编辑或等待保存完成','warning');return false;}
                     const ok=await protoSave(draft=>{if(!ProtoProjectNavigation.reorderProject(draft.project,request))throw new Error('页面结构已变化，请重新拖动');},{silent:true});
-                    if(ok){renderExtPageList();applyPreviewType();showToast('页面结构已保存');}return ok;
+                    if(ok){renderExtPageList();if(request.kind!=='state')applyPreviewType();showToast(request.kind==='state'?'状态顺序已保存':'页面结构已保存');}return ok;
                 },
                 onSelect:(pageId,stateId) => {
                     if (previewFrame.contentWindow.ProtoAnnotate?.isBusy() || ProtoMarkdown.isBusy()) {showToast('正在保存，请稍后切换','warning');return false;}
@@ -3331,7 +3348,53 @@
             document.body.append(dialog);render();dialog.showModal();position();window.addEventListener('resize',position);closeButton.focus();
         }
 
+        function editExtStateName(page, state, anchor) {
+            if(!anchor?.isConnected)return;
+            if($('extStateRenameDialog')?.getAttribute('aria-busy')==='true')return;
+            if(previewFrame.contentWindow.ProtoAnnotate?.isBusy() || ProtoMarkdown.isBusy() || ProtoMarkdown.current()){
+                showToast('请先结束 PRD 编辑或等待保存完成','warning');return;
+            }
+            $('extStateRenameDialog')?.close();$('extPageNavigationDialog')?.close();
+            const dialog=document.createElement('dialog');dialog.id='extStateRenameDialog';dialog.className='ppn ppn-settings';
+            dialog.setAttribute('aria-labelledby','extStateRenameTitle');
+            dialog.innerHTML='<form><header class="ppn-settings-header"><div><h3 id="extStateRenameTitle">修改状态名称</h3><p class="ppn-settings-subtitle"></p></div></header><div class="ppn-settings-fields"><label class="ppn-settings-field"><span>状态名称</span><input class="ppn-page-name-input" type="text" maxlength="100" autocomplete="off" aria-describedby="extStateRenameError"></label><p id="extStateRenameError" class="ppn-client-error" role="alert" hidden></p></div><footer class="ppn-settings-footer"><button type="button" class="ppn-button ppn-button-quiet" data-cancel>取消</button><button type="submit" class="ppn-button ppn-button-primary">保存</button></footer></form>';
+            dialog.querySelector('.ppn-settings-subtitle').textContent=page.title || page.id;
+            const form=dialog.querySelector('form'),input=dialog.querySelector('input'),error=dialog.querySelector('[role="alert"]'),submit=form.querySelector('[type="submit"]');
+            const controller=new AbortController();let saving=false,unposition=null;
+            const findTrigger=()=>Array.from(pageList.querySelectorAll('.ppn-edit')).find(n=>n.dataset.ppnKey==='edit-state:'+page.id+':'+state.id) || Array.from(pageList.querySelectorAll('.ppn-edit')).find(n=>n.dataset.ppnKey==='edit:'+page.id);
+            input.value=state.title || state.id;
+            const close=()=>{if(!saving)dialog.close();};
+            form.querySelector('[data-cancel]').onclick=close;
+            input.oninput=()=>{input.removeAttribute('aria-invalid');error.hidden=true;};
+            dialog.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}});
+            dialog.addEventListener('close',()=>{controller.abort();unposition?.();dialog.remove();anchor.setAttribute('aria-expanded','false');
+                const next=anchor.isConnected?anchor:findTrigger();next?.focus({preventScroll:true});
+            },{once:true});
+            document.addEventListener('pointerdown',event=>{if(!dialog.contains(event.target)&&!anchor.contains(event.target)&&!$('appDialog')?.classList.contains('active'))close();},{signal:controller.signal});
+            form.onsubmit=async event=>{
+                event.preventDefault();if(saving)return;
+                const title=input.value.trim();
+                try{const check=JSON.parse(JSON.stringify(extBundle.project));if(!ProtoProjectNavigation.updateStateTitle(check,page.id,state.id,title)){close();return;}}
+                catch(reason){error.textContent=reason.message;error.hidden=false;input.setAttribute('aria-invalid','true');input.focus();return;}
+                saving=true;dialog.setAttribute('aria-busy','true');input.readOnly=true;form.querySelectorAll('button').forEach(b=>b.disabled=true);submit.textContent='保存中…';
+                const ok=await protoSave(draft=>ProtoProjectNavigation.updateStateTitle(draft.project,page.id,state.id,title),{silent:true});
+                saving=false;dialog.removeAttribute('aria-busy');
+                if(ok){renderExtPageList();close();showToast('状态名称已保存');}
+                else{input.readOnly=false;form.querySelectorAll('button').forEach(b=>b.disabled=false);submit.textContent='保存';input.focus();}
+            };
+            anchor.setAttribute('aria-expanded','true');anchor.setAttribute('aria-haspopup','dialog');
+            function followAnchor(){
+                unposition=ProtoProjectNavigation.positionPopup(dialog,anchor,{side:'right',gap:12,onDetach:()=>{
+                    const next=findTrigger();
+                    if(!next || next===anchor){close();return;}
+                    unposition?.();anchor=next;anchor.setAttribute('aria-expanded','true');anchor.setAttribute('aria-haspopup','dialog');followAnchor();
+                }});
+            }
+            document.body.append(dialog);dialog.show();followAnchor();input.focus({preventScroll:true});input.select();
+        }
+
         function editExtPageNavigation(page, anchor) {
+            $('extStateRenameDialog')?.close();
             document.getElementById('extPageNavigationDialog')?.close();
             if(!anchor?.isConnected)return;
             const dialog=document.createElement('dialog');dialog.id='extPageNavigationDialog';dialog.className='ppn ppn-settings';
@@ -3344,6 +3407,13 @@
             const nameInput=dialog.querySelector('#extPageNavigationName'), nameError=dialog.querySelector('#extPageNavigationNameError');
             nameInput.value=page.title || page.id;
             nameInput.oninput=()=>{nameInput.removeAttribute('aria-invalid');nameError.hidden=true;};
+            if(page.states?.length===1){
+                const field=document.createElement('div');field.className='ppn-settings-field';
+                const label=document.createElement('span');label.textContent='状态：'+(page.states[0].title || page.states[0].id);
+                const rename=document.createElement('button');rename.type='button';rename.className='ppn-button ppn-button-quiet';rename.textContent='修改状态名称';
+                rename.onclick=()=>{if(saving)return;dialog.addEventListener('close',()=>editExtStateName(page,page.states[0],anchor),{once:true});close(false);};
+                field.append(label,rename);dialog.querySelector('.ppn-settings-fields').append(field);
+            }
             if(page.kind==='screenshot'||page.htmlImport){
                 const source=document.createElement('div');source.className='ppn-settings-field';
                 const label=document.createElement('span');label.textContent=page.kind==='screenshot'?'截图页面':'已导入 HTML';
@@ -3522,11 +3592,11 @@
                 if (w.location.origin !== window.location.origin) return;
                 void extInitHotspots(w, d);
                 const page = extPageRecord();
-                if (page?.aiNavigation === 'legacy') {
+                if (page && (page.aiNavigation === 'legacy' || page.states?.length > 1)) {
                     if (!w.ProtoNavigation) {
                         await new Promise((resolve, reject) => {
                             const script = d.createElement('script');
-                            script.src = '/src/proto-navigation.js';
+                            script.src = '/src/proto-navigation.js?v=20261104-state-follow';
                             script.setAttribute('data-prototype-owned', '');
                             script.onload = resolve; script.onerror = () => reject(new Error('状态导航脚本载入失败'));
                             d.head.appendChild(script);
@@ -3543,7 +3613,7 @@
                     return;
                 }
                 const mdStyle = d.createElement('link');
-                mdStyle.rel = 'stylesheet'; mdStyle.href = '/src/proto-markdown.css?v=20261016-toolbar-single-row';
+                mdStyle.rel = 'stylesheet'; mdStyle.href = '/src/proto-markdown.css?v=20261105-note-titles';
                 mdStyle.setAttribute('data-prototype-owned', ''); d.head.appendChild(mdStyle);
                 await new Promise((resolve,reject)=>{
                 const s1 = d.createElement('script');
@@ -3551,7 +3621,7 @@
                 s1.onload = () => {
                     if (previewFrame.contentDocument !== d) {resolve();return;}
                     const s2 = d.createElement('script');
-                    s2.src = '/src/proto-annotate.js?v=20261028-visibility-core-v2';
+                    s2.src = '/src/proto-annotate.js?v=20261105-pin-style';
                     s2.onload = () => {
                         if (previewFrame.contentDocument !== d) {resolve();return;}
                         extRenderPins();
@@ -3591,6 +3661,7 @@
                 try {
                     if (previewFrame.contentWindow.document !== doc) return;
                     const cur = doc.documentElement.dataset.protoState || 'default';
+                    if (!extPageRecord()?.states?.some(state => state.id === cur)) return;
                     if (cur !== extStateId) {
                         extSuspendNoteEdit();
                         extSelectedNoteId = null;
@@ -3648,6 +3719,60 @@
                     w.ProtoAnnotate.renderPins(extDisplayNotes);
                 }
             } catch (e) { /* ignore */ }
+        }
+
+        function extRenderPinStyle() {
+            if (!$('extPinSize') || !extBundle) return;
+            const style = ProtoAppearance.pinStyle(extPinStylePreview || extBundle.project.pinStyle);
+            const grid = $('extPinColors');
+            let legacy = grid.querySelector('[data-legacy-color]');
+            if (style.color && !ProtoAppearance.PIN_COLORS.some(([hex]) => hex === style.color)) {
+                if (!legacy) { legacy = document.createElement('button'); legacy.type = 'button'; legacy.className = 'ext-pin-swatch'; legacy.dataset.legacyColor = ''; grid.appendChild(legacy); }
+                legacy.dataset.color = style.color; legacy.title = '当前自定义颜色'; legacy.setAttribute('aria-label', '当前自定义颜色'); legacy.style.setProperty('--swatch', style.color);
+                legacy.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m4 8 3 3 5-6"/></svg>';
+                ProtoAppearance.applyPin(legacy, {}, style);
+            } else legacy?.remove();
+            grid.querySelectorAll('button').forEach(button => { button.setAttribute('aria-pressed', String(button.dataset.color === style.color)); button.disabled = extPinStyleSaving || button.hasAttribute('data-legacy-color'); });
+            $('extPinSize').value = style.size;
+            $('extPinSizeValue').textContent = Math.round(style.size / 36 * 100) + '%';
+            $('extPinSize').setAttribute('aria-valuetext', $('extPinSizeValue').textContent);
+            for (const id of ['extPinSize','extPinColorReset','extPinStyleReset']) $(id).disabled = extPinStyleSaving;
+            $('extPinColorReset').disabled = extPinStyleSaving || !style.color;
+        }
+
+        async function extSavePinStyle(patch) {
+            if (!extBundle || extPinStyleSaving) return;
+            const focused = document.activeElement?.closest('.ext-pin-style-controls') ? document.activeElement : null;
+            extPinStyleSaving = true; extRenderPinStyle();
+            $('extPinStyleStatus').textContent = '正在保存序号样式…';
+            const ok = await protoSave(draft => {
+                if (patch === null) { delete draft.project.pinStyle; return; }
+                const style = { ...draft.project.pinStyle, ...patch };
+                if (style.color === null) delete style.color;
+                draft.project.pinStyle = style;
+            }, { silent: true });
+            extPinStylePreview = null; extPinStyleSaving = false;
+            extRenderPinStyle(); extRenderPins();
+            if (focused?.isConnected && !focused.disabled && document.activeElement === document.body && !$('extThemeCard').classList.contains('hidden')) focused.focus({preventScroll:true});
+            $('extPinStyleStatus').textContent = ok ? '已保存 · 本项目全部页面生效，发布和导出同步' : '未保存，已恢复原样式，请重试';
+        }
+
+        function extSetupPinStyle() {
+            const grid = $('extPinColors'); grid.replaceChildren();
+            for (const [hex, label] of ProtoAppearance.PIN_COLORS) {
+                const button = document.createElement('button'); button.type = 'button'; button.className = 'ext-pin-swatch'; button.dataset.color = hex;
+                button.style.setProperty('--swatch', hex); button.setAttribute('aria-label', `统一为${label}序号`); button.title = label;
+                button.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m4 8 3 3 5-6"/></svg>';
+                ProtoAppearance.applyPin(button, {color:hex}); button.onclick = () => extSavePinStyle({color:hex}); grid.appendChild(button);
+            }
+            $('extPinColorReset').onclick = () => extSavePinStyle({color:null});
+            $('extPinStyleReset').onclick = () => extSavePinStyle(null);
+            $('extPinSize').oninput = e => {
+                extPinStylePreview = { ...extBundle.project.pinStyle, size:Number(e.target.value) };
+                extRenderPinStyle(); extRenderPins();
+            };
+            $('extPinSize').onchange = e => extSavePinStyle({size:Number(e.target.value)});
+            extRenderPinStyle();
         }
 
         // ---------- 外观：跟随系统 / 浅色 / 暗色 ----------
@@ -3890,6 +4015,7 @@
                 testReveal: extTestReveal,
             });
             document.querySelectorAll('#extThemeCard input[name="extTheme"]').forEach(r => { r.onchange = () => { if (r.checked) extSetThemePref(r.value); }; });
+            extSetupPinStyle();
             extApplyTheme();
             $('prdPanelTitle').textContent = 'PRD · 标注';
             $('prdTabs').classList.add('hidden');
@@ -3910,6 +4036,7 @@
         }
 
         function extRefreshSidebar() {
+            extRenderPinStyle();
             renderExtPageList();
             renderExtAnnotList();
             renderExtDoc();
@@ -3934,7 +4061,20 @@
 
         function extCreateNoteRow(noteId) {
             const row = document.createElement('section'); row.className = 'ext-note'; row.dataset.noteId = noteId;
-            row.innerHTML = '<div class="ext-note-line"><div class="ext-note-head"><button type="button" class="ext-note-no"></button><button type="button" class="ext-note-more" aria-haspopup="menu" aria-expanded="false">···</button></div><div class="ext-note-content"><div class="ext-note-body"></div></div></div>';
+            row.innerHTML = '<div class="ext-note-line"><div class="ext-note-head"><button type="button" class="ext-note-no"></button><input class="ext-note-title" type="text" maxlength="120" hidden><button type="button" class="ext-note-more" aria-haspopup="menu" aria-expanded="false">···</button></div><div class="ext-note-title-status" role="status" hidden></div><div class="ext-note-content"><div class="ext-note-body"></div></div></div>';
+            const title = row.querySelector('.ext-note-title');
+            title.onclick = e => e.stopPropagation();
+            title.oninput = () => {
+                title.dataset.dirty = 'true'; title.removeAttribute('aria-invalid'); row.querySelector('.ext-note-title-status').hidden = true;
+                const note = extBundle?.prd.annotations.find(n => n.id === row.dataset.noteId);
+                if (note) { const key = extNoteTitleKey(note), saved = ProtoMarkdown.getDraft(key); ProtoMarkdown.putDraft(key, {value:title.value,base:saved?.base ?? note.title ?? ''}); }
+            };
+            title.onblur = () => extSaveNoteTitle(row);
+            title.onkeydown = e => {
+                if (e.isComposing) return;
+                if (e.key === 'Enter') { e.preventDefault(); title.blur(); }
+                if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); const note = extBundle?.prd.annotations.find(n => n.id === row.dataset.noteId); title.value = note?.title || ''; if (note) ProtoMarkdown.putDraft(extNoteTitleKey(note),null); delete title.dataset.dirty; title.removeAttribute('aria-invalid'); row.querySelector('.ext-note-title-status').hidden = true; title.blur(); }
+            };
             row.onclick = () => { if (!row.classList.contains('ext-pick-draft')) extSelectNote(row.dataset.noteId); };
             row.querySelector('.ext-note-no').onclick = e => { e.stopPropagation(); if (!row.classList.contains('ext-pick-draft')) extFocusNote(row.dataset.noteId); };
             row.querySelector('.ext-note-more').onclick = e => { e.stopPropagation(); extSelectNote(row.dataset.noteId); openExtNoteMenu(row.dataset.noteId, e.currentTarget); };
@@ -3947,7 +4087,7 @@
             const notes = extDisplayNotes.length ? extDisplayNotes : extPageNotes().map((n, i) => ({ ...n, displayNumber: i + 1 }));
             $('extAnnotCount').textContent = `${notes.length + (list.querySelector('.ext-pick-draft') ? 1 : 0)} 条`;
             const rows = new Map([...list.querySelectorAll('.ext-note:not(.ext-pick-draft)')].map(row => [row.dataset.noteId, row]));
-            rows.forEach((row, id) => { if (!notes.some(n => n.id === id)) { ProtoMarkdown.suspend(row); row.remove(); } });
+            rows.forEach((row, id) => { if (!notes.some(n => n.id === id)) { extSaveNoteTitle(row); ProtoMarkdown.suspend(row); row.remove(); } });
             list.querySelector('[data-empty]')?.remove();
             if (!notes.length && !list.querySelector('.ext-pick-draft')) {
                 const empty = document.createElement('p'); empty.dataset.empty = ''; empty.className = 'p-6 text-sm';
@@ -3964,6 +4104,17 @@
                 const number = row.querySelector('.ext-note-no'); number.textContent = n.displayNumber;
                 ProtoAppearance.applyPin(number, n);
                 number.classList.toggle('stale', !extAnchorAlive(n)); number.setAttribute('aria-label', `定位标注 ${n.displayNumber}`);
+                const title = row.querySelector('.ext-note-title');
+                title.hidden = false; title.readOnly = !!n.confirmed || title.dataset.saving === 'true';
+                title.setAttribute('aria-label', `标注 ${n.displayNumber} 标题`);
+                if (document.activeElement !== title && title.dataset.dirty !== 'true' && title.dataset.saving !== 'true') title.value = n.title || '';
+                if (title.dataset.dirty !== 'true' && title.dataset.saving !== 'true') {
+                    const draft = ProtoMarkdown.getDraft?.(extNoteTitleKey(n));
+                    if (draft && !n.confirmed) {
+                        if (draft.value === (n.title || '')) ProtoMarkdown.putDraft(extNoteTitleKey(n), null);
+                        else { title.value = draft.value; title.dataset.dirty = 'true'; const status = row.querySelector('.ext-note-title-status'); status.textContent = '已恢复未保存的标题，回车保存或 Esc 取消'; status.hidden = false; }
+                    }
+                }
                 row.querySelector('.ext-note-more').setAttribute('aria-label', `标注 ${n.displayNumber} 更多操作`);
                 const body = row.querySelector('.ext-note-body');
                 ProtoMarkdown.render(body, extNoteOptions(n));
@@ -3994,6 +4145,31 @@
             extSelectedNoteId = noteId;
             document.querySelectorAll('.ext-note').forEach(row => row.classList.toggle('flash', row.dataset.noteId === noteId));
             previewFrame.contentWindow.ProtoAnnotate?.selectNote(noteId);
+        }
+
+        function extNoteTitleKey(note) { return ProtoMarkdown.key(extId, note.pageId, note.stateId, 'title:' + note.id); }
+
+        async function extSaveNoteTitle(row) {
+            const input = row.querySelector('.ext-note-title'), noteId = row.dataset.noteId;
+            if (input.dataset.dirty !== 'true' || input.dataset.saving === 'true') return;
+            const note = extBundle?.prd.annotations.find(n => n.id === noteId);
+            if (!note || note.confirmed) return;
+            const value = input.value.trim();
+            const error = row.querySelector('.ext-note-title-status');
+            const key = extNoteTitleKey(note), savedDraft = ProtoMarkdown.getDraft(key);
+            if (savedDraft && savedDraft.base !== (note.title || '')) { input.setAttribute('aria-invalid', 'true'); error.textContent = '原标题已被更新，请复制当前输入，按 Esc 载入最新标题后再修改'; error.hidden = false; return; }
+            if (value.length > 120 || /[\x00-\x1f\x7f]/.test(value)) { input.setAttribute('aria-invalid', 'true'); error.textContent = '标题最多 120 个字符，不能包含换行'; error.hidden = false; return; }
+            if (value === (note.title || '')) { delete input.dataset.dirty; input.value = value; ProtoMarkdown.putDraft(key, null); return; }
+            input.dataset.saving = 'true'; input.readOnly = true;
+            const ok = await protoSave(draft => {
+                const current = draft.prd.annotations.find(n => n.id === noteId);
+                if (!current || current.confirmed) throw new Error('标注不存在或已确认');
+                if (value) current.title = value; else delete current.title;
+                current.updatedAt = new Date().toISOString();
+            }, { silent: true });
+            delete input.dataset.saving; input.readOnly = !!extBundle?.prd.annotations.find(n => n.id === noteId)?.confirmed;
+            if (ok) { delete input.dataset.dirty; input.value = value; ProtoMarkdown.putDraft(key, null); error.hidden = true; }
+            else { input.setAttribute('aria-invalid', 'true'); error.textContent = '标题未保存，内容已保留；点击标题后回车可重试'; error.hidden = false; }
         }
 
         function extIframeState() {
@@ -4326,7 +4502,8 @@ ${JSON.stringify(task.targets || [], null, 2)}
             const key = ProtoMarkdown.key(extId, pageId, stateId, '$document');
             // 页面需求永远可双击编辑（用户裁定 2026-09-28）：confirmed 只锁标注，不锁文档，故状态不再显示「已确认 · 只读」
             $('extDocStatus').textContent = ProtoMarkdown.getDraft(key) ? '有未提交草稿' : doc ? '已保存' : '未填写';
-            $('extDocPageName').textContent = `${extPageRecord()?.title || pageId} · ${stateId}`;
+            const page=extPageRecord(),state=page?.states?.find(s=>s.id===stateId);
+            $('extDocPageName').textContent = `${page?.title || pageId} · ${state?.title || stateId}`;
             $('extDocPageName').title = $('extDocPageName').textContent;
             ProtoMarkdown.render($('extDocBody'), { key, value: doc?.markdown || '', readonly: false, theme: extTheme(),
                 ...extImageOptions(),
@@ -4341,6 +4518,7 @@ ${JSON.stringify(task.targets || [], null, 2)}
         // ---------- iframe 内回调（proto-annotate.js 调用） ----------
         window.ProtoExtHost = {
             appearance: ProtoAppearance,
+            pinStyle: () => extPinStylePreview || extBundle?.project.pinStyle,
             openNoteMenu: openExtNoteMenu,
             async submitPick({ anchor, placement, body, scopeKey, id = crypto.randomUUID() }) {
                 if (!extBundle) return false;
@@ -4389,7 +4567,12 @@ ${JSON.stringify(task.targets || [], null, 2)}
             revealFailed() { showToast('该标注对应元素当前隐藏，页面没有可用的展开入口', 'warning'); },
             scopeKey: extScopeKey,
             markdown: ProtoMarkdown,
-            renderNote(region, note) { ProtoMarkdown.render(region, extNoteOptions(note)); },
+            renderNote(region, note) {
+                let title = region.parentElement.querySelector(':scope > .pa-note-title');
+                if (!title) { title = region.ownerDocument.createElement('strong'); title.className = 'pa-note-title'; title.style.cssText = 'display:block;font-weight:700;margin:0 0 8px;overflow-wrap:anywhere'; region.before(title); }
+                title.textContent = note.title || ''; title.hidden = !note.title; title.style.display = note.title ? 'block' : 'none';
+                ProtoMarkdown.render(region, extNoteOptions(note));
+            },
             editNote: extEditNote,
             beginSidebarPick(pick, done, cancelled) {
                 if (!prdExpanded || pick.scopeKey !== extScopeKey()) return null;

@@ -37,10 +37,12 @@ def proj(tmp_path):
 
 
 def markdown_body(text):
-    return '### 交互说明\n\n1. ' + text
+    return '1. ' + text
 
 
 def annotation_items(body):
+    if not body.startswith('### '):
+        return [{'requirementId': 'R1', 'markdown': body}]
     result = []
     for heading in re.finditer(r'^### ([^\n]+)\n\n([\s\S]*?)(?=\n\n### |\Z)', body, re.M):
         content = heading.group(2).strip()
@@ -449,29 +451,56 @@ def test_import_rejects_unstructured_new_annotation_before_writing(proj, body):
     assert not proto_meta.meta_dir(proj).exists()
 
 
-def test_structured_markdown_preserved_and_no_background_or_hints_invented(proj):
-    body = ('### 页面显示\n\n| 状态 | 显示 |\n| --- | --- |\n| 默认 | 全部订单 |\n\n'
-            '### 数据流转\n\n1. 查询词传给当前列表。\n\n'
-            '### 业务规则\n\n- 仅过滤当前列表。\n\n'
-            '### 交互说明\n\n1. 回车执行查询。\n2. 清空后显示全部。\n\n'
-            '### 异常情况\n\n1. 没有匹配结果时显示空列表。')
+def test_import_keeps_business_order_nesting_and_legacy_state_table(proj):
+    body = ('### 交互说明\n\n1. 回车执行查询。\n'
+            '    1. 仅过滤当前列表。\n'
+            '        1. **查无结果时**，显示“没有匹配的订单”。\n'
+            '2. 清空后显示全部。\n\n'
+            '### 页面显示\n\n| 状态 | 显示 |\n| --- | --- |\n| 默认 | 全部订单 |\n\n'
+            '### 异常情况\n\n- 查询失败时保留查询条件。')
     data = draft(proj, {'file': 'index.html', 'annotations': [{'protoId': 'kw', 'body': body}]})
-    proto_import.import_draft(proj, data)
+    items = data['pages'][0]['annotations'][0]['items']
+    del items[0]['section']
+    report = proto_import.import_draft(proj, data)
     saved = proto_meta.load_bundle(proj)
-    assert saved['prd']['annotations'][0]['body'] == body
+    assert saved['prd']['annotations'][0]['body'] == (
+        '1. 回车执行查询。\n'
+        '    1. 仅过滤当前列表。\n'
+        '        1. **查无结果时**，显示“没有匹配的订单”。\n'
+        '2. 清空后显示全部。\n\n'
+        '| 状态 | 显示 |\n| --- | --- |\n| 默认 | 全部订单 |\n\n'
+        '- 查询失败时保留查询条件。')
+    assert [item.get('section') for item in report['contentRefs']] == [None, '交互说明', '页面显示', '异常情况']
     assert not saved['prd']['documents']
     page = next(p for p in saved['project']['pages'] if p['id'] == 'home')
     assert page['states'][0].get('interactionHints', {'mode': 'targets', 'protoIds': []}) == {'mode': 'targets', 'protoIds': []}
 
 
-def test_display_only_annotation_does_not_require_other_sections_or_click_hints(proj):
+def test_display_only_annotation_does_not_require_other_rules_or_click_hints(proj):
     body = '### 页面显示\n\n- 查询结果为空时显示当前原型中的空列表文案。'
     data = draft(proj, {'file': 'index.html', 'annotations': [{'protoId': 'kw', 'body': body}]})
     report = proto_import.import_draft(proj, data)
     saved = proto_meta.load_bundle(proj)
-    assert saved['prd']['annotations'][0]['body'] == body
+    assert saved['prd']['annotations'][0]['body'] == '- 查询结果为空时显示当前原型中的空列表文案。'
     assert not saved['prd']['documents'] and len(report['annotations']) == 1
     assert not saved['project']['pages'][0]['states'][0].get('interactionHints', {}).get('protoIds')
+
+
+@pytest.mark.parametrize('markdown', [
+    '### 页面显示\n\n- 查询结果',
+    '- 查询结果\n    ### 交互说明',
+    '- 查询结果\n    交互说明\n    -------',
+    '- 查询结果\n- 刷新结果',
+    '1. 查询结果\n  2. 缩进不足的第二条规则',
+    '1. 查询结果\n\n脱离列表的说明',
+    '2.1 查询结果',
+])
+def test_import_rejects_invalid_items_before_writing(proj, markdown):
+    data = draft(proj, {'file': 'index.html', 'annotations': [{'protoId': 'kw', 'body': '搜索'}]})
+    data['pages'][0]['annotations'][0]['items'][0]['markdown'] = markdown
+    with pytest.raises(proto_import.ImportError_, match='Markdown'):
+        proto_import.import_draft(proj, data)
+    assert not proto_meta.meta_dir(proj).exists()
 
 
 def test_new_page_document_cannot_repeat_development_implementation(proj):

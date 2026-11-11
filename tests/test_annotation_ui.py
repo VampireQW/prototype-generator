@@ -495,12 +495,18 @@ const previewFrame={contentWindow:{document:doc,ProtoAnnotate:{closeInputCard:()
 const extSuspendNoteEdit=()=>calls.push(['draft',extStateId]);
 const extAnnotateDeactivate=()=>calls.push(['exit',extStateId]),closeExtNoteMenu=()=>{};
 const extRenderPins=()=>calls.push('pins'),renderExtAnnotList=()=>{},renderExtDoc=()=>{};
+const extPageRecord=()=>({states:[{id:'default'},{id:'done'}]});
+const renderExtPageList=()=>calls.push(['nav',extStateId]),extInteractions=null;
 class MutationObserver {constructor(callback){this.callback=callback;} observe(el,opts){assert.deepEqual(opts.attributeFilter,['data-proto-state']);} disconnect(){this.disconnected=true;}}
 """ + VIEWER[start:end] + """
 extWatchState(); assert.equal(calls.length,0);
 doc.documentElement.dataset.protoState='done'; extStateWatcher.callback();
 assert.equal(extStateId,'done'); assert.equal(extSelectedNoteId,null);
 assert.deepEqual(calls.slice(0,3),[['draft','default'],['exit','default'],'close']);
+assert.deepEqual(calls[3],['nav','done']);assert.equal(calls[4],'pins');
+const count=calls.length;extStateWatcher.callback();assert.equal(calls.length,count,'same state must not redraw');
+doc.documentElement.dataset.protoState='undeclared';extStateWatcher.callback();assert.equal(extStateId,'done');assert.equal(calls.length,count);
+doc.documentElement.dataset.protoState='done';
 const old=extStateWatcher; extWatchState(); assert.ok(old.disconnected);
 """)
 
@@ -847,7 +853,8 @@ def test_sidebar_note_layout_content_first():
     viewer = (SRC / 'viewer.html').read_text(encoding='utf-8')
     # 行结构：首行 head（序号 + 更多）在前，内容 content 在后
     assert '<div class="ext-note-head"><button type="button" class="ext-note-no">' in viewer
-    assert '</button></div><div class="ext-note-content">' in viewer
+    assert 'class="ext-note-title"' in viewer and 'class="ext-note-title-status"' in viewer
+    assert '<div class="ext-note-content"><div class="ext-note-body">' in viewer
     # head 行：flex 两端对齐（序号左 / 更多右）
     head_rule = viewer.split('\n        .ext-note-head {', 1)[1].split('}', 1)[0]
     assert 'display: flex' in head_rule and 'justify-content: space-between' in head_rule
@@ -959,14 +966,14 @@ def test_review_shell_note_number_matches_workbench_style():
     assert '--accent: #2563eb;' in shell
     # 失锚灰圆与操作界面一致
     assert '.note.stale .note-no' in shell and 'background: var(--muted)' in shell
-    assert "createElement('strong')" not in shell and 'stale-badge' not in shell
+    assert 'title.textContent = note.title' in shell and 'stale-badge' not in shell
 
 
 def test_review_pin_matches_workbench_pin_style():
     """研发版页面序号气泡与预览同式：水滴 36px、白描边、#2563eb、锚点在尖部。"""
     pins = (SRC / 'review-pins.js').read_text(encoding='utf-8')
     # 与 .pa-pin 同式：水滴形、尺寸、描边、主色、向上锤点
-    assert 'border-radius:50% 50% 50% 2px' in pins and 'min-width:36px;height:36px' in pins
+    assert 'border-radius:50% 50% 50% 2px' in pins and 'min-width:var(--pin-size,36px);height:var(--pin-size,36px)' in pins
     assert 'border:3px solid #fff' in pins and 'background:#2563eb' in pins
     assert 'transform:translateY(-100%)' in pins
     # 不再是旧的圆形小标（居中定位 + 22px + 圆角 999px）

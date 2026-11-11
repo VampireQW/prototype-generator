@@ -11,7 +11,7 @@
     const style = document.createElement('style');
     style.setAttribute('data-prototype-owned', '');
     style.textContent = `
-.__review_pin{position:absolute;display:grid;place-items:center;min-width:36px;height:36px;padding:0 8px;border:3px solid #fff;border-radius:50% 50% 50% 2px;background:#2563eb;color:#fff;font:600 13px/1 "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;font-variant-numeric:tabular-nums;box-shadow:0 8px 24px rgba(16,24,40,.24);transform:translateY(-100%);cursor:pointer;pointer-events:auto;}
+.__review_pin{position:absolute;box-sizing:border-box;display:grid;place-items:center;min-width:var(--pin-size,36px);height:var(--pin-size,36px);padding:0 var(--pin-padding,8px);border:3px solid #fff;border-radius:50% 50% 50% 2px;background:#2563eb;color:#fff;font:600 var(--pin-font,13px)/1 "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif;font-variant-numeric:tabular-nums;box-shadow:0 8px 24px rgba(16,24,40,.24);transform:translateY(-100%);cursor:pointer;pointer-events:auto;}
 .__review_pin:hover{background:#1d4ed8;}
 .__review_pin:not(.__stale){background:var(--pin-fill);color:var(--pin-ink);border-color:var(--pin-stroke);}
 .__review_pin:not(.__stale):hover{background:var(--pin-fill);filter:brightness(.96);}
@@ -35,6 +35,8 @@
 .__review_pop p{margin:0 0 10px;overflow-wrap:anywhere;}
 .__review_pop img{display:block;max-width:100%;height:auto;margin:8px 0;border-radius:6px;}
 .__review_pop h1{font-size:18px;}.__review_pop h2{font-size:16px;}.__review_pop h3,.__review_pop h4{font-size:14px;}
+.__review_pop ol{list-style-type:decimal;}.__review_pop ol ol{list-style-type:lower-alpha;}.__review_pop ol ol ol{list-style-type:lower-roman;}
+.__review_pop_title{display:block;font-weight:700;margin:0 0 8px;overflow-wrap:anywhere;}
 .__review_pop ul,.__review_pop ol{padding-left:20px;margin:6px 0 10px;}.__review_pop li.task{list-style:none;margin-left:-18px;}
 .__review_pop code{font-family:ui-monospace,Consolas,monospace;font-size:13px;background:rgba(127,127,127,.16);padding:1px 5px;border-radius:4px;}
 .__review_pop pre{background:rgba(127,127,127,.14);padding:10px;border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;}.__review_pop pre code{background:none;padding:0;}
@@ -217,6 +219,7 @@
         popNoteId = note.id;
         pin.setAttribute('aria-expanded', 'true');
         popBody.innerHTML = R.renderBody ? R.renderBody(note) : (note.body || '');
+        if (note.title) { const title = document.createElement('strong'); title.className = '__review_pop_title'; title.textContent = note.title; popBody.prepend(title); }
         popBody.scrollTop = 0;
         pop.style.display = 'block';
         pop.style.visibility = 'hidden';
@@ -285,11 +288,12 @@
                 pinsById.set(n.id, pin);
                 layer.appendChild(pin);
             }
-            window.ProtoAppearance?.applyPin(pin, n);
+            window.ProtoAppearance?.applyPin(pin, n, R.pinStyle);
+            window.ProtoAppearance?.applyPinSize?.(pin, R.pinStyle);
             pin.classList.toggle('__review_selected', n.id === selectedNoteId);
             pin.setAttribute('aria-current', String(n.id === selectedNoteId));
             if (pin.textContent !== String(n.displayNumber)) pin.textContent = n.displayNumber;
-            pin.setAttribute('aria-label', `标注 ${n.displayNumber}`);
+            pin.setAttribute('aria-label', `标注 ${n.displayNumber}${n.title ? '：' + n.title : ''}`);
             pin.setAttribute('aria-haspopup', 'dialog');
             pin.setAttribute('aria-controls', '__review_popover');
             pin.setAttribute('aria-expanded', String(popNoteId === n.id && pop?.style.display === 'block'));

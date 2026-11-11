@@ -309,6 +309,14 @@ def validate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(bundle.get("revision"), int) or bundle["revision"] < 0:
         raise ValueError("revision 无效")
     project = bundle.get("project") or {}
+    pin_style = project.get('pinStyle')
+    if 'pinStyle' in project:
+        if not isinstance(pin_style, dict) or set(pin_style) - {'color', 'size'}:
+            raise ValueError('序号样式无效')
+        if 'color' in pin_style and (not isinstance(pin_style['color'], str) or not re.fullmatch(r'#[0-9a-fA-F]{6}', pin_style['color'])):
+            raise ValueError('序号统一颜色无效')
+        if 'size' in pin_style and (type(pin_style['size']) is not int or not 24 <= pin_style['size'] <= 56):
+            raise ValueError('序号大小须在 24 至 56 之间')
     pages = project.get("pages")
     if not project.get("id") or not isinstance(pages, list):
         raise ValueError("项目页面清单无效")
@@ -344,6 +352,10 @@ def validate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
         states = page.get("states")
         if not isinstance(states, list) or not states:
             raise ValueError("页面状态清单无效")
+        if 'stateOrder' in page:
+            order = page['stateOrder']
+            if not isinstance(order, list) or any(not isinstance(s, str) or not s for s in order) or len(set(order)) != len(order):
+                raise ValueError('状态排序必须为不重复的状态 ID 数组')
         for state in states:
             if not state.get("id") or state.get("kind") not in {"default", "adapter", "manual"}:
                 raise ValueError("状态定义无效")
@@ -371,6 +383,8 @@ def validate_bundle(bundle: dict[str, Any]) -> dict[str, Any]:
                 raise ValueError("条目引用了未登记状态")
     numbers = set()
     for note in bundle['prd']['annotations']:
+        if 'title' in note and (not isinstance(note['title'], str) or len(note['title']) > 120 or re.search(r'[\x00-\x1f\x7f]', note['title'])):
+            raise ValueError('标注标题最多 120 个字符，不能包含换行或控制字符')
         if isinstance(note.get('anchor'), dict) and 'revealSteps' in note['anchor']:
             validate_reveal_steps(note['anchor']['revealSteps'])
         if note.get('color') is not None and not re.fullmatch(r'#[0-9a-fA-F]{6}', str(note['color'])):
@@ -416,7 +430,7 @@ def bundle_from_docs(docs: dict[str, Any]) -> dict[str, Any]:
         "schemaVersion": SCHEMA_VERSION,
         "revision": revision,
         "project": {"id": p["id"], "name": p.get("name", "原型项目"), "pages": p.get("pages", []),
-                    **{key: p[key] for key in ('source', 'aiProjectId', 'previewType', 'clients', 'defaultPage', 'navigationManifestHash') if key in p}},
+                    **{key: p[key] for key in ('source', 'aiProjectId', 'previewType', 'clients', 'defaultPage', 'navigationManifestHash', 'pinStyle') if key in p}},
         "prd": {"documents": prd.get("documents", []), "annotations": prd.get("annotations", []),
                 **({'deletedAnnotations': prd['deletedAnnotations']} if 'deletedAnnotations' in prd else {})},
         "changes": {"items": changes.get("items", [])},

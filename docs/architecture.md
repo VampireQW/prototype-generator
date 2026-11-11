@@ -1,5 +1,43 @@
 # 架构设计 (Architecture)
 
+## 标注标题与序号样式（2026-11-05）
+
+prd.annotations[].title 为可选纯文本，最多 120 字且不含控制字符；不合并进 body。工作台使用原生输入框，评审壳 / 浮窗使用 textContent 展示，原始 HTML 不执行。标题保存复用串行 protoSave 和 revision 冲突保护，确认锁定沿用原协议；失败不覆盖输入。标题以独立 key 复用 Markdown 草稿存储，刷新恢复，原值与草稿基线不一致时阻止覆盖；Esc 放弃草稿。bundle 的原结构和 schemaVersion 保持兼容，缺字段时旧项目无需迁移。
+
+project.pinStyle 为可选对象，仅含可选十六进制 color 和 24–56 的整数 size。序号外观模块统一归一化、前景对比和尺寸变量，viewer 宿主及评审桥向 iframe 下发当前项目样式；实际气泡尺寸参与锚点边界和避让计算，不通过 transform 缩放位置。大小只影响原型气泡，统一颜色撤销后回退至每条原有配色。元数据读写保留此字段，review_data 及评审初始化消息携带设置；纯净版不受 PRD 样式影响。
+
+研发导出的轻量 Markdown 列表解析保留缩进栈、父列表项、混合类型和续行，CSS 按有序列表祖先层级选择 decimal / lower-alpha / lower-roman；编辑器与阅读态使用同一层级规则。标题与样式计入研发发布内容指纹，更新说明分别记录标题更新与序号外观更新。
+
+## 页内状态同步（2026-11-04）
+
+data-proto-state 是原型向宿主报告实际状态的公共协议。业务自己的统一切换函数与 PrototypeBridge.enter 都更新同一份界面 / 状态；不能只让工作台的主动切换更新属性。可选的同步 getState() 从实际状态模型返回已登记 ID，proto-navigation 通过交互事件及 100ms 轻量读取同步该属性，捕获异步变化；不调用 enter，不猜测 CSS 或文案含义。不可读、Promise 和未知 ID 不覆盖最后已确认状态；重初始化清理旧监听和定时器，保留桥对象。
+
+viewer 为旧适配页及普通多状态页加载同一运行时，extWatchState 先校验登记范围，再保留旧范围草稿、清除选中标注和气泡，刷新导航 / URL、PRD 与热点；不重新加载业务 iframe。仅实现属性协议的原型保持兼容，不增加无用读取循环。
+
+研发导出给同类页面内嵌运行时及页面状态配置，评审壳已有的 state 回传负责跟随导航与右侧 PRD，HTTP 和 file:// 共用。proto-navigation.js 加入发布运行时指纹，避免组件升级后发布内容版本不变。已发布的旧站点需要重新发布以获得新的读取能力。
+
+## 干净检出启动与编码边界（2026-11-04）
+
+launcher.py 仅依赖标准库，要求 Python 3.10+。基础解释器只创建 / 调度项目 .venv，pip 始终在该环境内运行；requirements.txt 的 SHA-256 与已安装版本、可导入性共同决定是否重装，失败不写成功标记。--check 只准备 / 检查，--no-install 不创建环境或联网安装；成功后以 UTF-8 环境运行 server.py，原有实例身份验证与交接机制保留。
+
+app_runtime 在导入其他服务模块前设置 stdout / stderr 为 UTF-8。load_local_json 按字节交给标准 JSON 解码器，支持 UTF-8 / BOM、UTF-16 / UTF-32，要求顶层对象；仅缺失文件时排他创建示例副本。非法文件不回退为空配置、不覆盖、不输出含凭据的原文。server 的 config / models 加载和 GitHub 配置保存统一使用该入口，API 与业务数据格式不变。
+
+.gitattributes 约定文本 LF、bat / cmd CRLF，vendor 保留原始字节；.editorconfig 约定 UTF-8。Windows 入口本身只含 ASCII，避免 CMD 按旧代码页解析中文脚本；.venv 与本机配置不进入 Git / Docker。Docker 直接安装 requirements.txt 并启动 server，容器内不额外创建虚拟环境。
+
+## 状态显示顺序（2026-11-04）
+
+页面可选 `stateOrder: string[]` 保存显示顺序，`states` 保持原定义顺序，继续承担既有默认进入状态的语义。proto_meta 校验排序为无重复非空字符串数组；orderedStates 按已存 ID 取当前真实状态，忽略已删除的旧 ID，并将新状态按定义顺序补在末尾。未排序项目按原状态数组显示，无需迁移。
+
+共用导航的 reorderProject / reorderError 新增 kind=state，payload 使用 pageId、id、targetId 和 before / after，仅允许同页已存在状态排序。乐观预览替换目标页的 stateOrder，不改旧项目对象或状态对象，保证失败可回滚。指针候选与键盘兄弟节点均按 pageId 限定；拖动后抑制点击，不触发状态切换。viewer 经原 protoSave 队列与 CAS 接口保存，编辑忙碌时拒绝排序。
+
+public_navigation 将 stateOrder 加入公开导航白名单，纯净演示入口与研发评审壳共用 orderedStates，默认入口仍取原状态定义。声明更新不覆盖独立的显示排序，序号 / 热区与 stateId 绑定保持不变。
+
+## 状态名称与稳定身份（2026-11-04）
+
+共用导航组件通过可选 onEditState 回调暴露编辑入口，仅工作台提供该回调；演示导航与发布 / 导出的只读导航保持只读。updateStateTitle 校验标题后，只更新匹配状态的 title 与 titleUserSet 标记，不改 id / kind / interactionHints 等字段。viewer 使用既有 protoSave 队列与 `/api/proto/save` 的 expectedRevision 保存，无新增接口。
+
+`prototype_manifest.apply_manifest` 遇到 titleUserSet 时保留该状态的显示标题，仍更新声明中的其他字段，防止重新扫描回退名称。状态数据继续保存在原 project.json 的 states 数组，元数据版本不变；旧项目无需迁移，只有用户新执行改名才写入此标记。导出 / 评审导航按原状态 title 读取，不改变切换消息或锚点。
+
 ## 发布版本与更新说明（2026-11-03）
 
 `publication_versions.py` 独立负责规范化快照、事实差异、说明草稿和基线。`.prototype/releases/<target-hash>/` 按 owner / repo / branch / remoteId 隔离：`preview.json` 限定可编辑变化 ID，`draft.json` 只存指纹匹配的说明文本，`state.json` 保存最近成功发布和部署状态，`snapshots/*.json.gz` 保存最近 10 次轻量语义快照（无变化重发不挤占变化历史，当前快照仍保留）。不复制图片或改写三文件协议及 PRD。

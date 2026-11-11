@@ -166,7 +166,7 @@ def source_files(root):
 
 def runtime_version():
     base=Path(__file__).parent
-    names=['review_shell.html','proto-anchors.js','proto-order.js','review-bridge.js','review-pins.js',
+    names=['review_shell.html','proto-anchors.js','proto-order.js','proto-navigation.js','review-bridge.js','review-pins.js',
            'proto-hotspots.js','proto-appearance.js','publication-updates.js','publication-updates.css','change-locator.js']
     return digest({name:hashlib.sha256((base/'src'/name).read_bytes()).hexdigest() for name in names if (base/'src'/name).is_file()})
 
@@ -197,7 +197,8 @@ def capture(root,bundle,mode='review'):
         files[rel]=row
     snap={'schemaVersion':SCHEMA,'projectId':bundle['project']['id'],'name':bundle['project'].get('name','原型项目'),
           'mode':mode,'pages':pages,'navigation':clean({k:bundle['project'][k] for k in ('previewType','clients','defaultPage') if k in bundle['project']}),'documents':sorted(docs,key=lambda d:d.get('id','')),
-          'annotations':sorted(notes,key=lambda n:n['id']),'files':files,'runtime':runtime_version() if mode=='review' else ''}
+          'annotations':sorted(notes,key=lambda n:n['id']),'files':files,'runtime':runtime_version() if mode=='review' else '',
+          **({'pinStyle':clean(bundle['project']['pinStyle'])} if mode=='review' and 'pinStyle' in bundle['project'] else {})}
     snap['contentVersion']=digest(snap)
     return snap
 
@@ -258,14 +259,18 @@ def compare(before,after):
         add('page','项目名称调整',next(iter(pages),''),old=before.get('name'),new=after.get('name'))
     if 'navigation' in before and before.get('navigation')!=after.get('navigation'):
         add('page','导航分组或默认预览设置更新',next(iter(pages),''))
+    if before.get('pinStyle',{}) != after.get('pinStyle',{}):
+        add('page','页面标注序号颜色或大小调整',next(iter(pages),''),affected=set(pages))
     for key,kind,field,label in [('annotations','annotation','body','标注'),('documents','document','markdown','页面需求')]:
         old={n['id']:n for n in before.get(key,[])}; new={n['id']:n for n in after.get(key,[])}
         for nid in sorted(set(old)|set(new)):
             a=old.get(nid); b=new.get(nid); n=b or a
             if n['pageId'] not in pages or n['pageId'] not in old_pages: continue
             if a==b: continue
+            if kind=='annotation' and a and b and a.get('title','') != b.get('title',''):
+                add('annotation','标注标题更新',n['pageId'],n.get('stateId'),old=a.get('title',''),new=b.get('title',''),note_id=nid)
             if a and b and a.get(field)==b.get(field):
-                if kind=='annotation': add('annotation-position','标注位置或展开入口调整',n['pageId'],n.get('stateId'),note_id=nid)
+                if kind=='annotation' and {k:v for k,v in a.items() if k!='title'} != {k:v for k,v in b.items() if k!='title'}: add('annotation-position','标注位置或展开入口调整',n['pageId'],n.get('stateId'),note_id=nid)
                 continue
             action='新增' if not a else '删除' if not b else '更新'
             old_text=(a or {}).get(field,'');new_text=(b or {}).get(field,'')
@@ -452,7 +457,7 @@ def remote_baseline(session,target):
         'mode':'review','pages':[clean(p) for p in data['pages']],
         'documents':[clean({k:v for k,v in d.items() if k!='confirmed'}) for d in data.get('documents',[])],
         'annotations':[clean({k:v for k,v in n.items() if k not in {'number','confirmed'}}) for n in data.get('annotations',[])],
-        'files':files,'runtime':None}
+        'files':files,'runtime':None,**({'pinStyle':clean(data['pinStyle'])} if 'pinStyle' in data else {})}
     snapshot['contentVersion']=digest(snapshot)
     return {'snapshot':snapshot,'release':{'sequence':0,'releaseId':'','publishedAt':data.get('publishedAt',''),'prototypeBase':'proto/'},'history':[]}
 

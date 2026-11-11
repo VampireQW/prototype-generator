@@ -74,7 +74,7 @@
 .pa-layer[data-hidden]{display:none;}
 .pa-layer[data-theme="light"]{--pa-ring:#0070f3;--pa-surface:#ffffff;--pa-text:#171717;--pa-muted:#666666;--pa-border:#888888;--pa-control:#888888;--pa-hover:#f5f5f5;--pa-scroll:#888888;--pa-error:#c50000;--pa-shadow:0 1px 1px #00000005,0 8px 16px -4px #0000000a,0 24px 32px -8px #0000000f;}
 .pa-layer *, .pa-layer *::before{box-sizing:border-box;}
-.pa-pin{position:absolute;display:grid;place-items:center;min-width:36px;height:36px;margin:0;padding:0 8px;border:3px solid var(--pa-on-accent);border-radius:50% 50% 50% 2px;background:var(--pa-accent);color:var(--pa-on-accent);font:600 13px/1 var(--pa-font);font-variant-numeric:tabular-nums;box-shadow:var(--pa-shadow);transform:translateY(-100%);cursor:grab;touch-action:none;user-select:none;pointer-events:auto;}
+.pa-pin{position:absolute;box-sizing:border-box;display:grid;place-items:center;min-width:var(--pin-size,36px);height:var(--pin-size,36px);margin:0;padding:0 var(--pin-padding,8px);border:3px solid var(--pa-on-accent);border-radius:50% 50% 50% 2px;background:var(--pa-accent);color:var(--pa-on-accent);font:600 var(--pin-font,13px)/1 var(--pa-font);font-variant-numeric:tabular-nums;box-shadow:var(--pa-shadow);transform:translateY(-100%);cursor:grab;touch-action:none;user-select:none;pointer-events:auto;}
 .pa-pin::before{content:"";position:absolute;inset:-7px;}
 .pa-layer .pa-pin:not(.pa-stale){background:var(--pin-fill,var(--pa-accent));color:var(--pin-ink,var(--pa-on-accent));border-color:var(--pin-stroke,var(--pa-on-accent));}
 .pa-layer .pa-pin[data-note-id]:hover{background:var(--pin-fill,var(--pa-accent));filter:brightness(.96);}
@@ -206,6 +206,8 @@ html[data-proto-pick-cursor],html[data-proto-pick-cursor] :not([data-prototype-o
             hoverBox.setAttribute('data-proto-toolbar-avoid', '');
             pinLayer.appendChild(hoverBox);
         }
+        host()?.appearance?.applyPin(hoverBox, notes.find(n => n.id === (pending?.rebindId || window.__paRebindId)), host()?.pinStyle?.());
+        host()?.appearance?.applyPinSize?.(hoverBox, host()?.pinStyle?.());
         return hoverBox;
     }
 
@@ -219,7 +221,7 @@ html[data-proto-pick-cursor],html[data-proto-pick-cursor] :not([data-prototype-o
         box.classList?.add('pa-cursor-preview');
         box.toggleAttribute?.('data-proto-toolbar-avoid', false);
         box.style.left = Math.max(4, Math.min(x, viewWidth() - (box.offsetWidth || 36) - 4)) + 'px';
-        box.style.top = Math.max(40, Math.min(y, viewHeight() - 4)) + 'px';
+        box.style.top = Math.max((box.offsetHeight || host()?.pinStyle?.()?.size || 36) + 4, Math.min(y, viewHeight() - 4)) + 'px';
         box.style.display = '';
         document.documentElement.toggleAttribute?.('data-proto-pick-cursor', true);
     }
@@ -238,7 +240,7 @@ html[data-proto-pick-cursor],html[data-proto-pick-cursor] :not([data-prototype-o
         const found = ProtoAnchors.point(pending);
         if (!found.point || !found.point.visible) { box.style.display = 'none'; return; }
         box.style.left = Math.max(4, Math.min(found.point.x, viewWidth() - (box.offsetWidth || 36) - 4)) + 'px';
-        box.style.top = Math.max(40, Math.min(found.point.y, viewHeight() - 4)) + 'px';
+        box.style.top = Math.max((box.offsetHeight || host()?.pinStyle?.()?.size || 36) + 4, Math.min(found.point.y, viewHeight() - 4)) + 'px';
         box.style.display = '';
     }
 
@@ -652,20 +654,21 @@ html[data-proto-pick-cursor],html[data-proto-pick-cursor] :not([data-prototype-o
                 pinLayer.appendChild(pin);
             }
             pin.classList.toggle('pa-stale', !found.point);
-            host()?.appearance?.applyPin(pin, note);
+            host()?.appearance?.applyPin(pin, note, host()?.pinStyle?.());
+            host()?.appearance?.applyPinSize?.(pin, host()?.pinStyle?.());
             pin.classList.toggle('pa-selected', note.id === selectedId);
             pin.toggleAttribute('data-proto-toolbar-avoid', note.id === selectedId);
             pin.setAttribute('aria-pressed', String(note.id === selectedId));
-            pin.setAttribute('aria-label', `标注 ${numberOf(note)}：${note.body}`);
+            pin.setAttribute('aria-label', `标注 ${numberOf(note)}：${note.title || note.body}`);
             pin.textContent = numberOf(note);
-            pin.title = found.point ? `标注 ${numberOf(note)}` : (found.reason || '目标待重新定位');
+            pin.title = found.point ? `标注 ${numberOf(note)}${note.title ? '：' + note.title : ''}` : (found.reason || '目标待重新定位');
             // 定不到落点（目标被折叠/切页签隐藏、或已失锚）的序号一律隐藏，不再摆成左上角灰色网格——
             // 那堆灰序号在用户眼里是 bug；可展开的由引导徽标提示，失锚的在右栏标灰并可从「更多」重新绑定。
             if (!found.point) { pin.style.visibility = 'hidden'; return; }
             const x = found.point.x, y = found.point.y;
             const placed = found.point.visible && ProtoAnchors.pinPosition
                 ? ProtoAnchors.pinPosition(x, y, pin.offsetWidth || 36, pin.offsetHeight || 36, occupied, viewWidth(), viewHeight())
-                : { x: Math.max(4, Math.min(x, viewWidth() - pin.offsetWidth - 4)), y: Math.max(40, Math.min(y, viewHeight() - 4)) };
+                : { x: Math.max(4, Math.min(x, viewWidth() - pin.offsetWidth - 4)), y: Math.max((pin.offsetHeight || 36) + 4, Math.min(y, viewHeight() - 4)) };
             pin.style.left = placed.x + 'px';
             pin.style.top = placed.y + 'px';
             pin.style.visibility = found.point.visible ? '' : 'hidden';
@@ -756,7 +759,7 @@ html[data-proto-pick-cursor],html[data-proto-pick-cursor] :not([data-prototype-o
         e.preventDefault();
         drag.pin.classList.add('pa-dragging');
         drag.pin.style.left = Math.max(4, Math.min(drag.x + dx, viewWidth() - drag.pin.offsetWidth - 4)) + 'px';
-        drag.pin.style.top = Math.max(40, Math.min(drag.y + dy, viewHeight() - 4)) + 'px';
+        drag.pin.style.top = Math.max((drag.pin.offsetHeight || 36) + 4, Math.min(drag.y + dy, viewHeight() - 4)) + 'px';
     }
 
     async function endDrag(e) {

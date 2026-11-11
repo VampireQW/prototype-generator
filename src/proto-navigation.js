@@ -1,4 +1,4 @@
-/* 旧单页原型的状态适配；工作台和静态评审壳共用。 */
+/* 页面状态同步与旧单页适配；工作台和静态评审壳共用。 */
 (() => {
     'use strict';
     if (window.ProtoNavigation) return;
@@ -6,10 +6,37 @@
 
     function init(config = {}) {
         active?.destroy();
+        active = null;
         const states = Array.isArray(config.states) ? config.states : [];
-        if (config.aiNavigation !== 'legacy' || !states.some(s => s.legacyPage || s.legacyType)) return null;
         const root = document.documentElement;
         const originalBridge = window.PrototypeBridge;
+        if (typeof originalBridge?.getState === 'function') {
+            const known = new Set(states.map(state => state.id));
+            let destroyed = false;
+            function sync() {
+                if (destroyed) return;
+                try {
+                    const id = window.PrototypeBridge?.getState?.();
+                    if (typeof id !== 'string' || !known.has(id)) return;
+                    if (config.pageId) root.dataset.protoPage = config.pageId;
+                    if (root.dataset.protoState !== id) root.dataset.protoState = id;
+                } catch (_) { /* 页面加载 / 切换中，保留最后一个已确认状态。 */ }
+            }
+            const refresh = () => { Promise.resolve().then(sync); };
+            for (const type of ['click', 'input', 'change']) document.addEventListener(type, refresh);
+            for (const type of ['hashchange', 'popstate']) window.addEventListener(type, refresh);
+            // 兼容异步流程及代码切换；只读取已声明状态，不调用 enter 或猜测业务状态。
+            const timer = window.setInterval(sync, 100);
+            active = { sync, destroy() {
+                destroyed = true;
+                window.clearInterval(timer);
+                for (const type of ['click', 'input', 'change']) document.removeEventListener(type, refresh);
+                for (const type of ['hashchange', 'popstate']) window.removeEventListener(type, refresh);
+            } };
+            sync();
+            return active;
+        }
+        if (config.aiNavigation !== 'legacy' || !states.some(s => s.legacyPage || s.legacyType)) return null;
         if (typeof originalBridge?.enter === 'function') return originalBridge;
         let destroyed = false, timer = null, unwatch = null;
         const hasDefault = states.some(s => s.id === 'default' && !s.legacyPage);

@@ -195,7 +195,19 @@
         function visit(page) {if (!page || seen.has(page.id)) return; seen.add(page.id); result.push(page); (project.pages || []).filter(p => p.parentId === page.id).forEach(visit);}
         visit((project.pages || []).find(p => p.id === id)); return result;
     }
+    function orderedStates(page) {
+        const states=page?.states || [],records=new Map(states.map(s=>[s.id,s]));
+        const ordered=[];
+        for(const id of Array.isArray(page?.stateOrder)?page.stateOrder:[]){const state=records.get(id);if(state){ordered.push(state);records.delete(id);}}
+        return ordered.concat(states.filter(s=>records.has(s.id)));
+    }
     function reorderError(project, request) {
+        if(request.kind==='state'){
+            const page=project.pages?.find(p=>p.id===request.pageId && !p.trashedAt);
+            if(!page || !page.states?.some(s=>s.id===request.id) || !page.states.some(s=>s.id===request.targetId))return '状态已变化，请重新拖动';
+            if(!['before','after'].includes(request.position))return '状态只支持同一页面内上下排序';
+            return request.id===request.targetId?'请选择其他状态':'';
+        }
         if (request.kind === 'client') return '';
         const source = project.pages?.find(p => p.id === request.id), target = project.pages?.find(p => p.id === request.targetId);
         if (!source || source.trashedAt) return '页面已移除';
@@ -215,7 +227,7 @@
         return depth + height(source) - 1 > 3 ? '最多支持三级页面，当前子树会超过三级' : '';
     }
     function reorderProject(project, request) {
-        if (!['page', 'client'].includes(request.kind)) return false;
+        if (!['page', 'client', 'state'].includes(request.kind)) return false;
         if (request.kind === 'client') {
             const records = [...(project.clients || [])], source = records.findIndex(p => p.id === request.id), target = records.findIndex(p => p.id === request.targetId);
             if (source < 0 || target < 0 || source === target || !['before', 'after'].includes(request.position)) return false;
@@ -225,6 +237,12 @@
             project.clients = records; return true;
         }
         if (reorderError(project, request)) return false;
+        if(request.kind==='state'){
+            const page=project.pages.find(p=>p.id===request.pageId),states=orderedStates(page),ids=states.map(s=>s.id);
+            const next=ids.filter(id=>id!==request.id);next.splice(next.indexOf(request.targetId)+(request.position==='after'?1:0),0,request.id);
+            if(next.every((id,index)=>id===ids[index]))return false;
+            project.pages=project.pages.map(p=>p===page?{...p,stateOrder:next}:p);return true;
+        }
         const tree = pageTree(project), target = tree.nodes.get(request.targetId)?.page;
         const moved = subtreePages(project, request.id).map(p => ({...p})), ids = new Set(moved.map(p => p.id));
         const records = project.pages.filter(p => !ids.has(p.id));
@@ -259,6 +277,14 @@
         if(page.role==='launcher'||(parent&&(parent.clientId || '')!==(page.clientId || '')))delete page.parentId;
         if(page.role==='launcher')for(const child of project.pages)if(child.parentId===id)delete child.parentId;
     }
+    function updateStateTitle(project, pageId, stateId, value) {
+        const title=typeof value==='string'?value.trim():'';
+        if(!title || title.length>100 || /[\u0000-\u001f\u007f]/.test(title))throw new Error(!title?'请填写状态名称':'状态名称最多 100 个字符，不能包含换行或控制字符');
+        const page=project.pages.find(p=>p.id===pageId && !p.trashedAt),state=page?.states?.find(s=>s.id===stateId);
+        if(!state)throw new Error('状态已移除，请重新打开项目');
+        if(title===(state.title || state.id))return false;
+        state.title=title;state.titleUserSet=true;return true;
+    }
     function mount(host, initial) {
         let options = initial, filter = '', closed = new Set(['__launchers']), closedPages = new Set(), filterControl = null, drag = null, saving = false, suppressClick = false;
         host.classList.add('ppn');
@@ -270,7 +296,7 @@
         }
         function render() {
             const focused = document.activeElement?.closest('[data-ppn-key]')?.dataset.ppnKey;
-            const { project, currentPage, currentState, onSelect, onEdit, onReorder, annotations = [] } = options;
+            const { project, currentPage, currentState, onSelect, onEdit, onEditState, onReorder, annotations = [] } = options;
             const pages = (project.pages || []).filter(p=>!p.trashedAt), clients = project.clients || [], tree = pageTree(project);
             if (filter && !clients.some(c => c.id === filter)) filter = '';
             filterControl?.destroy(); filterControl = null; host.replaceChildren();
@@ -342,10 +368,18 @@
                         const expand=button('ppn-expand','',()=>{closedPages.has(page.id)?closedPages.delete(page.id):closedPages.add(page.id);render();});
                         expand.innerHTML=chevron;expand.setAttribute('aria-label',(nested.hidden?'展开':'收起')+' '+title.textContent+'的子页面');expand.setAttribute('aria-expanded',String(!nested.hidden));expand.setAttribute('aria-controls',nested.id);expand.dataset.ppnKey='expand:'+page.id;item.append(expand);
                     }
-                    if ((page.states || []).length>1) for (const state of page.states) {
+                    if ((page.states || []).length>1) for (const state of orderedStates(page)) {
                         const st=button('ppn-state',state.title || state.id,()=>onSelect(page.id,state.id));
                         st.dataset.pageId=page.id;st.dataset.stateId=state.id;st.dataset.scope=page.id+'\n'+state.id;st.dataset.ppnKey='state:'+page.id+':'+state.id;
-                        st.style.setProperty('--ppn-depth',depth-1);st.setAttribute('aria-current',String(page.id===currentPage && state.id===currentState));node.append(st);
+                        st.style.setProperty('--ppn-depth',depth-1);st.setAttribute('aria-current',String(page.id===currentPage && state.id===currentState));
+                        if(onReorder){const grip=document.createElement('span');grip.className='ppn-state-grip';grip.innerHTML=dragIcon;grip.setAttribute('aria-hidden','true');st.prepend(grip);st.dataset.ppnDrag='state';st.dataset.dragId=state.id;st.setAttribute('aria-keyshortcuts','Alt+ArrowUp Alt+ArrowDown');st.title='拖动调整状态顺序 · Alt + ↑ / ↓';}
+                        if(onEditState){
+                            const row=document.createElement('div');row.className='ppn-state-wrap';
+                            const edit=button('ppn-edit ppn-state-edit','',event=>{event.stopPropagation();onEditState(page,state,event.currentTarget);});
+                            edit.innerHTML=editIcon;edit.setAttribute('aria-label','修改状态名称：'+(state.title || state.id));edit.title='修改状态名称';edit.dataset.ppnKey='edit-state:'+page.id+':'+state.id;
+                            st.setAttribute('aria-keyshortcuts',(onReorder?'Alt+ArrowUp Alt+ArrowDown ':'')+'F2');st.onkeydown=event=>{if(event.key==='F2'){event.preventDefault();event.stopPropagation();onEditState(page,state,edit);}};
+                            row.append(st,edit);node.append(row);
+                        }else node.append(st);
                     }
                     children.forEach(child=>renderPage(child,nested));if(children.length)node.append(nested);
                 }
@@ -362,13 +396,14 @@
             if (saving || !options.onReorder) return;
             const check = {pages: [...options.project.pages], clients: [...(options.project.clients || [])]};
             const error=reorderError(options.project,request);if(error){live.textContent=error;return;}
-            if (!reorderProject(check, request)) {live.textContent='页面位置未改变';return;}
+            const stateMove=request.kind==='state',label=stateMove?'状态顺序':'页面结构';
+            if (!reorderProject(check, request)) {live.textContent=label+'未改变';return;}
             const previousProject=options.project, save=options.onReorder;
             if(request.position==='inside')closedPages.delete(request.targetId);
-            const moved=check.pages.find(p=>p.id===request.id);if(moved)closed.delete(groupKey(moved,check));
+            const moved=request.kind==='page'&&check.pages.find(p=>p.id===request.id);if(moved)closed.delete(groupKey(moved,check));
             if(filter && moved && groupKey(moved,check)!==filter)filter='';
-            saving = true; options={...options,project:check}; live.textContent = '正在保存页面结构'; render();
-            try {const ok = await save(request); if(ok===false && options.project===check)options={...options,project:previousProject};live.textContent = ok === false ? '移动未保存，已恢复原结构' : '页面结构已保存';}
+            saving = true; options={...options,project:check}; live.textContent = '正在保存'+label; render();
+            try {const ok = await save(request); if(ok===false && options.project===check)options={...options,project:previousProject};live.textContent = ok === false ? '移动未保存，已恢复原结构' : label+'已保存';}
             catch (_) {if(options.project===check)options={...options,project:previousProject};live.textContent = '移动未保存，已恢复原结构';}
             finally {saving = false; render(); if(focusKey) Array.from(host.querySelectorAll('[data-ppn-key]')).find(n=>n.dataset.ppnKey===focusKey)?.focus({preventScroll:true});}
         }
@@ -392,7 +427,7 @@
                 drag.caption=document.createElement('div');drag.caption.className='ppn-drag-caption';drag.ghost.append(drag.caption);
                 drag.ghost.style.width=startRect.width+'px';document.body.append(drag.ghost);
                 drag.line=document.createElement('div');drag.line.className='ppn-drop-line';document.body.append(drag.line);
-                live.textContent=node.dataset.ppnDrag==='client'?'正在拖动端分组':'拖到中间成为子页面，上下边缘同级排序';tick();
+                live.textContent=node.dataset.ppnDrag==='state'?'上下拖动调整状态顺序，仅限当前页面':node.dataset.ppnDrag==='client'?'正在拖动端分组':'拖到中间成为子页面，上下边缘同级排序';tick();
             }
             function tick(schedule=true) {
                 if (!drag?.started) return;
@@ -401,13 +436,13 @@
                 const inPanel=d.x>=r.left-18 && d.x<=r.right+18;
                 if(inPanel){const edge=38;const delta=d.y<r.top+edge?-Math.min(9,(r.top+edge-d.y)/4):d.y>r.bottom-edge?Math.min(9,(d.y-r.bottom+edge)/4):0;host.scrollTop+=delta;}
                 host.querySelectorAll('.ppn-drop-inside,.ppn-drop-invalid,.ppn-root-active').forEach(n=>n.classList.remove('ppn-drop-inside','ppn-drop-invalid','ppn-root-active'));
-                const kind=node.dataset.ppnDrag, candidates=Array.from(host.querySelectorAll('[data-ppn-drag]')).filter(n=>n.dataset.ppnDrag===kind && n.getClientRects().length);
+                const kind=node.dataset.ppnDrag, candidates=Array.from(host.querySelectorAll('[data-ppn-drag]')).filter(n=>n.dataset.ppnDrag===kind && (kind!=='state'||n.dataset.pageId===node.dataset.pageId) && n.getClientRects().length);
                 let closest=null, distance=Infinity, request=null, caption='', inside=false;
                 const rootTarget=kind==='page'&&inPanel?Array.from(host.querySelectorAll('[data-ppn-root]')).find(n=>{const cr=n.getBoundingClientRect();return cr.height&&d.y>=cr.top&&d.y<=cr.bottom;}):null;
                 if(rootTarget){request={kind,id:node.dataset.dragId,targetId:rootTarget.dataset.ppnRoot,position:'root'};closest=rootTarget;caption='移到“'+rootTarget.querySelector('span')?.textContent+'”顶层';}
                 else if(inPanel && d.y>=r.top && d.y<=r.bottom)for(const candidate of candidates){const cr=candidate.getBoundingClientRect(),dist=Math.abs(d.y-(cr.top+cr.height/2));if(dist<distance&&d.y>=cr.top-8&&d.y<=cr.bottom+8){distance=dist;closest=candidate;}}
                 if(closest&&!rootTarget){const cr=closest.getBoundingClientRect(),part=(d.y-cr.top)/cr.height;inside=kind==='page'&&part>.25&&part<.75&&node.dataset.dragGroup!=='__launchers';
-                    const position=inside?'inside':part<.5?'before':'after';request={kind,id:node.dataset.dragId,targetId:closest.dataset.dragId,position};
+                    const position=inside?'inside':part<.5?'before':'after';request={kind,id:node.dataset.dragId,targetId:closest.dataset.dragId,position,...(kind==='state'?{pageId:node.dataset.pageId}:{})};
                     const title=closest.querySelector('.ppn-title')?.textContent || closest.textContent;caption=inside?'移入“'+title+'”':'放在“'+title+'”'+(position==='before'?'之前':'之后');
                 }
                 const error=request?reorderError(options.project,request):'', valid=request&&!error;
@@ -419,10 +454,10 @@
                 }
                 const expandId=valid&&inside?request.targetId:'';
                 if(d.expandId!==expandId){clearTimeout(d.expandTimer);d.expandId=expandId;if(expandId&&closedPages.has(expandId))d.expandTimer=setTimeout(()=>{if(!drag||drag.expandId!==expandId)return;closedPages.delete(expandId);const branch=closest.closest('.ppn-branch'),children=branch.querySelector(':scope > .ppn-children'),toggle=branch.querySelector(':scope > .ppn-item-wrap > .ppn-expand');if(children)children.hidden=false;if(toggle){toggle.setAttribute('aria-expanded','true');toggle.setAttribute('aria-label',toggle.getAttribute('aria-label').replace(/^展开/,'收起'));}},650);}
-                const message=error || caption || '中间移入 · 边缘排序 · 最多三级';d.caption.textContent=message;if(d.message!==message){live.textContent=message;d.message=message;}
+                const message=error || caption || (kind==='state'?'仅限当前页面的状态之间排序':'中间移入 · 边缘排序 · 最多三级');d.caption.textContent=message;if(d.message!==message){live.textContent=message;d.message=message;}
                 d.ghost.classList.toggle('ppn-no-drop',!d.drop);if(schedule)d.raf=requestAnimationFrame(tick);
             }
-            const touchHandle=event.target.closest('.ppn-page-icon');
+            const touchHandle=event.target.closest('.ppn-page-icon,.ppn-state-grip');
             if(event.pointerType==='touch'&&!touchHandle) drag.timer=setTimeout(start,300);
             window.addEventListener('pointermove', e=>{if(!drag||e.pointerId!==drag.pointerId)return;drag.x=e.clientX;drag.y=e.clientY;if(!drag.started&&Math.hypot(e.clientX-drag.startX,e.clientY-drag.startY)>6){if(event.pointerType==='touch'&&!touchHandle){endDrag(true);return;}start();}if(drag?.started)e.preventDefault();},{passive:false,signal:controller.signal});
             window.addEventListener('pointerup',e=>{if(drag&&e.pointerId===drag.pointerId){drag.x=e.clientX;drag.y=e.clientY;if(drag.started)tick(false);endDrag();}},{signal:controller.signal});
@@ -439,12 +474,12 @@
             if(!event.altKey||!['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.key)||!options.onReorder)return;
             const node=event.target.closest('[data-ppn-drag]');if(!node)return;event.preventDefault();event.stopImmediatePropagation();
             const kind=node.dataset.ppnDrag,id=node.dataset.dragId,tree=pageTree(options.project),branch=tree.nodes.get(id);
-            const siblings=Array.from(host.querySelectorAll('[data-ppn-drag]')).filter(n=>n.dataset.ppnDrag===kind && (kind==='client'||(n.dataset.dragGroup===node.dataset.dragGroup&&n.dataset.parentId===node.dataset.parentId)));
+            const siblings=Array.from(host.querySelectorAll('[data-ppn-drag]')).filter(n=>n.dataset.ppnDrag===kind && (kind==='state'?n.dataset.pageId===node.dataset.pageId:kind==='client'||(n.dataset.dragGroup===node.dataset.dragGroup&&n.dataset.parentId===node.dataset.parentId)));
             const i=siblings.indexOf(node);let target,position;
             if(event.key==='ArrowLeft'&&kind==='page'){target=branch?.parentId;position='after';}
             else if(event.key==='ArrowRight'&&kind==='page'){target=siblings[i-1]?.dataset.dragId;position='inside';}
             else if(['ArrowUp','ArrowDown'].includes(event.key)){target=siblings[i+(event.key==='ArrowUp'?-1:1)]?.dataset.dragId;position=event.key==='ArrowUp'?'before':'after';}
-            if(target)commit({kind,id,targetId:target,position},node.dataset.ppnKey);
+            if(target)commit({kind,id,targetId:target,position,...(kind==='state'?{pageId:node.dataset.pageId}:{})},node.dataset.ppnKey);
         },true);
         function revealAncestors(pageId){const tree=pageTree(options.project);let node=tree.nodes.get(pageId);while(node?.parentId){closedPages.delete(node.parentId);node=tree.nodes.get(node.parentId);}}
         let revealedPage='';
@@ -471,5 +506,5 @@
         canvas.classList.add('ppn-canvas');canvas.classList.toggle('ppn-mobile',type==='mobile');canvas.classList.toggle('ppn-pad',type==='pad');canvas.classList.toggle('ppn-shell',['mobile','pad'].includes(type) && shell);
         if(type==='pad')previewDevices.set(frame,fitDevice(frame,canvas,shell?1220:1180,shell?860:820));
     }
-    window.ProtoProjectNavigation = {mount, defaultPage, applyPreview, fitDevice, createSelect, positionPopup, reorderProject, reorderError, pageTree, subtreePages, updatePageNavigation, createPageTracking};
+    window.ProtoProjectNavigation = {mount, defaultPage, applyPreview, fitDevice, createSelect, positionPopup, reorderProject, reorderError, pageTree, subtreePages, updatePageNavigation, updateStateTitle, orderedStates, createPageTracking};
 })();

@@ -99,6 +99,7 @@ def review_data(bundle: dict, published_at: str) -> dict:
     return {
         "name": project.get("name", "原型项目"),
         "projectId": project.get("id", ""),
+        **({'pinStyle': project['pinStyle']} if 'pinStyle' in project else {}),
         **({'previewType': project['previewType']} if project.get('previewType') in ('mobile', 'web', 'pad') else {}),
         "revision": bundle.get("revision", 0),
         "publishedAt": published_at,
@@ -186,11 +187,11 @@ def inject_proto_scripts(proto_dir: Path, copied: list[str], project_bundle: dic
         scripts = bundle
         page = next((page for page in (project_bundle or {}).get('project', {}).get('pages', [])
                      if str(page.get('file', '')).replace('\\', '/').casefold() == rel.casefold()), None)
-        if page and page.get('aiNavigation') == 'legacy':
+        if page and (page.get('aiNavigation') == 'legacy' or len(page.get('states', [])) > 1):
             navigation = (BASE_DIR / 'src' / 'proto-navigation.js').read_text(encoding='utf-8')
             if '</script' in navigation.lower():
                 raise ValueError('导航桥含 </script，无法内嵌')
-            config = json.dumps({'pageId': page['id'], 'aiNavigation': page['aiNavigation'], 'states': page['states']}, ensure_ascii=False).replace('</', '<\\/')
+            config = json.dumps({'pageId': page['id'], 'aiNavigation': page.get('aiNavigation'), 'states': page['states']}, ensure_ascii=False).replace('</', '<\\/')
             scripts = (BUNDLE_MARK + '\n<script data-proto-review="navigation-config">window.__PROTO_NAVIGATION__=' + config + ';</script>\n'
                        + '<script data-proto-review="navigation">\n' + navigation + '\n</script>\n' + bundle[len(BUNDLE_MARK):])
         out = inject_bundle(inject_hotspot_bootstrap(text, inline=True), scripts)

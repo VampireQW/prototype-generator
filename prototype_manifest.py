@@ -136,7 +136,7 @@ def apply_manifest(root: Path, bundle: dict, declaration: dict | None = None) ->
                 existing = {'id': requested['id'], 'title': requested.get('title', requested['id']), 'kind': 'adapter'}
                 page['states'].append(existing)
             for key in ('title', 'previewType'):
-                if key in requested:
+                if key in requested and not (key == 'title' and existing.get('titleUserSet')):
                     existing[key] = requested[key]
     by_id = {p['id']: p for p in project['pages']}
     for page in project['pages']:
@@ -164,7 +164,7 @@ def public_navigation(project: dict) -> dict:
         'name': project.get('name', '原型项目'),
         'clients': [{k: c[k] for k in ('id', 'title', 'previewType') if k in c} for c in project.get('clients', [])],
         'defaultPage': project.get('defaultPage', ''),
-        'pages': [{**{k: p[k] for k in ('id', 'title', 'file', 'role', 'clientId', 'previewType', 'priority', 'progress', 'parentId') if k in p},
+        'pages': [{**{k: p[k] for k in ('id', 'title', 'file', 'role', 'clientId', 'previewType', 'priority', 'progress', 'parentId', 'stateOrder') if k in p},
                    'states': [{k: s[k] for k in ('id', 'title', 'previewType') if k in s} for s in p.get('states', [])]}
                   for p in proto_meta.navigation_pages(project.get('pages', []))],
     }

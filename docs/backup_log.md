@@ -1,5 +1,77 @@
 # 备份与回滚日志 (Backup & Rollback Log)
 
+## 手动文案与 Agent 改动冲突恢复（2026-11-11）
+
+修改前的文案后端、编辑器脚本、viewer 资源版本、既有测试与相关文档按相对路径保存在 `backups/20261111_text_edit_rebase/`。恢复对应文件并重启生成器、刷新浏览器可回滚；本次不批量改写用户原型、PRD 或历史记录。新增回归位于 `tests/test_text_edit_browser.py`，验收项目和截图仅写入 `tmp/text-rebase-*`。
+
+## PRD 撰写规范与列表式标注（2026-11-08）
+
+修改前的导入器、服务端 Agent 提示、回归测试、协作 skill 和相关说明按相对路径保存在 `backups/20261108_prd_writing_lists/`。恢复对应文件后，将其中 `agent-skills/prototype-flow/` 的三份 PRD 相关文件同步回工作区 Qoder skill；服务端提示在进程重启后加载。此改动不批量迁移项目数据，验证仅使用隔离测试项目。
+
+## 统一序号预设色板（2026-11-05）
+
+修改前 viewer 与对应文档保存在 backups/20261105_pin_color_presets/。恢复对应文件并刷新工作台即可回滚；本次仅调整颜色选择入口与共用色块样式，不修改元数据协议或历史配色，测试保存仅使用合成项目。
+
+对抗性自审与浏览器验证覆盖：两处色板相同的 10 色、历史自定义色不被覆盖、选中 / 保存 / 刷新、键盘焦点、失败回退、恢复单独配色、大小不变、导出携带颜色、浅 / 暗主题、窄栏换行和触屏触点。相关回归 156 passed、1 deselected，报告 / 截图在 tmp/pin-presets/。
+
+## 标注标题、序号外观与多级列表（2026-11-05）
+
+修改前元数据、发布快照 / 导出、viewer、标注交互、外观、Markdown 样式与编辑入口、评审壳 / 桥 / 气泡、相关既有测试和文档按相对路径保存在 backups/20261105_note_titles_pin_style/。恢复对应文件并移除新增 tests/test_annotation_titles.py 可回滚；新增 title / pinStyle 为可选字段，旧版可忽略，不批量改写历史项目。验证仅在 tmp/note-titles/app/fixture 合成项目保存，不修改用户 PRD、标注、配置或远端发布。
+
+整体回归 781 passed、1 skipped、1 deselected；最终受影响范围复核 144 passed、1 deselected。独立浏览器完成标题保存 / 刷新草稿恢复 / 并发保护 / 故障重试、只读、跨页样式和恢复、实际编辑器三级列表、HTTP / file:// 导出及浮窗验证。实际本机服务已按实例身份交接加载新后端，用户项目 p-b07ee217175f4ec4 只读核对入口与无占位标题，三份元数据哈希保持一致。未向 GitHub 发布测试内容。报告和截图在 tmp/note-titles/。
+
+## 状态编辑入口悬停显示（2026-11-04）
+
+修改前共用导航 CSS、viewer 样式版本和更新日志按相对路径保存在 backups/20261104_state_edit_hover/；工作区 skill 的原样式保存在 workspace-skill/assets。恢复对应文件并刷新工作台即可回滚；本次不修改用户项目、状态名称、PRD 或标注数据。
+
+独立浏览器在实际项目完成浅 / 暗主题、默认隐藏、仅当前行悬停显示、移出隐藏、布局稳定、键盘和鼠标打开 / 取消改名及触屏常显检查。原三份元数据哈希一致，共用样式副本一致；报告与截图在 tmp/state-edit-hover/。
+
+## 页内状态自动跟随（2026-11-04）
+
+修改前共用状态运行时、viewer、研发导出、发布版本指纹、相关测试 / 文档和接入 skill 保存在 backups/20261104_state_follow/；工作区 skill 原副本保存在 workspace-skill。验收项目两份 HTML、brief 和原三份元数据保存在 acceptance-project，并保存元数据 SHA-256。回滚恢复相应文件并移除新增 tests/test_state_follow.py，重启服务、刷新工作台；本轮没有业务数据或 PRD 迁移。
+
+相关回归 175 passed，整体回归 762 passed、1 skipped、1 deselected。隔离工作台、研发 HTTP / file:// 与实际服务均完成验证，报告和截图在 tmp/state-follow。原本机服务通过身份校验交接后加载新后端；真实项目两个状态入口均已调整，三份原型元数据保持一致，未向 GitHub 发布测试内容。
+
+## PRD 移除像素与视觉参数约定（2026-11-04）
+
+修改前 prototype-flow 的入口、prd-import.md 和 prd-writing.md，分别保存至 backups/20261104_prd_no_visual_metrics/agent-skills/prototype-flow/ 与 workspace-skill/；对应文档保留相对路径。恢复这些文件即可回滚规范，本次未改写原型、既有 PRD 或落库工具。
+
+## 状态行悬停拖拽柄（2026-11-04）
+
+修改前共用导航 JS / CSS、viewer 资源版本和相关文档按相对路径保存在 backups/20261104_state_grip/；工作区 skill 原副本另存 workspace-skill/assets。回滚恢复这些文件并刷新工作台，不涉及状态或标注数据迁移。
+
+状态排序 / 改名回归 9 passed。独立浏览器验证浅 / 暗主题的悬停显隐、文字不移位、嵌套状态缩进、从图标实际拖动排序、改名和点击切换通过；只读不显示、触屏显示加大触点通过。本地与分发组件逐字节一致，JS 语法及 diff 空白检查通过。截图与结构化验证位于 tmp/state-grip/，未修改真实用户项目。
+
+## 彩色文字删除边界（2026-11-04）
+
+修改前 src/markdown-editor.js、src/markdown-editor.html、tests/test_prd_editor_browser.py 与变更 / 功能 / 备份文档按相对路径保存在 backups/20261104_color_delete/。修复仅作用于正在输入的编辑器 DOM，未修改用户现有 PRD 或项目数据。
+
+回滚恢复这些文件，移除本次新增任务记录，刷新工作台以重建编辑器。诊断与验证均使用独立静态服务器和内存测试文案，日志在 tmp/color-delete/；没有对真实业务内容执行批量清理。
+
+## 干净拉取与启动编码（2026-11-04）
+
+修改前 server、Windows 启动脚本、Docker / Git 配置、README、相关测试和文档按相对路径保存到 backups/20261104_portable_startup/；protected-sha256.json 仅保存本机配置、注册表、数据库和 Token 文件的哈希，用于确认未触碰原内容，不包含凭据原文。
+
+回滚恢复备份中的文件，移除本次新增 launcher.py、app_runtime.py、config.example.json、.editorconfig、tests/test_portable_startup.py 与任务记录。虚拟环境仅是本机依赖，可保留供直接启动使用；本次未修改真实配置、数据库、项目、标注或远端仓库。验证副本位于 tmp/portable-startup/，不能作为用户项目恢复来源。
+
+## 状态排序（2026-11-04）
+
+修改前 viewer、proto_meta、prototype_manifest、共用导航 JS / CSS 及文档保存到 `backups/20261104_state_order/`，保留相对路径；本地技能导航原副本另存 workspace-skill/assets。该基线包含此前状态改名和 PRD 撰写规范改动。
+
+回滚恢复这些文件并移除新增 tests/test_state_order.py；重启服务、刷新工作台。已保存的页面 stateOrder 只是显示顺序，可保留让旧代码忽略；原 states 数组与状态 ID 未重排，默认入口、PRD 和热区无需恢复。所有验证均使用隔离项目，未重排用户项目。
+
+## 状态名称修改（2026-11-04）
+
+修改前 viewer、prototype_manifest、共用导航 JS / CSS 和对应文档保存在 `backups/20261104_state_rename/`，保留相对路径；工作区 `.qoder` 的导航副本另存 workspace-skill/assets。回滚恢复这些文件并移除新增 tests/test_state_rename.py，重启服务后刷新页面。
+
+功能不迁移或重分配历史状态 ID。已执行的名称修改保存在原 states.title，可继续保留；titleUserSet 为新增的显示名称保护标记。验证仅使用隔离项目，未更改用户项目状态、PRD 或热区。
+
+## PRD 撰写规范（2026-11-04）
+
+修改前的工作区 `.qoder/skills/prototype-flow` 入口 / PRD 导入协议与工具仓库分发副本，分别保存到 `backups/20261104_prd_writing/workspace-skill/` 和 `agent-skills/prototype-flow/`；对应文档保留相对路径。新增 `references/prd-writing.md` 集中维护写作约定，两份入口和引用保持一致。
+
+回滚恢复对应技能入口、prd-import.md 与文档，并移除两份新增 prd-writing.md。未修改服务端代码或用户原型；参考项目 PRD 的只读 SHA-256 记录保存在同一备份目录，完成后核对一致。
+
 ## 发布更新通知与说明（2026-11-03）
 
 修改前核心文件、共享评审模块、发布 / 导出测试和对应文档保存至 `backups/20261103_release_updates/`，沿用相对路径。`src/proto-text-runtime.js` 的原导出接口另存同目录；PRD skill 随服务副本同步前也已备份，保留本地已确认规则。

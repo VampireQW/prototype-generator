@@ -38,3 +38,16 @@ def test_failed_token_storage_preserves_previous_config_and_environment(api, tmp
     assert status == 200 and result['success'] is False and result['tokenStored'] is False
     assert os.environ['PROTOTYPE_GITHUB_TOKEN'] == 'previous-fixture-token'
     assert json.loads(config_file.read_text(encoding='utf-8')) == original
+
+
+@pytest.mark.parametrize('encoding', ['utf-8-sig', 'utf-16'])
+def test_github_config_save_accepts_windows_unicode_settings(api, tmp_path, encoding):
+    config_file = tmp_path / 'fixture-config.json'
+    original = {'server': {'port': 8098}, 'custom': '保留同事的配置'}
+    config_file.write_bytes(json.dumps(original, ensure_ascii=False).encode(encoding))
+    api.namespace.update(CONFIG_FILE=str(config_file))
+    status, result = api.request('/api/github/config', {'username': 'fixture', 'repo': 'fixture'})
+    assert status == 200 and result['success']
+    saved = json.loads(config_file.read_bytes())
+    assert saved['server'] == original['server'] and saved['custom'] == original['custom']
+    assert saved['github'] == {'username': 'fixture', 'repo': 'fixture'}

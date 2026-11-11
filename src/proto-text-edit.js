@@ -44,8 +44,9 @@
         const status = el('p', 'status'); status.className = 'inspector-text-status'; status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
         const actions = el('div'); actions.className = 'inspector-text-actions';
         const save = el('button', 'save', '保存修改'), cancel = el('button', 'cancel', '取消修改'), undo = el('button', 'undo', '撤销上次修改');
-        for (const button of [save, cancel, undo]) button.type = 'button';
-        save.className = 'inspector-text-save'; actions.append(save, cancel, undo); host.replaceChildren(pickerLabel, original, inputLabel, status, actions);
+        const recover = el('button', 'recover', '恢复上次手动文案');
+        for (const button of [save, cancel, undo, recover]) button.type = 'button';
+        save.className = 'inspector-text-save'; actions.append(save, cancel, undo, recover); host.replaceChildren(pickerLabel, original, inputLabel, status, actions);
         const message = (text, error = false) => { status.textContent = text; status.dataset.tone = error ? 'error' : 'normal'; };
         const scopeKey = value => JSON.stringify(value);
         const dirty = () => !!model && model.fields.some((field, i) => model.values[i] !== field.text);
@@ -57,6 +58,8 @@
             save.disabled = !ready || !dirty() || busy;
             cancel.disabled = !ready || !dirty() || busy;
             undo.disabled = !ready || !model.undoId || dirty() || busy;
+            recover.hidden = !model?.previousFields;
+            recover.disabled = !ready || busy;
             undo.title = dirty() ? '先保存或取消当前修改' : '撤销后刷新原型';
             save.textContent = busy ? '处理中…' : '保存修改';
         }
@@ -88,8 +91,8 @@
                 if (!result.ok) throw Error(result.error || '源文件读取失败');
                 if (result.fields.length !== described.nodes.length) throw Error('文案结构已变化，请重新选择');
                 model = { ...described, scope, key: scopeKey(scope), hash: result.hash, file: result.file, fields: result.fields,
-                    values: result.fields.map(f => f.text), undoId: result.undoId };
-                fill(); message('保存到 ' + result.file); return true;
+                    values: result.fields.map(f => f.text), undoId: result.undoId, previousFields: result.previousFields };
+                fill(); message(result.warning || '保存到 ' + result.file); return true;
             } catch (error) { if (ticket === sequence) { message(error.message || '暂不支持手动修改，请使用 AI 修改', true); controls(); } return false; }
         }
         picker.onchange = field;
@@ -104,6 +107,16 @@
             if (busy || !model) return;
             restore(model); model.values = model.fields.map(f => f.text); field(); controls(); message('已取消未保存的修改');
         };
+        recover.onclick = () => {
+            if (busy || !model?.previousFields) return;
+            if (!valid(model)) { message('页面已变化，请重新选择', true); return; }
+            model.values = model.previousFields.map(f => f.text);
+            model.nodes.forEach((item, i) => {
+                const prefix = item.before.match(/^\s*/)[0], suffix = item.before.match(/\s*$/)[0];
+                item.node.nodeValue = prefix + model.values[i] + suffix;
+            });
+            field(); controls(); message('已恢复上次手动文案的预览，点击“保存修改”后生效');
+        };
         save.onclick = async () => {
             if (!model || busy) return;
             const current = model;
@@ -115,6 +128,7 @@
                 const result = await config.request('save', { ...current.scope, target: { ...current.target, texts: [...current.target.texts] }, expectedHash: current.hash, edits });
                 if (!result.ok) throw Error(result.error || '保存失败');
                 current.hash = result.hash; current.undoId = result.undoId; current.fields = result.fields;
+                current.previousFields = null;
                 current.target.texts = result.fields.map(f => f.text); current.values = result.fields.map(f => f.text);
                 for (const item of current.nodes) item.before = item.node.nodeValue;
                 if (result.runtimeEdits) {

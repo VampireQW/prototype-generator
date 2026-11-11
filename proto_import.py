@@ -15,7 +15,7 @@
     "stateId": "default",            # 可省，默认 default；必须是该页已登记的状态
     "document": {"goals":[{"requirementId":"R1","text":"便于手动获取当前列表的最新结果。"}]},
     "hotspots": ["btn-refresh"],      # 明确替换为本次真实交互；省略保留，[] 清空
-    "annotations": [{"protoId":"btn-refresh","items":[{"section":"交互说明","requirementId":"R1","markdown":"1. 点击刷新当前列表。"}]}]
+    "annotations": [{"protoId":"btn-refresh","items":[{"requirementId":"R1","markdown":"1. 点击刷新当前列表。"}]}]
   }],
   "unknowns": ["……"]                 # 待确认清单，只回显不落库
 }
@@ -133,7 +133,8 @@ def scan_proto_ids(html: str) -> dict[str, list[dict[str, Any]]]:
 
 # ---------- 草稿解析 ----------
 
-ANNOTATION_SECTIONS = ('页面显示', '数据流转', '业务规则', '交互说明', '异常情况')
+LEGACY_ANNOTATION_SECTIONS = ('页面显示', '数据流转', '业务规则', '交互说明', '异常情况')
+ANNOTATION_LIST_ITEM = re.compile(r'^([ \t]*)(?:[-*+]|[0-9]{1,9}\.)[ \t]+(?=\S)', re.M)
 
 
 def _text_key(value):
@@ -171,30 +172,42 @@ def render_document(document, allowed, where):
 
 def render_annotation(note, allowed, where):
     if 'body' in note:
-        raise ImportError_(f'{where}：版本 3 不接受整段 body；请将 Markdown 拆成 items，每条选择适用小节并关联本期 requirementId')
+        raise ImportError_(f'{where}：版本 3 不接受整段 body；请将 Markdown 按业务顺序拆成 items，每条关联本期 requirementId')
     items = note.get('items')
     if not isinstance(items, list) or not items:
         raise ImportError_(f'{where}：protoId 与逐条 items 都不能为空')
-    grouped = {}
+    blocks = []
+    previous_is_table = False
     for index, item in enumerate(items):
         label = f'{where}.items[{index}]'
         _reference(item, allowed, label)
-        section, markdown = item.get('section'), item.get('markdown')
-        if section not in ANNOTATION_SECTIONS or not isinstance(markdown, str) or not markdown.strip():
-            raise ImportError_(f'{label}：选择适用的 Markdown 小节并填写单条内容，不凑齐五项')
-        markdown = markdown.replace('\r\n', '\n').strip()
-        if re.search(r'^#{1,6}\s', markdown, re.M):
-            raise ImportError_(f'{label}：Markdown 小节由工具生成，单条内容不能再夹带标题')
-        bullets = list(re.finditer(r'^(?:[-*+]|\d+\.)[ \t]+\S', markdown, re.M))
-        is_table = all(line.startswith('|') and line.endswith('|') for line in markdown.splitlines()) and len(markdown.splitlines()) >= 2
-        if not is_table and (len(bullets) != 1 or bullets[0].start() != 0):
-            raise ImportError_(f'{label}：每个 Markdown items 条目只写一个顶层列表项或一张状态表；不同规则请分别关联需求')
-        if section not in grouped:
-            grouped[section] = []
-        grouped[section].append(markdown)
-    body = '\n\n'.join('### ' + title + '\n\n' + '\n'.join(grouped[title]) for title in ANNOTATION_SECTIONS if title in grouped)
-    validate_annotation_markdown(body, where)
-    return body
+        if 'section' in item and item['section'] not in LEGACY_ANNOTATION_SECTIONS:
+            raise ImportError_(f'{label}：新草稿省略 section；旧 section 须为原有分类')
+        markdown = item.get('markdown')
+        if not isinstance(markdown, str) or not markdown.strip():
+            raise ImportError_(f'{label}：请填写非空的 Markdown 条目')
+        markdown = markdown.replace('\r\n', '\n').replace('\r', '\n').strip()
+        if re.search(r'^[ \t]*(?:#{1,6}(?:[ \t]|$)|(?:=+|-+)[ \t]*$)', markdown, re.M):
+            raise ImportError_(f'{label}：标注正文使用 Markdown 列表，不夹带标题')
+        lines = markdown.splitlines()
+        is_table = len(lines) >= 2 and all(line.startswith('|') and line.endswith('|') for line in lines)
+        if not is_table:
+            first = ANNOTATION_LIST_ITEM.match(markdown)
+            if not first:
+                raise ImportError_(f'{label}：每个 Markdown items 条目只写一个顶层列表项或一张状态表')
+            content_indent = len(first[0].expandtabs(4))
+            for line in lines[1:]:
+                if not line.strip():
+                    continue
+                expanded = line.expandtabs(4)
+                indent = len(expanded) - len(expanded.lstrip(' '))
+                if indent < content_indent and ('section' not in item or ANNOTATION_LIST_ITEM.match(line)):
+                    raise ImportError_(f'{label}：每个 Markdown 条目只写一个顶层列表项；子项和续行须按父项缩进')
+        if blocks:
+            blocks.append('\n\n' if is_table or previous_is_table else '\n')
+        blocks.append(markdown)
+        previous_is_table = is_table
+    return ''.join(blocks)
 
 
 def compile_draft(draft):
@@ -209,26 +222,13 @@ def compile_draft(draft):
         entry['document'] = render_document(document, refs, 'document')
         for note in entry.get('annotations', []):
             note['body'] = render_annotation(note, ids if result['scope']['mode'] == 'full' else allowed[note['protoId']], 'annotations')
-            entry['_contentRefs'].extend({'kind': 'annotation', 'protoId': note['protoId'], 'section': item['section'], 'requirementId': item['requirementId'], 'markdown': item['markdown']} for item in note['items'])
+            entry['_contentRefs'].extend({
+                'kind': 'annotation', 'protoId': note['protoId'],
+                'requirementId': item['requirementId'], 'markdown': item['markdown'],
+                **({'section': item['section']} if 'section' in item else {}),
+            } for item in note['items'])
     return result
 
-
-def validate_annotation_markdown(body, where):
-    """Require organized Markdown without inventing missing business requirements."""
-    body = body.replace('\r\n', '\n')
-    headings = list(re.finditer(r'^### +([^\n]+?)[ \t]*$', body, re.M))
-    names = [h.group(1).strip() for h in headings]
-    if not headings or body[:headings[0].start()].strip() or any(name not in ANNOTATION_SECTIONS for name in names):
-        raise ImportError_(f'{where}：body 须用结构化 Markdown，自行选择 ### 页面显示 / 数据流转 / 业务规则 / 交互说明 / 异常情况 中适用的小节，不要求全部填写，不写成一整段')
-    indexes = [ANNOTATION_SECTIONS.index(name) for name in names]
-    if indexes != sorted(set(indexes)):
-        raise ImportError_(f'{where}：Markdown 小节应按页面显示、数据流转、业务规则、交互说明、异常情况排序且不重复')
-    for i, heading in enumerate(headings):
-        content = body[heading.end():headings[i + 1].start() if i + 1 < len(headings) else len(body)].strip()
-        if not content or not re.match(r'(?:\d+\.\s+\S|[-*+]\s+\S|\|.+\|[ \t]*(?:\n|$))', content):
-            raise ImportError_(f'{where}：{names[i]} 须分条列出内容（1. 或 -），状态对照可用 Markdown 表格；无内容的小节请省略')
-        if not re.match(r'\n[ \t]*\n', body[heading.end():]):
-            raise ImportError_(f'{where}：Markdown 小节标题与内容之间须空一行')
 
 def _page_lookup(bundle: dict[str, Any], entry: dict[str, Any], where: str) -> dict[str, Any]:
     pages = bundle['project']['pages']

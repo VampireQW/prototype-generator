@@ -40,7 +40,7 @@ class El {
 const list=new El(),count=new El();let scope='["project","page","default"]',expanded=true,session=null,failSave=false,sequence=0,reserved=0,savedScopes=[];
 const bundle={prd:{annotations:[]},changes:{items:[]}};
 function createRow(id){const row=new El('ext-note');row.dataset.noteId=id;
- const head=row.appendChild(new El('ext-note-head'));head.appendChild(new El('ext-note-no'));head.appendChild(new El('ext-note-more'));
+ const head=row.appendChild(new El('ext-note-head'));head.appendChild(new El('ext-note-no'));head.appendChild(new El('ext-note-title'));head.appendChild(new El('ext-note-more'));
  const content=row.appendChild(new El('ext-note-content'));content.appendChild(new El('ext-note-body'));return row;}
 const md={key:(...v)=>JSON.stringify(v),begin(region,options){session={region,options};return true;},
  render(region,options){if(session?.region!==region)region.textContent=options.value;},
@@ -50,7 +50,7 @@ const context={ProtoMarkdown:md,ProtoAppearance:{applyPin(){}},get prdExpanded()
  $:id=>id==='extAnnotList'?list:count,document:{createElement:()=>new El()},extCreateNoteRow:createRow,
  extPageNotes:()=>bundle.prd.annotations.filter(n=>JSON.stringify(['project',n.pageId,n.stateId])===scope),
  extAnchorAlive:()=>true,extNoteOptions:n=>({value:n.body}),extShortcutText:()=> 'Alt+Shift+A',
- closeExtNoteMenu(){},extScrollNoteIntoView(){},extImageOptions:()=>({}),extTheme:()=> 'light',
+ closeExtNoteMenu(){},extSaveNoteTitle(){},extScrollNoteIntoView(){},extImageOptions:()=>({}),extTheme:()=> 'light',
  extPinsVisible:()=>true,extSaveNoteBody:async(id,body)=>{const note=bundle.prd.annotations.find(n=>n.id===id);note.body=body;return true;}};
 const win={scrollX:0,scrollY:0,document:{},ProtoAnchors:{point:n=>({point:{x:n.placement?.x??0,y:n.placement?.y??0}})},
  ProtoAnnotate:{setTheme(){},setVisible(){},renderPins(notes){context.renderedPins=notes;}}};

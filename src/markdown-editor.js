@@ -456,6 +456,34 @@
     const htmlInline = n => n?.nodeType === 1 && n.matches('.vditor-ir__node[data-type="html-inline"]');
     const isOpen = n => htmlInline(n) && COLOR_TAG.test(n.textContent);
     const isClose = n => htmlInline(n) && n.textContent === '</span>';
+    /* 原生删除会连同颜色展示壳删掉起标签、留下闭标签。输入前记住自己的格式边界，
+       在 Vditor 解析 input 之前清理空壳 / 补回剩余文字的边界；不重建正文，保留光标和撤销。 */
+    let inputColors = null;
+    document.addEventListener('beforeinput', e => {
+        const root = surface();
+        inputColors = null;
+        if (!ready || destroyed || !root?.contains(e.target)) return;
+        inputColors = [...root.querySelectorAll('.proto-md-color')].map(wrap => {
+            const open = wrap.previousSibling, close = wrap.nextSibling;
+            return isOpen(open) && isClose(close)
+                ? { wrap, open, close, opening: open.cloneNode(true), closing: close.cloneNode(true) } : null;
+        }).filter(Boolean);
+    }, true);
+    document.addEventListener('input', e => {
+        const pairs = inputColors, root = surface();
+        inputColors = null;
+        if (!pairs || destroyed || !root?.contains(e.target)) return;
+        for (const { wrap, open, close, opening, closing } of pairs) {
+            if (root.contains(wrap) && wrap.textContent.replace(/\u200b/g, '').length) {
+                if (!root.contains(open)) wrap.before(opening);
+                if (!root.contains(close)) wrap.after(closing);
+            } else {
+                if (root.contains(open)) open.remove();
+                if (root.contains(close)) close.remove();
+                if (root.contains(wrap)) wrap.replaceWith(...wrap.childNodes);
+            }
+        }
+    }, true);
     function decorate() {
         const root = surface();
         if (!root || decorating || destroyed) return;

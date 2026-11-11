@@ -25,6 +25,7 @@ import proto_meta
 import review_export
 import design_settings
 import home_thumbnails
+import app_runtime
 
 SERVER = Path(__file__).resolve().parents[1] / 'server.py'
 

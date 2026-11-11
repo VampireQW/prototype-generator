@@ -62,7 +62,12 @@ dialog.ppn-trash-dialog{position:fixed;top:12px;bottom:auto;margin:0;padding:0;w
 .ppn .ppn-expand svg{width:12px;height:12px;transition:transform 140ms ease}
 .ppn .ppn-expand[aria-expanded="false"] svg{transform:rotate(-90deg)}
 .ppn .ppn-expand:hover{background:var(--nav-hover);color:var(--nav-ink)}
-.ppn .ppn-state{padding-left:calc(62px + var(--ppn-depth,0)*14px)}
+.ppn .ppn-state{position:relative;padding-left:calc(62px + var(--ppn-depth,0)*14px)}
+.ppn .ppn-state-grip{position:absolute;left:calc(38px + var(--ppn-depth,0)*14px);top:50%;transform:translateY(-50%);display:grid;place-items:center;width:16px;height:18px;color:var(--nav-muted);opacity:0;touch-action:none}.ppn .ppn-state-grip svg{width:15px;height:17px}.ppn .ppn-state:focus-visible .ppn-state-grip,.ppn.ppn-drag-ghost .ppn-state-grip{opacity:1}
+@media(hover:hover){.ppn .ppn-state[data-ppn-drag]:hover{cursor:grab}.ppn .ppn-state[data-ppn-drag]:hover .ppn-state-grip{opacity:1}}
+.ppn .ppn-state-wrap{position:relative}.ppn .ppn-state-wrap>.ppn-state{padding-right:42px;min-height:32px;overflow-wrap:anywhere}.ppn .ppn-state-edit{top:50%;transform:translateY(-50%);width:24px;height:24px;padding:5px;background:transparent;opacity:0;pointer-events:none}.ppn .ppn-state-wrap:hover>.ppn-state-edit,.ppn .ppn-state-wrap:has(:focus-visible)>.ppn-state-edit{opacity:1;pointer-events:auto}.ppn .ppn-state-edit:hover{background:var(--nav-hover);color:var(--nav-ink)}
+@media(hover:none),(pointer:coarse){.ppn .ppn-state-edit{opacity:1;pointer-events:auto}}
+@media(pointer:coarse){.ppn .ppn-state-wrap>.ppn-state{min-height:44px;padding-right:52px}.ppn .ppn-state-edit{width:40px;height:40px;padding:12px}.ppn .ppn-state-grip{left:calc(34px + var(--ppn-depth,0)*14px);width:22px;height:30px;opacity:1}}
 .ppn .ppn-page.ppn-drop-inside{background:color-mix(in srgb,var(--nav-focus) 10%,var(--nav-surface));box-shadow:inset 0 0 0 1.5px var(--nav-focus);color:var(--nav-ink)}
 .ppn .ppn-drop-invalid{box-shadow:inset 0 0 0 1px var(--nav-danger);background:color-mix(in srgb,var(--nav-danger) 8%,var(--nav-surface))}
 .ppn .ppn-root-active{background:color-mix(in srgb,var(--nav-focus) 9%,var(--nav-surface));box-shadow:inset 0 0 0 1px var(--nav-focus);color:var(--nav-focus)}

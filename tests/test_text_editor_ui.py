@@ -97,3 +97,20 @@ delete first.el.__vueParentComponent;await editor.select([first.el]);input('确�
 await control('undo').onclick();assert.equal(undone,2);
 })().catch(e=>{console.error(e);process.exitCode=1});
 ''')
+
+
+def test_agent_conflict_allows_edit_or_previous_text_recovery_without_auto_write():
+    run_case(r'''
+(async()=>{
+const conflicted=api.create({container,scope:()=>scope,request:async(action,p)=>action==='inspect'?{
+ ok:true,file:'index.html',hash:'old',fields:[{slot:0,text:'保存'}],previousFields:[{slot:0,text:'上次手动名称'}],warning:'文案已被其他工具更新'}:request(action,p)});
+assert.equal(await conflicted.select([first.el]),true);
+assert.equal(control('text').disabled,false);assert.equal(control('text').value,'保存');
+assert.ok(control('status').textContent.includes('文案已被其他工具更新'));
+const recover=control('recover');assert.equal(recover.hidden,false);assert.equal(writes,0);
+recover.onclick();assert.equal(first.text.nodeValue,' 上次手动名称 ');assert.equal(control('save').disabled,false);assert.equal(writes,0);
+control('cancel').onclick();assert.equal(first.text.nodeValue,' 保存 ');
+recover.onclick();await control('save').onclick();assert.equal(writes,1);assert.equal(recover.hidden,true);
+conflicted.close();assert.equal(first.text.nodeValue,' 上次手动名称 ');
+})().catch(e=>{console.error(e);process.exitCode=1});
+''')

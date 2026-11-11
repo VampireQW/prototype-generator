@@ -28,6 +28,8 @@
 .proto-md-body h3, .markdown-editor .vditor-reset h3 { font-size: 16px; }
 .proto-md-body :is(ul,ol), .markdown-editor .vditor-reset :is(ul,ol) { padding-left: 24px; margin: 8px 0 12px; }
 .proto-md-body ul { list-style: disc; } .proto-md-body ol { list-style: decimal; }
+.proto-md-body ol ol, .markdown-editor .vditor-reset ol ol { list-style-type: lower-alpha; }
+.proto-md-body ol ol ol, .markdown-editor .vditor-reset ol ol ol { list-style-type: lower-roman; }
 .proto-md-body blockquote, .markdown-editor .vditor-reset blockquote { margin: 12px 0; padding: 0 12px; border-left: 3px solid var(--md-control); color: var(--md-muted); }
 .proto-md-body code, .markdown-editor .vditor-reset code { font: 13px/1.7 var(--md-mono); background: var(--md-alt); color: var(--md-text); border-radius: 6px; padding: 0 4px; }
 .proto-md-body pre, .markdown-editor .vditor-reset pre { padding: 12px; background: var(--md-alt); white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 6px; }

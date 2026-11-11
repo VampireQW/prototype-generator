@@ -23,8 +23,8 @@ def current_change():
             'document': {'background': [{'requirementId': 'R1', 'text': '原按钮不便直观看出当前是否需要讲解。'}], 'goals': [{'requirementId': 'R1', 'text': '以开关状态明确表达讲解意愿。'}]},
             'targets': [{'protoId': 'explain-toggle', 'requirementIds': ['R1']}],
             'hotspots': ['explain-toggle'], 'annotations': [{'protoId': 'explain-toggle', 'items': [
-                {'section': '页面显示', 'requirementId': 'R1', 'markdown': '- 开启显示“需要讲解”，关闭显示“不需讲解”。'},
-                {'section': '交互说明', 'requirementId': 'R1', 'markdown': '1. 切换后即时更新讲解意愿，并显示原型已实现的反馈。'}]}]}]}
+                {'requirementId': 'R1', 'markdown': '- 开启显示“需要讲解”，关闭显示“不需讲解”。'},
+                {'requirementId': 'R1', 'markdown': '- 切换后即时更新讲解意愿，并显示原型已实现的反馈。'}]}]}]}
 
 
 def test_only_current_toggle_rules_are_rendered_and_auditable(pad):
@@ -36,7 +36,7 @@ def test_only_current_toggle_rules_are_rendered_and_auditable(pad):
     assert saved['schemaVersion'] == 2, '草稿升级不改变工作台元数据版本'
     assert len(saved['prd']['annotations']) == 1
     text = saved['prd']['annotations'][0]['body']
-    assert text.startswith('### 页面显示\n\n- ')
+    assert text == '- 开启显示“需要讲解”，关闭显示“不需讲解”。\n- 切换后即时更新讲解意愿，并显示原型已实现的反馈。'
     assert all(word not in text for word in ('学案', '排序', '题干折叠', '正确答案'))
     background = saved['prd']['documents'][0]['markdown']
     assert '需求背景' in background and '需求目标' in background and '横屏双栏' not in background

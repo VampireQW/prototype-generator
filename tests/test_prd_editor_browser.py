@@ -80,6 +80,120 @@ def edit(page, region):
     return page.frame_locator('.proto-md-frame')
 
 
+@pytest.mark.parametrize('boundary', ['inside', 'include-open', 'include-close'])
+@pytest.mark.parametrize('key', ['Backspace', 'Delete'])
+def test_delete_colored_text_never_leaves_format_tags(browser_page, boundary, key):
+    page, _ = browser_page
+    markdown = '## 业务规则\n\n1. 确定重批扣减 1 次。<span style="color:#b42318">（2026-11-03 更新：用完后保留按钮并置灰）</span>\n2. 次数用尽显示提示。'
+    page.evaluate('args=>init(...args)', [markdown, 'light'])
+    frame = edit(page, 'note')
+    frame.locator('.proto-md-color').wait_for()
+    frame.locator('.vditor-ir [contenteditable="true"]').evaluate('''(root, boundary) => {
+        root.focus();
+        const color = root.querySelector('.proto-md-color'), range = document.createRange();
+        range.setStart(color.firstChild, 0); range.setEnd(color.lastChild, color.lastChild.length);
+        if (boundary === 'include-open') range.setStartBefore(color.previousSibling);
+        if (boundary === 'include-close') range.setEndAfter(color.nextSibling);
+        const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    }''', boundary)
+    page.keyboard.press(key)
+    page.wait_for_function('() => !ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value().includes("2026-11-03")', timeout=5000)
+    value = page.evaluate('ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value()')
+    assert '<span' not in value and '</span>' not in value, value
+    assert '确定重批扣减 1 次。' in value and '次数用尽显示提示。' in value
+    assert frame.locator('.vditor-ir').inner_text().find('</span>') == -1
+
+
+@pytest.mark.parametrize('part,remaining', [('start', '重点提示'), ('end', '红色重点'), ('middle', '红色提示')])
+def test_partial_color_delete_preserves_remaining_format(browser_page, part, remaining):
+    page, _ = browser_page
+    page.evaluate('args=>init(...args)', ['前文。<span style="color:#b42318">红色重点提示</span>后文。', 'light'])
+    frame = edit(page, 'note')
+    frame.locator('.proto-md-color').wait_for()
+    frame.locator('.vditor-ir [contenteditable="true"]').evaluate('''(root, part) => {
+        root.focus(); const color=root.querySelector('.proto-md-color'), text=color.firstChild, range=document.createRange();
+        range.setStart(text, part==='start'?0:part==='end'?4:2);
+        range.setEnd(text, part==='start'?2:part==='end'?6:4);
+        if(part==='start')range.setStartBefore(color.previousSibling);
+        if(part==='end')range.setEndAfter(color.nextSibling);
+        getSelection().removeAllRanges();getSelection().addRange(range);
+    }''', part)
+    page.keyboard.press('Backspace')
+    page.wait_for_function('() => !ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value().includes("红色重点提示")', timeout=5000)
+    value = page.evaluate('ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value()')
+    assert f'<span style="color:#b42318">{remaining}</span>' in value, value
+    assert value.count('<span') == value.count('</span>') == 1
+    assert '前文。' in value and '后文。' in value
+
+
+@pytest.mark.parametrize('region,theme', [('card', 'light'), ('note', 'dark'), ('doc', 'light')])
+def test_color_delete_undo_redo_autosave_and_code_are_preserved(browser_page, region, theme):
+    page, _ = browser_page
+    markdown = '前文。<span style="color:#b42318">删除说明</span>，<span style="color:#1d4ed8">保留重点</span>。\n\n代码：`</span>`\n\n```html\n<span>代码示例</span>\n```'
+    page.evaluate('args=>init(...args)', [markdown, theme])
+    frame = edit(page, region)
+    frame.locator('.proto-md-color').first.wait_for()
+    frame.locator('.vditor-ir [contenteditable="true"]').evaluate('''root => {
+        root.focus();const text=root.querySelector('.proto-md-color').firstChild,range=document.createRange();
+        range.setStart(text,0);range.setEnd(text,text.length);getSelection().removeAllRanges();getSelection().addRange(range);
+    }''')
+    page.keyboard.press('Delete')
+    page.wait_for_function('() => !ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value().includes("删除说明")', timeout=5000)
+    after = page.evaluate('ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value()')
+    assert '<span style="color:#1d4ed8">保留重点</span>' in after
+    assert '#b42318' not in after
+    assert '`</span>`' in after and '<span>代码示例</span>' in after
+    # 原生输入和撤销历史延迟入栈；先等待同一次输入被自动保存。
+    page.wait_for_function('id => saved.filter(s => s.id===id).at(-1)?.value.includes("保留重点") && !saved.filter(s => s.id===id).at(-1).value.includes("删除说明")', arg=region, timeout=5000)
+    page.keyboard.press('Control+z')
+    page.wait_for_function('() => ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value().includes("删除说明")', timeout=5000)
+    assert '<span style="color:#b42318">删除说明</span>' in page.evaluate('ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value()')
+    page.locator('.proto-md-toolbar button[data-command="redo"]').click()
+    page.wait_for_function('() => !ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value().includes("删除说明")', timeout=5000)
+    page.wait_for_function('id => saved.filter(s => s.id===id).at(-1)?.value.includes("保留重点") && !saved.filter(s => s.id===id).at(-1).value.includes("删除说明")', arg=region, timeout=5000)
+    saved = page.evaluate('id => saved.filter(s => s.id===id).at(-1).value', region)
+    assert '#b42318' not in saved and saved.count('</span>') == 3, saved
+    page.evaluate('ProtoMarkdown.save(true)')
+    page.wait_for_function('() => !ProtoMarkdown.current()')
+    assert page.locator('#'+region+' .proto-md-body span[style^="color:"]').count() == 1
+    edit(page, region)
+    reopened = page.evaluate('ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value()')
+    assert '#b42318' not in reopened and reopened.count('</span>') == 3
+
+
+def test_replacing_entire_colored_text_does_not_leave_a_closing_tag(browser_page):
+    page, _ = browser_page
+    page.evaluate('args=>init(...args)', ['前文。<span style="color:#b42318">旧说明</span>后文。', 'light'])
+    frame = edit(page, 'note')
+    frame.locator('.proto-md-color').wait_for()
+    frame.locator('.vditor-ir [contenteditable="true"]').evaluate('''root => {
+        root.focus();const text=root.querySelector('.proto-md-color').firstChild,r=document.createRange();
+        r.setStart(text,0);r.setEnd(text,text.length);getSelection().removeAllRanges();getSelection().addRange(r);
+    }''')
+    page.keyboard.insert_text('替换说明')
+    page.wait_for_function('() => ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value().includes("替换说明")', timeout=5000)
+    value = page.evaluate('ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value()')
+    assert '旧说明' not in value
+    assert value.count('<span') == value.count('</span>'), value
+
+
+def test_delete_across_two_colors_keeps_both_remaining_boundaries(browser_page):
+    page, _ = browser_page
+    page.evaluate('args=>init(...args)', ['前文。<span style="color:#b42318">红色重点</span>中间。<span style="color:#1d4ed8">蓝色提示</span>后文。', 'light'])
+    frame = edit(page, 'note')
+    frame.locator('.proto-md-color').first.wait_for()
+    frame.locator('.vditor-ir [contenteditable="true"]').evaluate('''root => {
+        root.focus();const colors=root.querySelectorAll('.proto-md-color'),r=document.createRange();
+        r.setStart(colors[0].firstChild,2);r.setEnd(colors[1].firstChild,2);getSelection().removeAllRanges();getSelection().addRange(r);
+    }''')
+    page.keyboard.press('Delete')
+    page.wait_for_function('() => !ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value().includes("中间")', timeout=5000)
+    value = page.evaluate('ProtoMarkdown.current().frame.contentWindow.ProtoEditor.value()')
+    assert '<span style="color:#b42318">红色</span>' in value, value
+    assert '<span style="color:#1d4ed8">提示</span>' in value, value
+    assert value.count('<span') == value.count('</span>') == 2
+
+
 def overlap(a, b):
     return max(0, min(a['x'] + a['width'], b['x'] + b['width']) - max(a['x'], b['x'])) * max(0, min(a['y'] + a['height'], b['y'] + b['height']) - max(a['y'], b['y']))
 

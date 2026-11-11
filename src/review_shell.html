@@ -123,6 +123,8 @@
             .markdown th, .markdown td { border: 1px solid var(--border); padding: 6px; text-align: left; }
             .markdown blockquote { border-left: 3px solid var(--border); margin: 8px 0; padding: 2px 12px; color: var(--muted); }
             .markdown ul, .markdown ol { padding-left: 22px; }
+            .markdown ol { list-style-type: decimal; } .markdown ol ol { list-style-type: lower-alpha; } .markdown ol ol ol { list-style-type: lower-roman; }
+            .note-title { margin-left: 10px; min-width: 0; font-weight: 700; overflow-wrap: anywhere; }
             .markdown li.task { list-style: none; margin-left: -20px; }
             .markdown a { color: var(--accent); }
             .markdown hr { border: 0; border-top: 1px solid var(--border); }
@@ -268,18 +270,38 @@
                     }
                     if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
                         flushPara();
-                        const ordered = /^\s*\d+\./.test(line);
-                        const itemRe = ordered ? /^\s*\d+\.\s+(.*)$/ : /^\s*[-*+]\s+(.*)$/;
-                        const items = [];
-                        while (i < lines.length && itemRe.test(lines[i])) {
-                            const t = lines[i].match(itemRe)[1];
+                        const matchItem = text => /^([ \t]*)([-*+]|\d+\.)\s+(.*)$/.exec(text);
+                        const indent = text => text.replace(/\t/g, '    ').length;
+                        const first = matchItem(line), base = indent(first[1]), stack = [], parts = [];
+                        const closeList = () => { const last = stack.pop(); parts.push(`</li></${last.tag}>`); };
+                        while (i < lines.length) {
+                            const item = matchItem(lines[i]);
+                            if (!item) {
+                                if (!lines[i].trim()) {
+                                    let next = i + 1; while (next < lines.length && !lines[next].trim()) next++;
+                                    const nextItem = matchItem(lines[next] || '');
+                                    if (nextItem && indent(nextItem[1]) >= base) { i = next; continue; }
+                                    break;
+                                }
+                                if (stack.length && indent((/^[ \t]*/.exec(lines[i]) || [''])[0]) > stack.at(-1).indent) {
+                                    parts.push('<br>' + inline(lines[i++].trim())); continue;
+                                }
+                                break;
+                            }
+                            const depth = indent(item[1]), tag = /^\d/.test(item[2]) ? 'ol' : 'ul';
+                            if (depth < base) break;
+                            while (stack.length && depth < stack.at(-1).indent) closeList();
+                            if (stack.length && depth === stack.at(-1).indent && tag !== stack.at(-1).tag) closeList();
+                            if (!stack.length || depth > stack.at(-1).indent) {
+                                const start = tag === 'ol' && parseInt(item[2],10) !== 1 ? ` start="${parseInt(item[2],10)}"` : '';
+                                parts.push(`<${tag}${start}>`); stack.push({indent:depth,tag});
+                            } else parts.push('</li>');
+                            const task = item[3].match(/^\[([ xX])\]\s+(.*)$/);
+                            parts.push(task ? `<li class="task"><input type="checkbox" disabled${task[1] !== ' ' ? ' checked' : ''}> ${inline(task[2])}` : `<li>${inline(item[3])}`);
                             i++;
-                            const task = t.match(/^\[([ xX])\]\s+(.*)$/);
-                            items.push(task
-                                ? `<li class="task"><input type="checkbox" disabled${task[1] !== ' ' ? ' checked' : ''}> ${inline(task[2])}</li>`
-                                : `<li>${inline(t)}</li>`);
                         }
-                        out.push(ordered ? `<ol>${items.join('')}</ol>` : `<ul>${items.join('')}</ul>`);
+                        while (stack.length) closeList();
+                        out.push(parts.join(''));
                         continue;
                     }
                     if (!line.trim()) { flushPara(); i++; continue; }
@@ -410,7 +432,7 @@
                 frameReady = true;
                 // 先按当前页/状态判定 PRD 是否为空，再把真实侧栏开合态下发给 iframe；避免切页瞬间沿用上一页状态。
                 renderAside();
-                post({ type: 'init', notes: pageNotes(), asideOpen: prdAsideOpen(), enterState, selectedNoteId,
+                post({ type: 'init', notes: pageNotes(), pinStyle: data.pinStyle, asideOpen: prdAsideOpen(), enterState, selectedNoteId,
                     hintScopes: (current.page?.states || []).map(state => ({id: state.id, interactionHints: state.interactionHints})) });
                 flushPublicationTarget();
             }
@@ -536,6 +558,7 @@
                     const head = document.createElement('div');
                     head.className = 'note-head';
                     head.append(no);
+                    if (note.title) { const title = document.createElement('strong'); title.className = 'note-title'; title.textContent = note.title; head.append(title); }
                     row.append(head, body);
                     if (!stale) {
                         row.onclick = () => reveal(note);

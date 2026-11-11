@@ -89,7 +89,7 @@ class Source(HTMLParser):
     def handle_entityref(self, name): self.add_text('&' + name + (';' if self.text[self.position()+len(name)+1:self.position()+len(name)+2] == ';' else ''))
     def handle_charref(self, name): self.add_text('&#' + name + (';' if self.text[self.position()+len(name)+2:self.position()+len(name)+3] == ';' else ''))
 
-    def resolve(self, target):
+    def element(self, target):
         if not isinstance(target, dict) or not isinstance(target.get('tag'), str) or target['tag'] not in ALLOWED or target.get('reactive'):
             raise UnsupportedText('请选择按钮、文字或单元格；动态内容请使用 AI 修改')
         if target.get('protoId') or target.get('id'):
@@ -118,6 +118,10 @@ class Source(HTMLParser):
             if ancestor.tag in BLOCKED or any(k in DYNAMIC or k.startswith('v-bind:') and k.endswith(('text', 'html')) for k in ancestor.attrs):
                 raise UnsupportedText('这个文案由程序生成，请使用 AI 修改')
             ancestor = ancestor.parent
+        return node
+
+    def resolve(self, target):
+        node = self.element(target)
         slots = []
         def visit(current):
             for child in current.children:
@@ -248,10 +252,70 @@ def _source_matches(source, node, criteria):
     return True
 
 
+def _source_column(source, cell):
+    """Resolve the same grouped header path as the browser, without running JS."""
+    table = cell.parent
+    while table and table.tag != 'table': table = table.parent
+    head = next((n for n in table.children if isinstance(n, Node) and n.tag == 'thead'), None) if table else None
+    rows = [n for n in head.children if isinstance(n, Node) and n.tag == 'tr'] if head else []
+    grid = {}
+    for y, row in enumerate(rows):
+        x = 0
+        for header in (n for n in row.children if isinstance(n, Node) and n.tag in {'th', 'td'}):
+            while (y, x) in grid: x += 1
+            def span(key):
+                try: value = int(header.attrs.get(key) or 1)
+                except ValueError: value = 1
+                return min(100, max(1, len(rows) - y if key == 'rowspan' and value == 0 else value))
+            width, height = span('colspan'), span('rowspan')
+            for dy in range(height):
+                for dx in range(width): grid[y + dy, x + dx] = header
+            x += width
+    column = 0
+    for sibling in cell.parent.children:
+        if sibling is cell: break
+        if isinstance(sibling, Node) and sibling.tag in {'th', 'td'}:
+            try: column += max(1, int(sibling.attrs.get('colspan') or 1))
+            except ValueError: column += 1
+    result, seen = [], set()
+    for y in range(max((r for r, _ in grid), default=-1) + 1):
+        header = grid.get((y, column))
+        if header is not None and header not in seen:
+            label = _source_text(source, header)
+            if label: result.append(label)
+            seen.add(header)
+    return result
+
+
+def _source_binding_node(source, binding):
+    anchor = binding['anchor']
+    found = [n for n in source.nodes if n.tag == anchor['tag'] and (not anchor.get('key') or n.attrs.get(anchor['key']) == anchor['value'])]
+    if len(found) != 1: return None
+    candidates, identified = found, bool(anchor.get('key'))
+    for step in binding['path']:
+        found = []
+        for node in candidates:
+            children = [n for n in node.children if isinstance(n, Node) and n.tag == step['tag']]
+            if step.get('key'): found.extend(n for n in children if n.attrs.get(step['key']) == step['value'])
+            elif step.get('match'): found.extend(n for n in children if _source_matches(source, n, step['match']))
+            elif step.get('text'): found.extend(n for n in children if _source_text(source, n) == step['text'])
+            elif step.get('column'): found.extend(n for n in children if _source_column(source, n) == step['column'])
+            else: found.extend(children[step['index'] - 1:step['index']] if identified else children)
+        identified |= any(step.get(key) for key in ('key', 'match', 'text', 'column'))
+        candidates = found
+        if not candidates or len(candidates) > 2000: return None
+    return candidates[0] if len(candidates) == 1 else None
+
+
 def _plan(source, target):
     # Keep static matching strict; runtime overrides require a key or semantic landmark
     # absent from the source, never hide mismatched static text or framework bindings.
-    try: return source.resolve(target), None, []
+    try:
+        slots = source.resolve(target)
+        _, rules = _runtime_block(source)
+        selected = source.element(target)
+        related = [r for r in rules if _source_binding_node(source, r['binding']) is selected]
+        return slots, None, related
     except UnsupportedText as original:
         if not isinstance(target, dict) or not isinstance(target.get('tag'), str) or target['tag'] not in ALLOWED or target.get('reactive'): raise original
         expected, candidates = target.get('texts'), target.get('bindings')
@@ -293,19 +357,24 @@ def _plan(source, target):
                 else: break  # Ordinal-only generated nodes are not stable enough.
                 if node.tag in BLOCKED or any(k in DYNAMIC for k in node.attrs): break
             if not generated: continue
-            existing = next((r for r in rules if r['binding'] == binding), None)
-            if existing and [_normal(t) for t in expected] != [_normal(t) for t in existing['after']]:
-                raise UnsupportedText('页面文案与已保存的修改不一致，请重新加载后选择')
             return [(None, None, t) for t in expected], binding, rules
         raise original
 
 
 def _save_runtime(source, binding, rules, before_fields, fields):
-    span, _ = _runtime_block(source)
     existing = next((r for r in rules if r['binding'] == binding), None)
-    rule = {'binding': binding, 'before': existing['before'] if existing else before_fields, 'after': [f['text'] for f in fields]}
+    # A later source revision may have changed this control. Only keep the old
+    # baseline while the displayed text is still our last saved value; otherwise
+    # the user's new save explicitly confirms the current page as the baseline.
+    unchanged = existing and [_normal(t) for t in before_fields] == [_normal(t) for t in existing['after']]
+    rule = {'binding': binding, 'before': existing['before'] if unchanged else before_fields, 'after': [f['text'] for f in fields]}
     updated = [r for r in rules if r['binding'] != binding]
     if rule['before'] != rule['after']: updated.append(rule)
+    return _render_runtime(source, updated), updated
+
+
+def _render_runtime(source, updated):
+    span, _ = _runtime_block(source)
     if len(updated) > 200: raise UnsupportedText('手动修改较多，请使用 AI 整理页面源码')
     block = ''
     if updated:
@@ -314,10 +383,10 @@ def _save_runtime(source, binding, rules, before_fields, fields):
         data = json.dumps(updated, ensure_ascii=False, separators=(',', ':')).replace('&', '\\u0026').replace('<', '\\u003c').replace('>', '\\u003e')
         runtime = (Path(__file__).parent / 'src' / 'proto-text-runtime.js').read_text(encoding='utf-8')
         block = RUNTIME_START + '<script type="application/json" id="proto-text-edits-data">' + data + '</script>\n<script data-proto-text-runtime>\n' + runtime + '\n</script>' + RUNTIME_END
-    if span: return source.text[:span[0]] + block + source.text[span[1]:], updated
+    if span: return source.text[:span[0]] + block + source.text[span[1]:]
     closing = list(re.finditer(r'</body\s*>', source.text, re.I))
     index = closing[-1].start() if closing else len(source.text)
-    return source.text[:index] + block + source.text[index:], updated
+    return source.text[:index] + block + source.text[index:]
 
 
 def upgrade_runtime_html(text):
@@ -334,8 +403,14 @@ def upgrade_runtime_html(text):
 def inspect_text(root, page_id, target):
     with proto_meta.PROJECT_LOCK:
         _, file, data, source = _page(root, page_id)
-        slots, _, _ = _plan(source, target); digest = _hash(data)
-        return {'ok': True, 'file': file, 'hash': digest, 'fields': [{'slot': i, 'text': slot[2]} for i, slot in enumerate(slots)], 'undoId': _last_undo(root, file, digest)}
+        slots, binding, rules = _plan(source, target); digest = _hash(data)
+        result = {'ok': True, 'file': file, 'hash': digest, 'fields': [{'slot': i, 'text': slot[2]} for i, slot in enumerate(slots)], 'undoId': _last_undo(root, file, digest)}
+        existing = next((r for r in rules if binding is None or r['binding'] == binding), None)
+        if existing and [_normal(s[2]) for s in slots] != [_normal(t) for t in existing['after']]:
+            result['warning'] = '此处文案已变化，上次手动修改未应用。可继续编辑，保存后以新文案为准。'
+            if len(existing['after']) == len(slots):
+                result['previousFields'] = [{'slot': i, 'text': text} for i, text in enumerate(existing['after'])]
+        return result
 
 
 def _write(path, data, expected_hash):
@@ -372,6 +447,11 @@ def save_text(root, page_id, target, expected_hash, edits):
         extra = {}
         if binding:
             after, updated = _save_runtime(source, binding, rules, [s[2] for s in slots], fields)
+            extra['runtimeEdits'] = updated
+        elif rules:
+            _, all_rules = _runtime_block(source)
+            updated = [r for r in all_rules if r not in rules]
+            after = _render_runtime(Source(after), updated)
             extra['runtimeEdits'] = updated
         data = after.encode('utf-8'); digest = _hash(data)
         if data == before: return {'ok': True, 'file': file, 'hash': digest, 'fields': fields, 'undoId': _last_undo(root, file, digest), **extra}

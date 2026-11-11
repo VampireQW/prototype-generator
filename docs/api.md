@@ -51,7 +51,7 @@
 
 本节替代旧版草稿内容格式；工作台三文件元数据 schemaVersion 仍为 2。`scope.requirements[]` 必须有 id、text、sourceQuote；原文引用须来自 scope.request，delta 模式另需非空且不同的 before / after。full 模式另以 fullRequest 引用整页 PRD 授权，“重新落库”不自动开启。可选 exclusions 为本期不涉及内容的字符串数组。
 
-targets 使用 `{protoId,requirementIds:[...]}`。document 不再接受字符串，改为 `{background:[{requirementId,text}],goals:[{requirementId,text}]}`，两部分均可省略；纯文档变更通过页面级 requirementIds 指定需求。annotations 不再接受 body，改用 `{protoId,items:[{section,requirementId,markdown}],action?}`；每个 item 是一个顶层列表项或一张状态表，只引用该 target 的需求，工具合成为普通 Markdown。每个 section 仍可独立选择，不要求填写全部五项。
+targets 使用 `{protoId,requirementIds:[...]}`。document 不再接受字符串，改为 `{background:[{requirementId,text}],goals:[{requirementId,text}]}`，两部分均可省略；纯文档变更通过页面级 requirementIds 指定需求。annotations 使用 `{protoId,items:[{requirementId,markdown}],action?}`；每个 item 是一个顶层列表项（可含子项）或一张状态表，只引用该 target 的需求。工具按原顺序合成 Markdown；旧版 3 草稿的有效 section 可保留，作为追溯信息。
 
 可选 removals 为 `[{annotationId,reason}]`，须通过 scope.cleanupRequest 引用 scope.request 中的清理授权；限定当前页状态和准确 ID，已确认标注保留，不允许同时删除和重建同一目标。正式保存维护 deletedAnnotations，dry-run 不删除。report 新增 scope / contentRefs / removedAnnotations；contentRefs 表示提交内容的引用，实际是否保存结合 skipped 和操作结果判断。其余 revision CAS、元素唯一、confirmed 与删除保护保持。
 
@@ -65,7 +65,7 @@ targets 使用 `{protoId,requirementIds:[...]}`。document 不再接受字符串
 
 ## PRD 导入与页面直达（2026-10-16）
 
-`proto_import.py` 的新草稿标注须为结构化 Markdown：三级标题按页面显示 / 数据流转 / 业务规则 / 交互说明 / 异常情况选择适用小节，每节至少有列表或状态表，不重复或留空。document 为可选背景说明，含“研发实现”等标题的新增草稿拒绝导入。该校验不追溯修改历史 PRD，也不限制工作台手工编辑。
+`proto_import.py` 的新草稿标注须用 Markdown 列表按业务顺序分条，不接受整段 body 或条目内的标题。document 为可选的背景和目标，含“研发实现”等标题的新增草稿拒绝导入。该校验不追溯修改历史 PRD，也不限制工作台手工编辑。
 
 hotspots 不从 targets 推导。版本 3 的页面支持 `hotspotAction: preserve | replace | clear`：省略操作与清单时保留既有状态；提供 hotspots 默认替换，[] 清空；显式 replace 必须带清单，preserve 不能带清单，clear 不能带非空清单。新页缺省无提示。scope.hotspotMode 的 full / off 分别对应 replace / clear；完整 PRD 与全页提示仍各自显式授权。
 
@@ -303,6 +303,8 @@ GET /api/home/thumbnail?source=local|ai&id=<项目ID>
 - `POST /api/proto/text/inspect`：Body `{ projectId, pageId, target }`，返回 `{ ok, file, hash, fields: [{ slot, text }], undoId }`。`target` 包含 `tag`、`texts` 和定位信息：优先唯一 `protoId`（data-proto-id），其次唯一 `id`，否则严格 `path: [{ tag, index }]`（同标签兄弟序号从 1 起）。需匹配完整静态文字列表；支持浏览器隐式 html / body / tbody 包装。
 - `POST /api/proto/text/save`：Body `{ projectId, pageId, target, expectedHash, edits: [{ slot, text }] }`，返回 `{ ok, file, hash, fields, undoId }`。仅替换指定文本节点，文本按 HTML 转义；单字段最多 4096 字符、最多 8 个文字片段、文件最多 4 MiB、UTF-8 HTML / HTM。`expectedHash` 使用 inspect 的 SHA256，保存后下一次使用新 hash 与新 texts。
 - `POST /api/proto/text/undo`：Body `{ projectId, pageId, undoId, expectedHash }`，返回 `{ ok, file, hash }`。仅当前文件仍与该次修改的 afterHash 一致时还原，不覆盖后续 Agent 修改。客户端应重载原型。
+
+当同一控件的旧重放记录与当前文案不同，inspect 仍返回当前 `fields`、新文件 `hash` 以及可选 `warning`，不写文件、不再要求反复重载。文字片段数一致时另附 `previousFields: [{ slot, text }]`，供用户预览恢复上次手动文案；结构不同时不按片段强行恢复。保存使用本次检查的 hash 和当前文案作为基线，旧 hash 继续返回冲突。控件由动态生成改成静态 HTML 时，静态保存只移除能够唯一对应到该控件的重放规则，其他控件的规则保留；可返回 `runtimeEdits: []` 通知客户端清空已退休的规则。
 
 脚本生成文字可额外提供 `target.bindings: [{ anchor, path }]`，最多 12 个候选、路径最多 16 层。anchor 可为源码中的唯一 `{ tag, key: "id" | "data-proto-id", value }` 或 `{ tag: "body" }`。
 

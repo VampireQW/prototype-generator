@@ -178,6 +178,129 @@ def test_dynamic_label_can_be_edited_twice_without_stacking_runtime(project):
     assert second['hash'] != first['hash']
 
 
+def test_agent_changed_label_can_be_inspected_rebased_saved_and_undone(project):
+    root, page, edit = project
+    path = root / 'index.html'
+    path.write_bytes(DYNAMIC_SOURCE.encode())
+    first = save(project, DYNAMIC_TARGET, [{'slot': 0, 'text': '手动名称'}])
+    path.write_bytes(path.read_bytes().replace(b"label:'", "label:'Agent 更新的".encode()))
+    agent_source = path.read_bytes()
+    target = {**DYNAMIC_TARGET, 'texts': ['Agent 更新的同名标签']}
+    info = inspect(project, target)
+    assert info['fields'] == [{'slot': 0, 'text': 'Agent 更新的同名标签'}]
+    assert info['previousFields'] == [{'slot': 0, 'text': '手动名称'}]
+    assert info['warning'] and info['undoId'] is None
+    assert path.read_bytes() == agent_source, '检查不能偷偷覆盖 Agent 改动'
+    with pytest.raises(edit.EditConflict):
+        edit.save_text(root, page, target, first['hash'], [{'slot': 0, 'text': '不能覆盖新文件'}])
+    result = save(project, target, [{'slot': 0, 'text': '重新确认的名称'}], info['hash'])
+    assert len(result['runtimeEdits']) == 1
+    assert result['runtimeEdits'][0]['before'] == ['Agent 更新的同名标签']
+    assert result['runtimeEdits'][0]['after'] == ['重新确认的名称']
+    assert "label:'Agent 更新的同名标签'" in path.read_text(encoding='utf-8')
+    assert inspect(project, {**target, 'texts': ['重新确认的名称']}).get('previousFields') is None
+    edit.undo_text(root, page, result['undoId'], result['hash'])
+    assert path.read_bytes() == agent_source, '撤销只能回退本次手改，保留 Agent 改动'
+
+
+def test_restoring_previous_manual_text_rebases_after_agent_change(project):
+    root, _, _ = project
+    path = root / 'index.html'
+    path.write_bytes(DYNAMIC_SOURCE.encode())
+    save(project, DYNAMIC_TARGET, [{'slot': 0, 'text': '之前的手动名称'}])
+    path.write_bytes(path.read_bytes().replace('同名标签'.encode(), '新版默认名称'.encode(), 1))
+    target = {**DYNAMIC_TARGET, 'texts': ['新版默认名称']}
+    info = inspect(project, target)
+    result = save(project, target, [{'slot': 0, 'text': info['previousFields'][0]['text']}], info['hash'])
+    assert result['runtimeEdits'][0]['before'] == ['新版默认名称']
+    assert result['runtimeEdits'][0]['after'] == ['之前的手动名称']
+
+
+def test_agent_materialized_control_can_restore_original_without_old_rule_reapplying(project):
+    root, _, _ = project
+    path = root / 'index.html'
+    path.write_bytes(DYNAMIC_SOURCE.encode())
+    save(project, DYNAMIC_TARGET, [{'slot': 0, 'text': '手动名称'}])
+    path.write_bytes(path.read_bytes().replace(b'<div id="pillTrack"></div>',
+                     '<div id="pillTrack"><span data-q="q2">手动名称</span></div>'.encode()))
+    target = {**DYNAMIC_TARGET, 'path': [
+        {'tag': 'html', 'index': 1}, {'tag': 'body', 'index': 1},
+        {'tag': 'div', 'index': 1}, {'tag': 'span', 'index': 1}], 'texts': ['手动名称']}
+    result = save(project, target, [{'slot': 0, 'text': '同名标签'}])
+    assert result.get('runtimeEdits') == [], '静态化后的保存必须移除同一控件的旧重放规则'
+    assert 'proto-text-edits-data' not in path.read_text(encoding='utf-8')
+    assert '<span data-q="q2">同名标签</span>' in path.read_text(encoding='utf-8')
+
+
+def test_materialized_static_edit_removes_only_its_rule_not_a_peer(project):
+    root, _, _ = project
+    path = root / 'index.html'
+    path.write_bytes(DYNAMIC_SOURCE.encode())
+    save(project, DYNAMIC_TARGET, [{'slot': 0, 'text': '第二项手动名称'}])
+    other = {**DYNAMIC_TARGET, 'bindings': [{'anchor': {'tag': 'div', 'key': 'id', 'value': 'pillTrack'},
+                                           'path': [{'tag': 'span', 'key': 'data-q', 'value': 'q1'}]}]}
+    save(project, other, [{'slot': 0, 'text': '第一项手动名称'}])
+    path.write_bytes(path.read_bytes().replace(b'<div id="pillTrack"></div>',
+                     '<div id="pillTrack"><span data-q="q2">Agent 文案</span></div>'.encode()))
+    target = {**DYNAMIC_TARGET, 'path': [
+        {'tag': 'html', 'index': 1}, {'tag': 'body', 'index': 1},
+        {'tag': 'div', 'index': 1}, {'tag': 'span', 'index': 1}], 'texts': ['Agent 文案']}
+    assert inspect(project, target)['previousFields'] == [{'slot': 0, 'text': '第二项手动名称'}]
+    result = save(project, target, [{'slot': 0, 'text': '最终文案'}])
+    assert len(result['runtimeEdits']) == 1
+    assert result['runtimeEdits'][0]['after'] == ['第一项手动名称']
+
+
+def test_conflict_with_changed_text_structure_is_editable_without_partial_recovery(project):
+    root, _, _ = project
+    (root / 'index.html').write_bytes(DYNAMIC_SOURCE.encode())
+    save(project, DYNAMIC_TARGET, [{'slot': 0, 'text': '手动名称'}])
+    target = {**DYNAMIC_TARGET, 'texts': ['Agent 新名称', '附加说明']}
+    info = inspect(project, target)
+    assert info['warning'] and 'previousFields' not in info
+    result = save(project, target, [{'slot': 1, 'text': '确认的说明'}], info['hash'])
+    assert result['runtimeEdits'][0]['before'] == target['texts']
+    assert result['runtimeEdits'][0]['after'] == ['Agent 新名称', '确认的说明']
+
+
+def test_materialized_table_cell_retires_its_grouped_header_override(project):
+    root, _, _ = project
+    path = root / 'index.html'
+    source = ('<html><body><table><thead><tr><th rowspan="2">班级</th><th colspan="2">人数</th></tr>'
+              '<tr><th>已交</th><th>良好</th></tr></thead><tbody id="rows"></tbody></table></body></html>')
+    path.write_bytes(source.encode())
+    target = {'tag': 'td', 'texts': ['16'], 'bindings': [
+        {'anchor': {'tag': 'tbody', 'key': 'id', 'value': 'rows'}, 'path': [
+            {'tag': 'tr', 'match': [{'path': [{'tag': 'td', 'index': 1}], 'text': '6'}]},
+            {'tag': 'td', 'column': ['人数', '良好']}]}]}
+    save(project, target, [{'slot': 0, 'text': '18'}])
+    path.write_bytes(path.read_bytes().replace(b'<tbody id="rows"></tbody>',
+                     b'<tbody id="rows"><tr><td>6</td><td>65</td><td>18</td></tr></tbody>'))
+    static = {**target, 'texts': ['18'], 'path': [
+        {'tag': tag, 'index': index} for tag, index in
+        [('html', 1), ('body', 1), ('table', 1), ('tbody', 1), ('tr', 1), ('td', 3)]]}
+    result = save(project, static, [{'slot': 0, 'text': '16'}])
+    assert result['runtimeEdits'] == []
+    assert '<td>65</td><td>16</td>' in path.read_text(encoding='utf-8')
+
+
+def test_ambiguous_body_override_is_not_removed_by_editing_an_identical_static_list(project):
+    root, _, _ = project
+    path = root / 'index.html'
+    path.write_bytes(b'<html><body><ul></ul></body></html>')
+    target = {'tag': 'button', 'texts': ['查看'], 'bindings': [{'anchor': {'tag': 'body'}, 'path': [
+        {'tag': 'ul', 'index': 1}, {'tag': 'li', 'match': [{'path': [{'tag': 'h3', 'index': 1}], 'text': '作业A'}]},
+        {'tag': 'button', 'index': 1}]}]}
+    result = save(project, target, [{'slot': 0, 'text': '查看详情'}])
+    content = '<ul><li><h3>作业A</h3><button>查看</button></li></ul>'
+    path.write_bytes(path.read_bytes().replace(b'<ul></ul>', (content * 2).encode()))
+    static = {**target, 'path': [{'tag': tag, 'index': 1} for tag in ['html', 'body', 'ul', 'li', 'button']]}
+    saved = save(project, static, [{'slot': 0, 'text': '新按钮'}])
+    assert 'runtimeEdits' not in saved
+    assert result['runtimeEdits'][0] in __import__('json').loads(
+        path.read_text(encoding='utf-8').split('id="proto-text-edits-data">')[1].split('</script>')[0])
+
+
 @pytest.mark.parametrize('source,binding', [
     (DYNAMIC_SOURCE, {'anchor':{'tag':'div','key':'id','value':'missing'}, 'path':[{'tag':'span','key':'data-q','value':'q2'}]}),
     (DYNAMIC_SOURCE, {'anchor':{'tag':'div','key':'id','value':'pillTrack'}, 'path':[{'tag':'span','index':2}]}),

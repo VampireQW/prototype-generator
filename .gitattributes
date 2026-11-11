@@ -1,2 +1,7 @@
-# 保留第三方发行资源原样；项目源码继续使用默认空白检查。
-src/vendor/** -whitespace
+# 源码统一 LF，Windows 启动脚本使用 CRLF；不依赖拉取者的 core.autocrlf。
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.sh text eol=lf
+# 保留第三方发行资源原始字节和原有空白。
+src/vendor/** -text -whitespace

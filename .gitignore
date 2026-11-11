@@ -24,6 +24,7 @@ tomodao/
 data/
 
 # Python 缓存
+.venv/
 __pycache__/
 *.pyc
 *.pyo
